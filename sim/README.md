@@ -49,19 +49,19 @@ sim/scripts/build_all.sh
 
 ## 2. 配置飞控（一次性）
 
-先单独启动 SITL，让它在 `third_party/betaflight/` 下生成/读取
-`eeprom.bin`，然后写入配置：
+飞控配置在 `config/betaflight_sim.txt` 中声明，由脚本经 TCP 5761 送入
+CLI 并 `save` 持久化。SITL 以**自身工作目录**解析 `eeprom.bin`，而启动器
+（betaloop）以 **ELF 所在目录**（`third_party/betaflight/obj/main`）为工作
+目录启动 SITL，所以要用 `configure_fc.sh` 自动完成"起一个临时 SITL → 写入
+配置 → 把生成的 `eeprom.bin` 存回 `config/eeprom.bin`"：
 
 ```bash
-# 终端 A：单独运行 SITL（用于配置）
-(cd sim/third_party/betaflight && ./obj/main/betaflight_SITL.elf)
-
-# 终端 B：应用配置
-sim/scripts/config_betaflight.py
+sim/scripts/configure_fc.sh
 ```
 
-脚本把 `config/betaflight_sim.txt` 里的命令经 TCP 5761 送入 CLI 并执行
-`save`。具体设置：
+`launch_sim.sh` 每次启动都会把 `config/eeprom.bin` 安装到 ELF 目录，所以
+即使 `make clean` 清掉 `obj/`，配置也不会丢。修改了 `betaflight_sim.txt`
+后重新运行 `configure_fc.sh` 即可。具体设置：
 
 | 命令 | 作用 |
 |---|---|
@@ -69,8 +69,12 @@ sim/scripts/config_betaflight.py
 | `aux 0 0 0 1700 2100` | ARM 绑到 AUX1（通道 5），由 9004 接收机驱动 |
 | `aux 1 50 1 1700 2100` | MSP OVERRIDE（box 50）绑到 AUX2（通道 6），由 9004 驱动 |
 
-配置持久化在 `eeprom.bin` 中。注意：`save` 后 SITL 会重启，通常表现为
-进程退出，需要重新启动。
+配置持久化在 `config/eeprom.bin` 中。注意：`save` 后 SITL 会重启，通常表现
+为进程退出——这就是 `configure_fc.sh` 里临时 SITL 结束的方式。
+
+> **调试提示**：查看模式映射时请用**不带参数**的 `aux`（列出全部 20 条）。
+> `aux <index>` 这类参数不足的写法会**重置**该条映射（`cliAux` 在参数
+> 个数不为 4/5/6 时会 `memset` 清空），容易误判成"配置没保存成功"。
 
 ## 3. 启动仿真
 

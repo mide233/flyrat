@@ -42,6 +42,19 @@ if [ ! -f "${AERO_DIR}/plugins/build/libBetaflightPlugin.so" ]; then
     exit 1
 fi
 
+# Betaflight SITL reads "eeprom.bin" relative to its own working directory, and
+# the betaloop launcher runs it with cwd set to the ELF's directory. Install the
+# version-controlled flight-controller config there so MSP override stays armed.
+EEPROM_SRC="${SIM_DIR}/config/eeprom.bin"
+ELF_DIR="$(dirname "${ELF}")"
+if [ -f "${EEPROM_SRC}" ]; then
+    cp -f "${EEPROM_SRC}" "${ELF_DIR}/eeprom.bin"
+    echo "[launch_sim] installed FC config: ${EEPROM_SRC} -> ${ELF_DIR}/eeprom.bin"
+else
+    echo "warning: ${EEPROM_SRC} missing; SITL will boot with default settings" >&2
+    echo "         (no MSP override). Run: sim/scripts/configure_fc.sh" >&2
+fi
+
 ARGS=(
     --gazebo-assets "${AERO_DIR}"
     --world "${WORLD}"
