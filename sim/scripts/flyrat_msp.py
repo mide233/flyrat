@@ -20,9 +20,11 @@ Command ids and payload layouts mirror Betaflight
 """
 from __future__ import annotations
 
+import select
 import socket
 import struct
 import threading
+import time
 
 # --- MSP command ids -------------------------------------------------------
 MSP_API_VERSION = 1
@@ -75,6 +77,9 @@ class MspClient:
         # Guards _send only, so a fire-and-forget RC writer thread and a
         # telemetry reader can share one socket without interleaving bytes.
         self._send_lock = threading.Lock()
+        # Guards the receive side (_fill/pump/flush), which is also touched by
+        # the RC writer thread when it drains the flight controller's replies.
+        self._recv_lock = threading.Lock()
 
     # -- lifecycle ----------------------------------------------------------
     def connect(self) -> "MspClient":
@@ -92,26 +97,67 @@ class MspClient:
     def flush(self) -> None:
         """Discard anything already queued on the socket / receive buffer.
 
-        ``MSP_SET_RAW_RC`` is acknowledged by the FC on every frame. A
-        high-rate control loop (see ``bringup_test.py``) therefore leaves a
-        trail of ACK frames behind, which would otherwise exhaust the retry
-        budget of the next request. Dropping them first keeps reads cheap.
+        Stale reply frames (e.g. ACKs of ``MSP_SET_RAW_RC``) would otherwise
+        exhaust the retry budget of the next request, so reads drop them first.
+
+        ``select`` is used to test readability instead of switching the socket
+        to non-blocking mode. The socket is shared with a fire-and-forget RC
+        writer thread; if ``sendall`` ever ran while the socket was temporarily
+        non-blocking it could emit a *truncated* MSP frame, which desynchronises
+        the firmware's parser and wedges its MSP task.
         """
-        self._buf.clear()
-        if self._sock is None:
-            return
-        previous = self._sock.gettimeout()
-        self._sock.settimeout(0.0)
-        try:
+        with self._recv_lock:
+            self._buf.clear()
+            if self._sock is None:
+                return
             while True:
                 try:
+                    ready, _, _ = select.select([self._sock], [], [], 0)
+                except (OSError, ValueError):
+                    break
+                if not ready:
+                    break
+                try:
                     data = self._sock.recv(4096)
-                except (socket.timeout, BlockingIOError):
+                except (socket.timeout, BlockingIOError, ConnectionError):
                     break
                 if not data:
                     break
+
+    def pump(self) -> None:
+        """Move whatever the FC has sent into the receive buffer (non-blocking).
+
+        The firmware acknowledges *every* ``MSP_SET_RAW_RC`` frame. If those
+        replies are never read they fill the emulated UART's transmit buffer,
+        after which the firmware silently drops later replies -- including the
+        telemetry a ``request`` is waiting for. Call this regularly from the
+        high-rate RC writer thread so the link never backs up; it never blocks
+        and the buffered frames are simply skipped by the next ``request``.
+        """
+        if self._sock is None:
+            return
+        # Never block: this is called from the high-rate RC writer, and the
+        # telemetry reader may hold the lock for the duration of a request. A
+        # missed drain is harmless -- the next call (or flush) catches up.
+        if not self._recv_lock.acquire(blocking=False):
+            return
+        try:
+            while True:
+                try:
+                    ready, _, _ = select.select([self._sock], [], [], 0)
+                except (OSError, ValueError):
+                    return
+                if not ready:
+                    return
+                try:
+                    data = self._sock.recv(4096)
+                except (socket.timeout, BlockingIOError):
+                    return
+                if not data:
+                    raise MspError("MSP connection closed by the flight controller")
+                self._buf.extend(data)
         finally:
-            self._sock.settimeout(previous)
+            self._recv_lock.release()
 
     def __enter__(self) -> "MspClient":
         return self.connect()
@@ -122,19 +168,20 @@ class MspClient:
     # -- framing ------------------------------------------------------------
     def _fill(self, timeout: float | None = None) -> None:
         assert self._sock is not None
-        previous = self._sock.gettimeout()
-        if timeout is not None:
-            self._sock.settimeout(timeout)
-        try:
-            data = self._sock.recv(4096)
-        except socket.timeout as exc:
-            raise MspTimeout("timed out waiting for an MSP frame") from exc
-        finally:
+        with self._recv_lock:
+            previous = self._sock.gettimeout()
             if timeout is not None:
-                self._sock.settimeout(previous)
-        if not data:
-            raise MspError("MSP connection closed by the flight controller")
-        self._buf.extend(data)
+                self._sock.settimeout(timeout)
+            try:
+                data = self._sock.recv(4096)
+            except socket.timeout as exc:
+                raise MspTimeout("timed out waiting for an MSP frame") from exc
+            finally:
+                if timeout is not None:
+                    self._sock.settimeout(previous)
+            if not data:
+                raise MspError("MSP connection closed by the flight controller")
+            self._buf.extend(data)
 
     def _recv_frame(self, timeout: float | None = None) -> tuple[int, bytes]:
         while True:
@@ -178,23 +225,34 @@ class MspClient:
             self._sock.sendall(frame)
 
     def request(self, cmd: int, payload: bytes = b"", *,
-                expect: int | None = None, attempts: int = 64):
+                expect: int | None = None, attempts: int = 256,
+                timeout: float = 0.05, resends: int = 5,
+                round_timeout: float = 0.4):
         """Send ``cmd`` and return the reply matching ``expect`` (default ``cmd``).
 
-        The flight controller acknowledges most set-style commands, so unrelated
-        ACK frames may still be queued on the wire; they are skipped here. Any
-        already-queued bytes are flushed first so a high-rate RC loop cannot
-        starve the read.
+        The flight controller acknowledges other commands (notably every
+        ``MSP_SET_RAW_RC``), so unrelated frames on the wire are skipped freely:
+        the inner loop runs until a match arrives or ``round_timeout`` elapses,
+        then the request is resent. ``attempts`` only bounds how many frames a
+        single round may consume. Short per-frame timeouts keep a read from
+        blocking the caller (and any shared use of the socket) for long.
         """
-        self.flush()
-        self._send(cmd, payload)
         want = cmd if expect is None else expect
         last = None
-        for _ in range(attempts):
-            reply_cmd, reply_payload = self._recv_frame()
-            last = reply_cmd
-            if reply_cmd == want:
-                return reply_cmd, reply_payload
+        for _ in range(resends):
+            self.flush()
+            self._send(cmd, payload)
+            deadline = time.monotonic() + round_timeout
+            consumed = 0
+            while consumed < attempts and time.monotonic() < deadline:
+                try:
+                    reply_cmd, reply_payload = self._recv_frame(timeout)
+                except MspTimeout:
+                    continue  # keep waiting until the round deadline
+                consumed += 1
+                last = reply_cmd
+                if reply_cmd == want:
+                    return reply_cmd, reply_payload
         raise MspTimeout(f"no reply for command {cmd} (saw {last})")
 
     # -- high level helpers -------------------------------------------------
@@ -203,7 +261,7 @@ class MspClient:
         return struct.unpack_from("<BBB", payload, 0)
 
     def set_raw_rc(self, channels, *, wait: bool = True,
-                   ack_timeout: float = 0.01) -> None:
+                   ack_timeout: float = 0.01, drain: bool = True) -> None:
         payload = struct.pack(f"<{len(channels)}H", *channels)
         self._send(MSP_SET_RAW_RC, payload)
         if wait:
@@ -213,6 +271,10 @@ class MspClient:
                 self._recv_frame(timeout=ack_timeout)
             except MspTimeout:
                 pass
+        elif drain:
+            # The FC ACKs every one of these frames; keep the UART's transmit
+            # buffer empty so telemetry replies are not dropped later on.
+            self.pump()
 
     def status(self, *, extended: bool = False) -> dict:
         cmd = MSP_STATUS_EX if extended else MSP_STATUS

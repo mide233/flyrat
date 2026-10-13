@@ -8,12 +8,30 @@ It exercises exactly the interfaces the ROS 2 layer will use later:
   2. the MSP UART on TCP 5761 (``flyrat_msp.MspClient``) which carries
      roll/pitch/yaw/throttle through ``MSP_SET_RAW_RC``.
 
-Control loops must feed ``MSP_SET_RAW_RC`` faster than the firmware's RC
-freshness window (``RX_MSP_RC_FRAME_FRESH_MS`` = 300 ms). If frames go stale the
-flight controller silently falls back to the *receiver's* channels, so this
-test runs a dedicated background "pusher" thread at ``--rate`` Hz. That mirrors
-the intended ROS 2 node design (a high-rate RC loop independent of any slow
-telemetry/pose work).
+Two things must be true for this test (and the real autopilot) to work, and both
+were bugs worth documenting:
+
+  * The RC stream must never stall. The firmware only applies the MSP override
+    while ``MSP_SET_RAW_RC`` frames are fresh (``RX_MSP_RC_FRAME_FRESH_MS`` =
+    300 ms); on a gap it silently falls back to the *receiver's* channels (idle
+    throttle here), the motors drop to idle and the vehicle stops climbing. So a
+    dedicated sender thread pushes ``MSP_SET_RAW_RC`` at ``--rate`` Hz and is
+    never paused - not for telemetry, not for anything. The test verifies the
+    largest inter-frame gap stayed below 300 ms.
+
+  * The MSP socket must not be driven by two things at once in a way that can
+    corrupt a frame. The socket is shared by the sender and the telemetry
+    reader; every write is a single ``sendall`` of a whole frame under a lock,
+    and incoming data is drained with ``select`` (never by switching the socket
+    to non-blocking, which could truncate a concurrent ``sendall``). A truncated
+    frame desynchronises the firmware's MSP parser, which will then treat a stray
+    ``#`` byte as "enter CLI mode" and stop answering MSP altogether until the
+    SITL is restarted.
+
+The Gazebo pose oracle is used ONLY here, to verify the bridge independently of
+the (unreliable in SITL) ``MSP_ALTITUDE``. It is sampled once before and once at
+the end of the climb: each sample spawns a ``gz model -p`` subprocess, and doing
+that continuously demonstrably starves the simulation and suppresses the climb.
 
 Checks performed:
   * MSP link answers (API version readable),
@@ -22,7 +40,8 @@ Checks performed:
     *different* roll/pitch/yaw and reading ``MSP_RC`` back,
   * arming succeeds,
   * (with ``--takeoff``) the vehicle climbs when throttle is raised,
-  * afterwards it disarms cleanly.
+  * afterwards it disarms cleanly,
+  * the RC stream stayed fresh (largest inter-frame gap < 300 ms).
 
 Run it against a live stack, e.g.
     sim/scripts/launch_sim.sh &            # in another shell
@@ -44,6 +63,8 @@ from rc_receiver import RcReceiver, RC_MID, RC_MIN
 # Distinctive values so we can tell receiver- from MSP-sourced channels.
 RX_BASELINE = 1050      # receiver roll/pitch/yaw while MSP override is active
 MSP_CENTER = 1500
+# The firmware's MSP RC freshness window (rx/msp.c RX_MSP_RC_FRAME_FRESH_MS).
+RC_FRESH_MS = 300.0
 
 
 class BringupTest:
@@ -53,19 +74,19 @@ class BringupTest:
         self.msp: MspClient | None = None
         self.failures: list[str] = []
 
-        # Desired MSP_SET_RAW_RC attitude/throttle, shared with the pusher
+        # Desired MSP_SET_RAW_RC attitude/throttle, shared with the sender
         # thread. AUX channels always come from the receiver snapshot.
         self._cmd = {"roll": MSP_CENTER, "pitch": MSP_CENTER,
                      "yaw": MSP_CENTER, "throttle": RC_MIN}
         self._cmd_lock = threading.Lock()
-        # Serialises every use of the single MSP socket (pusher + reads).
+        # Serialises every use of the single MSP socket (sender + reads).
         self._msp_lock = threading.Lock()
-        self._pusher_stop = threading.Event()
-        # While set, the pusher stops sending so a telemetry read can own the
-        # single MSP socket. The SITL tolerates ~300ms without RC frames, so a
-        # short read window is safe and keeps the two directions serialised.
-        self._pause = threading.Event()
-        self._pusher: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._sender: threading.Thread | None = None
+
+        # Send timestamps, used to prove the RC stream stayed fresh.
+        self._send_times: list[float] = []
+        self._send_times_lock = threading.Lock()
 
     # -- helpers ------------------------------------------------------------
     def _check(self, label: str, ok: bool, detail: str = "") -> bool:
@@ -83,89 +104,62 @@ class BringupTest:
                     self._cmd[key] = int(value)
 
     def _read(self, fn, *args, **kwargs):
-        """Pause the RC pusher, then run a blocking MspClient method.
+        """Run a blocking MspClient method (telemetry etc.).
 
-        The RC frames and the telemetry reads share one MSP socket; letting
-        them interleave perturbs the stream and can make the MSP override go
-        stale. Pausing the pusher for the (short) read keeps the traffic
-        serialised, and stays well inside the firmware's 300ms RC freshness
-        window.
+        The sender thread keeps pushing RC frames throughout: reads and writes
+        use the same socket but never block each other, and ``request`` is
+        bounded, so a read cannot stall the control stream.
         """
-        self._pause.set()
-        time.sleep(0.05)  # let any in-flight send finish
-        try:
-            with self._msp_lock:
-                return fn(*args, **kwargs)
-        finally:
-            self._pause.clear()
-
-    def _push_msp(self, roll=MSP_CENTER, pitch=MSP_CENTER, yaw=MSP_CENTER,
-                  throttle=RC_MIN) -> None:
-        """Send one MSP_SET_RAW_RC frame mirroring the receiver's AUX channels.
-
-        ``MSP_SET_RAW_RC`` uses the raw receiver order, i.e.
-        roll, pitch, throttle, yaw, then AUX1.. (note: *not* AETR).
-        """
-        channels = [int(roll), int(pitch), int(throttle), int(yaw)]
-        channels += self.receiver.snapshot()[4:]
         with self._msp_lock:
-            self.msp.set_raw_rc(channels)
+            return fn(*args, **kwargs)
 
-    # -- background pusher --------------------------------------------------
-    def _pusher_loop(self) -> None:
+    # -- background RC sender ----------------------------------------------
+    def _sender_loop(self) -> None:
         period = 1.0 / self.args.rate
         next_at = time.monotonic()
-        sent = 0
-        while not self._pusher_stop.is_set():
-            if self._pause.is_set():
-                self._pusher_stop.wait(0.01)
-                continue
+        while not self._stop.is_set():
             with self._cmd_lock:
                 cmd = dict(self._cmd)
+            # MSP_SET_RAW_RC takes the raw receiver order: roll, pitch,
+            # throttle, yaw, then AUX1.. (note: *not* AETR).
             channels = [cmd["roll"], cmd["pitch"], cmd["throttle"], cmd["yaw"]]
             channels += self.receiver.snapshot()[4:]
-            # Fire-and-forget: never read ACKs here, otherwise this thread would
-            # race the telemetry reader for reply frames (and block on the
-            # socket). Reads flush stale ACKs themselves.
+            # Fire-and-forget: never read ACKs here. Reads flush stale replies.
             try:
                 self.msp.set_raw_rc(channels, wait=False)
+                with self._send_times_lock:
+                    self._send_times.append(time.monotonic())
             except (MspError, OSError):
                 pass
-            sent += 1
-            # The FC acknowledges every SET_RAW_RC frame; if those replies are
-            # never drained they back up and eventually stall the firmware's
-            # MSP task, which then stops consuming our RC override. Discard
-            # them periodically. Reads pause us first, so this can never eat a
-            # telemetry reply.
-            if sent % 20 == 0 and not self._pause.is_set():
-                try:
-                    with self._msp_lock:
-                        self.msp.flush()
-                except (MspError, OSError):
-                    pass
             next_at += period
             delay = next_at - time.monotonic()
             if delay > 0:
-                self._pusher_stop.wait(delay)
+                self._stop.wait(delay)
             else:
                 next_at = time.monotonic()
 
-    def _start_pusher(self) -> None:
-        if self._pusher is None:
-            self._pusher_stop.clear()
-            self._pusher = threading.Thread(target=self._pusher_loop,
-                                            name="msp-pusher", daemon=True)
-            self._pusher.start()
+    def _start_threads(self) -> None:
+        self._stop.clear()
+        self._sender = threading.Thread(target=self._sender_loop,
+                                        name="msp-sender", daemon=True)
+        self._sender.start()
 
-    def _stop_pusher(self) -> None:
-        self._pusher_stop.set()
-        if self._pusher is not None:
-            self._pusher.join(timeout=1.0)
-            self._pusher = None
+    def _stop_threads(self) -> None:
+        self._stop.set()
+        if self._sender is not None:
+            self._sender.join(timeout=2.0)
+            self._sender = None
 
     def _pump(self, seconds: float) -> None:
-        """Keep both links fed for ``seconds``; the pusher thread does the work."""
+        """Keep both links fed for ``seconds``; the sender thread does the work."""
         time.sleep(seconds)
+
+    def _max_send_gap_ms(self) -> float:
+        with self._send_times_lock:
+            times = list(self._send_times)
+        if len(times) < 2:
+            return float("inf")
+        return max((b - a) for a, b in zip(times, times[1:])) * 1000.0
 
     # -- phases -------------------------------------------------------------
     def phase_link(self) -> None:
@@ -201,9 +195,6 @@ class BringupTest:
     def phase_arm(self) -> None:
         self.receiver.set_aetr(MSP_CENTER, MSP_CENTER, MSP_CENTER)
         self.receiver.set_arm(True)
-        # Poll slowly: every read briefly pauses the RC pusher, and hammering
-        # the socket at 50 Hz while the link is settling keeps the override
-        # stale and can hold the FC in RXLOSS.
         end = time.monotonic() + self.args.arm_timeout
         armed = False
         while time.monotonic() < end:
@@ -218,7 +209,7 @@ class BringupTest:
             try:
                 print("       FC channels:", self._read(self.msp.rc))
                 print("       status      :",
-                      self._read(self.msp.status, True))
+                      self._read(self.msp.status, extended=True))
             except MspTimeout:
                 pass
         self._check("vehicle armed", armed,
@@ -242,63 +233,39 @@ class BringupTest:
             return None
         return tuple(float(v) for t in triples[:2] for v in t)
 
-    def _altitude_m(self):
-        """Best-effort MSP_ALTITUDE in metres; None for the invalid sentinel."""
-        try:
-            altitude, _ = self._read(self.msp.altitude_cm)
-        except MspTimeout:
-            return None
-        # 0xFFFFFFFF (and 0xFFFFFFFE) are the "no estimate" sentinels.
-        if altitude >= 0xFFFFFF00:
-            return None
-        return altitude / 100.0
-
     def phase_takeoff(self) -> None:
-        pose = self._gazebo_pose()
-        baseline = pose[2] if pose else None
-        peak = baseline
-        max_tilt = 0.0
-        # Sample Gazebo only a few times per second: each sample spawns a
-        # `gz model` subprocess, and doing that at the 50Hz loop rate starves
-        # Gazebo/SITL and destroys the real-time sync (and thus the thrust).
-        pose_period = 0.5
-        next_pose = time.monotonic()
-        end = time.monotonic() + self.args.climb_timeout
-        ramp = self.args.climb_timeout
+        baseline_pose = self._gazebo_pose()
+        baseline = baseline_pose[2] if baseline_pose else None
+        start = time.monotonic()
+        end = start + self.args.climb_timeout
         while time.monotonic() < end:
-            elapsed = ramp - (end - time.monotonic())
+            elapsed = time.monotonic() - start
             throttle = min(self.args.hover_throttle,
                            RC_MIN + (self.args.hover_throttle - RC_MIN) *
                            min(1.0, elapsed / 2.0))
             self._set_cmd(throttle=throttle)
-            # No MSP reads in this thrust-critical loop: they would starve the
-            # 50Hz RC push and let the MSP override go stale (falling back to
-            # the receiver's idle throttle). Climb and tilt come from the
-            # independent Gazebo pose oracle instead.
-            now = time.monotonic()
-            if now >= next_pose:
-                next_pose = now + pose_period
-                pose = self._gazebo_pose()
-                if pose is not None:
-                    if peak is None:
-                        peak = pose[2]
-                    peak = max(peak, pose[2])
-                    # Gazebo pose roll/pitch are radians.
-                    max_tilt = max(max_tilt, abs(math.degrees(pose[3])),
-                                   abs(math.degrees(pose[4])))
+            # Nothing blocking in this loop: the RC sender must stay on
+            # schedule. The pose is sampled once afterwards.
             time.sleep(1.0 / self.args.rate)
 
-        # Climb is proven by the independent Gazebo pose oracle.
-        if baseline is not None and peak is not None:
+        # One sample while still at full throttle; a climbing vehicle only
+        # descends after throttle is cut, so this captures the peak.
+        peak_pose = self._gazebo_pose()
+        if peak_pose is not None and baseline is not None:
+            peak = peak_pose[2]
             climbed = (peak - baseline) >= self.args.climb_threshold_m
             self._check("vehicle climbed under throttle", climbed,
                         f"gazebo z: baseline={baseline:.3f}m "
                         f"peak={peak:.3f}m delta={peak - baseline:.3f}m")
+            # Gazebo pose roll/pitch are radians.
+            tilt = max(abs(math.degrees(peak_pose[3])),
+                       abs(math.degrees(peak_pose[4])))
         else:
             self._check("vehicle climbed under throttle", False,
                         "Gazebo pose oracle unavailable")
-        self._check("vehicle stayed upright", max_tilt < 45.0,
-                    f"max tilt (Gazebo pose) = {max_tilt:.1f} deg")
+            tilt = 0.0
+        self._check("vehicle stayed upright", tilt < 45.0,
+                    f"tilt (Gazebo pose) = {tilt:.1f} deg")
 
     def phase_disarm(self) -> None:
         # Cut throttle, hold for a moment, then drop ARM.
@@ -327,7 +294,7 @@ class BringupTest:
         # Provide a receiver link before the SITL starts evaluating failsafe.
         self.receiver.set_msp_override(True)
         self.receiver.start()
-        self._start_pusher()
+        self._start_threads()
         try:
             self._pump(0.5)          # let the SITL see the receiver link
             self.phase_link()
@@ -335,11 +302,18 @@ class BringupTest:
             self.phase_arm()
             if self.args.takeoff:
                 self.phase_takeoff()
+            else:
+                # Give the freshness measurement a meaningful window.
+                self._pump(1.0)
             self.phase_disarm()
         finally:
-            self._stop_pusher()
+            self._stop_threads()
             self.receiver.stop()
             self.msp.close()
+
+        gap_ms = self._max_send_gap_ms()
+        self._check("RC stream stayed fresh (< 300ms gaps)", gap_ms < RC_FRESH_MS,
+                    f"max gap = {gap_ms:.0f}ms")
 
         print()
         if self.failures:
