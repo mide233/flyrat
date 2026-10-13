@@ -1,0 +1,13 @@
+diff --git a/plugins/BetaflightPlugin.cc b/plugins/BetaflightPlugin.cc
+index 2725828..5d9914d 100644
+--- a/plugins/BetaflightPlugin.cc
++++ b/plugins/BetaflightPlugin.cc
+@@ -649,7 +649,7 @@ void BetaflightPluginPrivate::ReceiveMotorCommand()
+   {
+     // increase timeout for receive once we detect a packet from
+     // Betaflight FCS.
+-    waitMs = 1000;
++    waitMs = 2;
+   }
+   else
+   {

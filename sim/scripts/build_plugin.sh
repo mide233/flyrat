@@ -7,6 +7,9 @@
 # motor command packet (UDP 9002), applies rotor forces and streams simulated
 # IMU/GPS/barometer state back to SITL (UDP 9003).
 #
+# The submodule is patched before building (see sim/patches/) instead of being
+# modified in place, so the fix is reproducible from a clean checkout.
+#
 # Usage:
 #   sim/scripts/build_plugin.sh
 #
@@ -31,6 +34,25 @@ if ! pkg-config --exists gz-sim8; then
 fi
 
 cd "${AERO_DIR}"
+
+# Apply our patches to the pristine submodule source. The upstream plugin waits
+# up to 1000 ms for a motor command packet *inside the physics update*, which
+# stalls the whole simulation as soon as one packet is missed (the real-time
+# factor collapses to ~0.5%). See sim/patches/ for the details.
+PATCHES_DIR="${SIM_DIR}/patches"
+for patch in "${PATCHES_DIR}"/*.patch; do
+    [ -e "${patch}" ] || continue
+    if git apply --reverse --check "${patch}" >/dev/null 2>&1; then
+        echo "[build_plugin] already applied: $(basename "${patch}")"
+    elif git apply "${patch}"; then
+        echo "[build_plugin] applied $(basename "${patch}")"
+    else
+        echo "error: cannot apply ${patch}" >&2
+        echo "       (restore the submodule sources first, e.g." >&2
+        echo "        git -C ${AERO_DIR} checkout -- . )" >&2
+        exit 1
+    fi
+done
 
 # Start from a clean build directory so a stale CMake cache from another
 # Gazebo release cannot silently break the configuration.
