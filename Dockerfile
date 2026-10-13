@@ -63,7 +63,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake make ninja-build \
     openssh-client \
     lsb-release software-properties-common gnupg sudo \
-    python3-colorama python3-dpkt && \
+    python3-colorama python3-dpkt \
+    python3-pip websockify && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 50 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 50 && \
     apt-get clean && \
@@ -167,6 +168,15 @@ RUN apt-get update && \
     "binutils-${cross_pkg_triplet}" && \
     update-alternatives --install "/usr/bin/${cross_triplet}-gcc" "${cross_triplet}-gcc" "/usr/bin/${cross_triplet}-gcc-14" 50 && \
     update-alternatives --install "/usr/bin/${cross_triplet}-g++" "${cross_triplet}-g++" "/usr/bin/${cross_triplet}-g++-14" 50 && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl gnupg ca-certificates lsb-release && \
+    curl -fsSL https://packages.osrfoundation.org/gazebo.gpg --output /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] https://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/gazebo-stable.list > /dev/null && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends gz-harmonic && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
