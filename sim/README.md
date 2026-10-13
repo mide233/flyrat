@@ -87,6 +87,18 @@ VERBOSE=1 sim/scripts/launch_sim.sh       # 打开启动器详细日志
 启动器（`betaloop/start.py`）会依次拉起 Gazebo 世界、SITL，并（默认
 禁用）网页配置器用的 websockify。
 
+## 4. 自动驾驶联调（ROS 2 + 算法库）
+
+仿真本身跑通后，可以接上我们自己的算法做闭环：
+
+- `bringup_test.py`：不依赖 ROS 2 的链路自检（覆盖/解锁/拉升）。
+- `ros2_ws/src/flyrat_msp`：MSP 桥接与虚拟接收机（`msp_node`）。
+- `ros2_ws/src/flyrat_control`：控制节点（`control_node`，调用算法库）。
+- `autopilot/`：与 ROS 解耦的纯 C++17 算法库。
+
+完整流程、接口表和排查清单见
+[`docs/zh-cn/betaflight_sitl_gazebo.md`](../docs/zh-cn/betaflight_sitl_gazebo.md)。
+
 ## 端口速查
 
 | 端口 | 方向 | 含义 |
