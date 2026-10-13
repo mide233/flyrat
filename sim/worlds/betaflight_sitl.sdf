@@ -2,9 +2,10 @@
 <!--
   Betaflight SITL + Gazebo Harmonic world.
 
-  The iris model (model://betaloop_iris_with_standoffs) carries the
-  BetaflightPlugin system plugin, which bridges Gazebo and Betaflight SITL
-  over UDP:
+  The iris model (model://betaflight_iris, our override of the upstream
+  betaloop_iris_with_standoffs that fixes the QUADX rotor order expected by the
+  BetaflightPlugin) carries the system plugin, which bridges Gazebo and
+  Betaflight SITL over UDP:
     - 9002  SITL -> Gazebo  motor commands
     - 9003  Gazebo -> SITL  simulated IMU / GPS / barometer state
 
@@ -99,7 +100,7 @@
 
     <!-- Iris quadcopter with the Betaflight bridge plugin -->
     <include>
-      <uri>model://betaloop_iris_with_standoffs</uri>
+      <uri>model://betaflight_iris</uri>
       <name>iris</name>
       <pose>0 0 0.5 0 0 1.5708</pose>
     </include>

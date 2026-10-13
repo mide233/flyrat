@@ -74,4 +74,11 @@ if [ "${VERBOSE:-0}" = "1" ]; then
 fi
 
 echo "[launch_sim] starting Betaloop (world=${WORLD})"
+
+# Resource resolution: our model override (sim/models) plus the upstream
+# aeroloop assets. Betaloop appends its own worlds path, so pre-seed the
+# variables here to keep every lookup root on the search path.
+export GZ_SIM_RESOURCE_PATH="${SIM_DIR}/models:${AERO_DIR}/models:${AERO_DIR}/worlds${GZ_SIM_RESOURCE_PATH:+:${GZ_SIM_RESOURCE_PATH}}"
+export SDF_PATH="${AERO_DIR}/models:${SIM_DIR}/models${SDF_PATH:+:${SDF_PATH}}"
+
 exec python3 "${BETALOOP_DIR}/start.py" "${ARGS[@]}"
