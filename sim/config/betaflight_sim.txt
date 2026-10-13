@@ -1,0 +1,28 @@
+# Betaflight CLI configuration for the SITL + Gazebo stack.
+#
+# Applied over the SITL MSP UART (TCP 5761) by
+#   sim/scripts/config_betaflight.py
+# Each non-comment line is sent to the CLI verbatim; the script appends
+#   save
+# so the settings are written to eeprom.bin and survive a reboot.
+#
+# Control model (true MSP override):
+#   - The simulated receiver is RX_UDP (UDP 9004). It stays in charge of
+#     arming and of the mode switches, so the human/bench link keeps the
+#     safety-critical channels.
+#   - Channels 1-4 (roll/pitch/yaw/throttle, i.e. AETR) are handed to the
+#     companion computer (our autopilot) through MSP_SET_RAW_RC.
+#
+# IMPORTANT: ARM must NOT sit on an MSP-overridden channel, otherwise the
+# companion would be arming the aircraft. ARM therefore lives on AUX1 and is
+# driven by the UDP 9004 receiver stream.
+
+# Let the companion computer override channels 1-4 (AETR): mask = 0b1111.
+set msp_override_channels_mask = 15
+
+# ARM on AUX1 (channel 5), active above ~1700us. Driven by UDP 9004.
+aux 0 0 0 1700 2100
+
+# MSP OVERRIDE on AUX2 (channel 6), active above ~1700us. Driven by UDP 9004;
+# while this switch is high the masked channels come from MSP_SET_RAW_RC.
+aux 1 50 1 1700 2100
