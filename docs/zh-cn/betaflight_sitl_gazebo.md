@@ -57,6 +57,11 @@ sim/scripts/build_all.sh
 
 细节（串行拉取固件子模块、`JOBS`、`CLEAN=1` 等）见 `sim/README.md`。
 
+> `build_plugin.sh` 会先对上游插件子模块应用 `sim/patches/*.patch`。其中
+> `aeroloop_gazebo-motor-recv-timeout.patch` 把物理步进内等待电机指令包的
+> 上限从 1000 ms 降到 2 ms——这是**必需修复**，否则丢一个包就会让整个仿真
+> 卡死（详见第 10 节）。
+
 ## 4. 一次性配置飞控
 
 飞控配置声明在 `sim/config/betaflight_sim.txt`，由脚本经 TCP 5761 送入 CLI
@@ -186,6 +191,22 @@ ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
 - 解锁必须 **先低后高**：AUX1 若一开始就是高电平，飞控会因 `NOT_DISARMED`
   拒绝解锁。请先保持 AUX1 低，等链路稳定后再拉高。
 - 油门低起飞前不要提前加油门，否则会触发 `RUNAWAY THROTTLE` 而拒绝解锁。
+
+**仿真时间几乎不前进（飞机"悬不住"、MSP 突然全超时）**
+
+- 症状：起飞瞬间 Gazebo 的实时率从 ~1.0 掉到 0.00x，8 s 的起飞窗口里几乎没有
+  仿真时间流过，飞机只能挪十几厘米；同时 MSP 遥测成片超时、有时"下一次运行
+  连不上"。用
+  `gz topic -e -t /world/betaflight_sitl/stats | grep real_time_factor`
+  可以直接看到实时率。
+- 原因：上游桥接插件在**物理步进内**用 `select` 等电机指令包，且"在线"后把等待
+  上限设为 **1000 ms**（`BetaflightPlugin.cc` 的 `Recv(..., waitMs=1000)`）。
+  只要丢一个包，物理线程就阻塞在这一步，之后 SITL 与插件的收发互相等待，
+  正反馈式雪崩。
+- 修复：`sim/patches/aeroloop_gazebo-motor-recv-timeout.patch`（`waitMs=2`），
+  由 `sim/scripts/build_plugin.sh` 自动、幂等地应用。改动只影响"等多久"，
+  不影响控制律。若手工改过子模块导致补丁打不上，先
+  `git -C sim/third_party/aeroloop_gazebo checkout -- .`。
 
 **电机输出正常但飞机不升（无升力）**
 

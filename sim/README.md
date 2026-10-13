@@ -44,8 +44,15 @@ sim/scripts/build_all.sh
   会自行拉取固件子模块，并行时会争抢 git 锁），再 `make TARGET=SITL`。
   产物：`third_party/betaflight/obj/main/betaflight_SITL.elf`。
   可用环境变量：`BETAFLIGHT_TARGET`、`JOBS`、`CLEAN=1`。
-- `build_plugin.sh`：构建 Gazebo 桥接插件。
+- `build_plugin.sh`：先对上游子模块打补丁（`sim/patches/*.patch`，见下），
+  再构建 Gazebo 桥接插件。
   产物：`third_party/aeroloop_gazebo/plugins/build/libBetaflightPlugin.so`。
+
+> **关于 `patches/`**：上游插件在物理步进内用 `select` 等待电机指令包最多
+> **1000 ms**（`BetaflightPlugin.cc` 的 `waitMs = 1000`）。一旦丢一个包，
+> 整个仿真会卡在这一步，实时率（real_time_factor）从 1.0 掉到 ~0.5%，
+> 表现为"飞机不升 / MSP 遥测超时 / 下一次运行连不上"。补丁把它降到 2 ms，
+> 只影响等待上限，不改变控制逻辑。补丁由 `build_plugin.sh` 幂等应用。
 
 ## 2. 配置飞控（一次性）
 
