@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 
 # Emit compile_commands.json so clangd/editors can resolve this translation
-# unit. scripts/export_compile_commands.sh merges the per-project databases
-# into one file at the repository root.
+# unit. .script/export_compile_commands.sh merges the per-project databases into
+# one file at the repository root.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 project(flyrat_msp)
@@ -20,19 +20,15 @@ find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 
-# Plain C++ library wrapping the SITL links, so non-ROS tools (and tests) can
-# reuse the MSP client and the virtual RC receiver.
-add_library(flyrat_msp_client
-  src/msp_client.cpp
-  src/rc_receiver.cpp)
-target_include_directories(flyrat_msp_client PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
-target_compile_options(flyrat_msp_client PRIVATE -Wall -Wextra)
+# libflyrat owns the ROS-free transport (MSP client + UDP RC receiver); this
+# package is only the ROS 2 adapter around it.
+add_subdirectory(
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../../libflyrat"
+  "${CMAKE_CURRENT_BINARY_DIR}/flyrat")
 
 add_executable(msp_node src/msp_node.cpp)
 target_link_libraries(msp_node PRIVATE
-  flyrat_msp_client
+  flyrat::flyrat
   rclcpp::rclcpp
   ${geometry_msgs_TARGETS}
   ${sensor_msgs_TARGETS}
@@ -40,14 +36,9 @@ target_link_libraries(msp_node PRIVATE
   ${std_srvs_TARGETS})
 target_compile_options(msp_node PRIVATE -Wall -Wextra)
 
-install(TARGETS flyrat_msp_client msp_node
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
+install(TARGETS msp_node
   RUNTIME DESTINATION lib/${PROJECT_NAME})
-install(DIRECTORY include/ DESTINATION include)
 
-ament_export_include_directories(include)
-ament_export_libraries(flyrat_msp_client)
 ament_export_dependencies(rclcpp geometry_msgs sensor_msgs std_msgs std_srvs)
 
 ament_package()

@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: MIT
-#include "flyrat_msp/msp_client.hpp"
+#include "flyrat/msp_client.hpp"
 
 #include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 
+#include <fcntl.h>
 #include <netdb.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <termios.h>
 #include <unistd.h>
 
-namespace flyrat_msp {
+namespace flyrat {
 namespace {
 
 constexpr char kHeader0 = '$';
@@ -52,6 +54,29 @@ bool box_active(const std::vector<uint8_t>& p, uint16_t box) {
     return (p[offset] >> (index % 8)) & 1u;
 }
 
+speed_t baud_constant(int baud) {
+    switch (baud) {
+    case 9600:
+        return B9600;
+    case 19200:
+        return B19200;
+    case 38400:
+        return B38400;
+    case 57600:
+        return B57600;
+    case 115200:
+        return B115200;
+    case 230400:
+        return B230400;
+    case 460800:
+        return B460800;
+    case 921600:
+        return B921600;
+    default:
+        throw MspError("unsupported baud rate: " + std::to_string(baud));
+    }
+}
+
 } // namespace
 
 MspClient::~MspClient() { close(); }
@@ -84,6 +109,46 @@ void MspClient::connect(const std::string& host, int port, double timeout_s) {
     if (fd < 0)
         throw MspError("cannot connect to " + host + ":" + port_str);
     fd_ = fd;
+    is_socket_ = true;
+    buf_.clear();
+}
+
+void MspClient::connect_serial(const std::string& device, int baud, double timeout_s) {
+    close();
+    timeout_ = timeout_s;
+
+    const int fd = ::open(device.c_str(), O_RDWR | O_NOCTTY | O_CLOEXEC);
+    if (fd < 0)
+        throw MspError("cannot open " + device + ": " + std::strerror(errno));
+
+    termios tty{};
+    if (::tcgetattr(fd, &tty) != 0) {
+        const std::string err = std::strerror(errno);
+        ::close(fd);
+        throw MspError("tcgetattr " + device + ": " + err);
+    }
+    ::cfmakeraw(&tty);
+    tty.c_cflag |= (CLOCAL | CREAD);
+    tty.c_cflag &= ~CRTSCTS;
+    tty.c_cflag &= ~CSTOPB;
+    tty.c_cflag &= ~PARENB;
+    tty.c_cflag &= ~CSIZE;
+    tty.c_cflag |= CS8;
+    tty.c_cc[VMIN] = 0;
+    tty.c_cc[VTIME] = 0;
+
+    const speed_t speed = baud_constant(baud);
+    ::cfsetispeed(&tty, speed);
+    ::cfsetospeed(&tty, speed);
+    if (::tcsetattr(fd, TCSANOW, &tty) != 0) {
+        const std::string err = std::strerror(errno);
+        ::close(fd);
+        throw MspError("tcsetattr " + device + ": " + err);
+    }
+    ::tcflush(fd, TCIOFLUSH);
+
+    fd_ = fd;
+    is_socket_ = false;
     buf_.clear();
 }
 
@@ -92,12 +157,13 @@ void MspClient::close() {
         ::close(fd_);
         fd_ = -1;
     }
+    is_socket_ = false;
     buf_.clear();
 }
 
 bool MspClient::fill(double timeout_s) {
     if (fd_ < 0)
-        throw MspError("MSP socket is not connected");
+        throw MspError("MSP link is not connected");
     pollfd pfd{};
     pfd.fd = fd_;
     pfd.events = POLLIN;
@@ -114,14 +180,17 @@ bool MspClient::fill(double timeout_s) {
         return false;
 
     uint8_t tmp[4096];
-    const ssize_t n = ::recv(fd_, tmp, sizeof(tmp), 0);
+    const ssize_t n = ::read(fd_, tmp, sizeof(tmp));
     if (n < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
             return false;
-        throw MspError(std::string("recv: ") + std::strerror(errno));
+        throw MspError(std::string("read: ") + std::strerror(errno));
     }
-    if (n == 0)
-        throw MspError("MSP connection closed by peer");
+    if (n == 0) {
+        if (is_socket_)
+            throw MspError("MSP connection closed by peer");
+        return false;
+    }
     buf_.insert(buf_.end(), tmp, tmp + n);
     return true;
 }
@@ -185,7 +254,7 @@ std::optional<std::pair<uint8_t, std::vector<uint8_t>>> MspClient::recv_frame(do
 
 void MspClient::send_frame(uint8_t cmd, const std::vector<uint8_t>& payload) {
     if (fd_ < 0)
-        throw MspError("MSP socket is not connected");
+        throw MspError("MSP link is not connected");
     std::lock_guard<std::mutex> lock(send_mutex_);
     std::vector<uint8_t> frame;
     frame.reserve(6 + payload.size());
@@ -205,12 +274,17 @@ void MspClient::send_frame(uint8_t cmd, const std::vector<uint8_t>& payload) {
 
     size_t off = 0;
     while (off < frame.size()) {
-        const ssize_t n = ::send(fd_, frame.data() + off, frame.size() - off, MSG_NOSIGNAL);
+        const size_t remaining = frame.size() - off;
+        const ssize_t n = is_socket_
+                            ? ::send(fd_, frame.data() + off, remaining, MSG_NOSIGNAL)
+                            : ::write(fd_, frame.data() + off, remaining);
         if (n < 0) {
             if (errno == EINTR)
                 continue;
-            throw MspError(std::string("send: ") + std::strerror(errno));
+            throw MspError(std::string("write: ") + std::strerror(errno));
         }
+        if (n == 0)
+            throw MspError("MSP link closed while writing");
         off += static_cast<size_t>(n);
     }
 }
@@ -348,4 +422,4 @@ void MspClient::set_raw_rc(const std::vector<uint16_t>& channels, double drain_t
     }
 }
 
-} // namespace flyrat_msp
+} // namespace flyrat

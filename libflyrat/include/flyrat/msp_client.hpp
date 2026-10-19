@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 //
-// Minimal MSP v1 client for the Betaflight SITL UART.
+// Minimal MSP v1 client for Betaflight.
 //
-// The SITL exposes UART1 as a TCP socket (default 127.0.0.1:5761) that speaks
-// the same MSP v1 framing as the real serial link:
+// The same framing is used over two transports:
+//   * TCP    - the SITL exposes UART1 as a TCP socket (default 127.0.0.1:5761);
+//   * serial - a real flight controller, e.g. /dev/ttyACM0 at 115200 baud.
 //   request  $M< size cmd payload... xor
 //   response $M> size cmd payload... xor
 //   error    $M! ...
@@ -19,7 +20,7 @@
 #include <utility>
 #include <vector>
 
-namespace flyrat_msp {
+namespace flyrat {
 
 enum MspCommand : uint8_t {
     kApiVersion = 1,
@@ -104,6 +105,9 @@ public:
     MspClient& operator=(const MspClient&) = delete;
 
     void connect(const std::string& host, int port, double timeout_s = 0.1);
+    // Open a real flight controller over a serial port (8N1, raw). Throws
+    // MspError when the device cannot be opened or the baud rate is unsupported.
+    void connect_serial(const std::string& device, int baud, double timeout_s = 0.1);
     void close();
     bool connected() const { return fd_ >= 0; }
     void set_timeout(double seconds) { timeout_ = seconds; }
@@ -137,6 +141,8 @@ private:
     std::optional<std::pair<uint8_t, std::vector<uint8_t>>> recv_frame(double timeout_s);
 
     int fd_ = -1;
+    // send()/MSG_NOSIGNAL is socket-only; serial uses write().
+    bool is_socket_ = false;
     double timeout_ = 0.1;
     std::vector<uint8_t> buf_;
     // Serializes writes so a sender (RC stream) and a reader (telemetry) can
@@ -144,4 +150,4 @@ private:
     std::mutex send_mutex_;
 };
 
-} // namespace flyrat_msp
+} // namespace flyrat

@@ -16,7 +16,7 @@
 
 #include <netinet/in.h>
 
-namespace flyrat_msp {
+namespace flyrat {
 
 class RcReceiver {
 public:
@@ -40,4 +40,4 @@ private:
     sockaddr_in addr_{};
 };
 
-} // namespace flyrat_msp
+} // namespace flyrat

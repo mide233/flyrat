@@ -33,10 +33,20 @@
 #include <std_msgs/msg/u_int16_multi_array.hpp>
 #include <std_srvs/srv/set_bool.hpp>
 
-#include "flyrat_msp/msp_client.hpp"
-#include "flyrat_msp/rc_receiver.hpp"
+#include "flyrat/msp_client.hpp"
+#include "flyrat/rc_receiver.hpp"
 
 namespace flyrat_msp {
+
+using flyrat::AltitudeFrame;
+using flyrat::AnalogFrame;
+using flyrat::Attitude;
+using flyrat::ImuSample;
+using flyrat::MotorFrame;
+using flyrat::MspClient;
+using flyrat::RcFrame;
+using flyrat::RcReceiver;
+using flyrat::StatusFrame;
 namespace {
 
 // Raw Betaflight receiver channel order.

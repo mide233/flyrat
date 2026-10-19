@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "flyrat_msp/rc_receiver.hpp"
+#include "flyrat/rc_receiver.hpp"
 
 #include <cerrno>
 #include <cstring>
@@ -8,7 +8,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-namespace flyrat_msp {
+namespace flyrat {
 
 RcReceiver::~RcReceiver() { close(); }
 
@@ -51,4 +51,4 @@ void RcReceiver::send(
         throw std::runtime_error(std::string("sendto: ") + std::strerror(errno));
 }
 
-} // namespace flyrat_msp
+} // namespace flyrat
