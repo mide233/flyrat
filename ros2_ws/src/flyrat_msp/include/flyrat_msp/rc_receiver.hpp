@@ -19,25 +19,25 @@
 namespace flyrat_msp {
 
 class RcReceiver {
- public:
-  RcReceiver() = default;
-  ~RcReceiver();
+public:
+    RcReceiver() = default;
+    ~RcReceiver();
 
-  RcReceiver(const RcReceiver&) = delete;
-  RcReceiver& operator=(const RcReceiver&) = delete;
+    RcReceiver(const RcReceiver&) = delete;
+    RcReceiver& operator=(const RcReceiver&) = delete;
 
-  void open(const std::string& host, int port);
-  void close();
-  bool is_open() const { return fd_ >= 0; }
+    void open(const std::string& host, int port);
+    void close();
+    bool is_open() const { return fd_ >= 0; }
 
-  // `channels` is raw receiver order with up to 16 entries; missing channels
-  // default to the idle value.
-  void send(const std::vector<uint16_t>& channels, double timestamp,
-            uint16_t default_channel = 1000);
+    // `channels` is raw receiver order with up to 16 entries; missing channels
+    // default to the idle value.
+    void send(
+        const std::vector<uint16_t>& channels, double timestamp, uint16_t default_channel = 1000);
 
- private:
-  int fd_ = -1;
-  sockaddr_in addr_{};
+private:
+    int fd_ = -1;
+    sockaddr_in addr_{};
 };
 
-}  // namespace flyrat_msp
+} // namespace flyrat_msp

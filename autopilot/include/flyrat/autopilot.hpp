@@ -13,15 +13,14 @@
 namespace flyrat {
 
 class Autopilot {
- public:
-  virtual ~Autopilot() = default;
+public:
+    virtual ~Autopilot() = default;
 
-  // Clear integrators/state; called before (re)arming.
-  virtual void reset() = 0;
+    // Clear integrators/state; called before (re)arming.
+    virtual void reset() = 0;
 
-  // Produce one command. `dt` is the cycle time in seconds.
-  virtual Command update(const State& state, const Setpoint& setpoint,
-                         double dt) = 0;
+    // Produce one command. `dt` is the cycle time in seconds.
+    virtual Command update(const State& state, const Setpoint& setpoint, double dt) = 0;
 };
 
-}  // namespace flyrat
+} // namespace flyrat
