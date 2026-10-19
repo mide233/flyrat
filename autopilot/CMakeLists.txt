@@ -1,5 +1,11 @@
 # SPDX-License-Identifier: MIT
 cmake_minimum_required(VERSION 3.16)
+
+# Emit compile_commands.json so clangd/editors can resolve this translation
+# unit. scripts/export_compile_commands.sh merges the per-project databases
+# into one file at the repository root.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 project(flyrat_autopilot VERSION 0.1.0 LANGUAGES CXX)
 
 # The autopilot core is deliberately ROS-free. It builds as a standalone CMake
