@@ -3,7 +3,7 @@
 
 Betaflight exposes both MSP and the CLI on its UARTs. SITL maps UART1 to
 TCP 5761, so this script opens that socket, switches the firmware into CLI
-mode (the '#' byte), feeds the commands from sim/config/betaflight_sim.txt and
+mode (the '#' byte), feeds the commands from flyrat_play/gazebo/config/betaflight_sim.txt and
 finally issues 'save' to persist them to eeprom.bin.
 
 The settings themselves (MSP override mask, ARM / MSP OVERRIDE mode ranges)
@@ -11,8 +11,8 @@ live in the committed text file, so the configuration stays auditable and
 reproducible.
 
 Usage:
-    sim/scripts/config_betaflight.py [--host 127.0.0.1] [--port 5761]
-                                     [--commands sim/config/betaflight_sim.txt]
+    flyrat_play/gazebo/scripts/config_betaflight.py [--host 127.0.0.1] [--port 5761]
+                                     [--commands flyrat_play/gazebo/config/betaflight_sim.txt]
                                      [--no-save]
 """
 from __future__ import annotations

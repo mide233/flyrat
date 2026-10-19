@@ -5,7 +5,7 @@
 #   flyrat_msp      - virtual RC receiver + MSP link to the SITL
 #   flyrat_control  - the autopilot core, publishing RC overrides
 #
-# Start the simulator first (sim/scripts/launch_sim.sh), then:
+# Start the simulator first (flyrat_play/gazebo/scripts/launch_sim.sh), then:
 #   ros2 launch flyrat_control flyrat_sitl.launch.py
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument

@@ -7,11 +7,11 @@
 # motor command packet (UDP 9002), applies rotor forces and streams simulated
 # IMU/GPS/barometer state back to SITL (UDP 9003).
 #
-# The submodule is patched before building (see sim/patches/) instead of being
+# The submodule is patched before building (see flyrat_play/gazebo/patches/) instead of being
 # modified in place, so the fix is reproducible from a clean checkout.
 #
 # Usage:
-#   sim/scripts/build_plugin.sh
+#   flyrat_play/gazebo/scripts/build_plugin.sh
 #
 # Requires: gz-harmonic + dev packages (libgz-sim8-dev, libgz-plugin2-dev,
 #           libgz-math7-dev) and cppzmq-dev.
@@ -38,7 +38,7 @@ cd "${AERO_DIR}"
 # Apply our patches to the pristine submodule source. The upstream plugin waits
 # up to 1000 ms for a motor command packet *inside the physics update*, which
 # stalls the whole simulation as soon as one packet is missed (the real-time
-# factor collapses to ~0.5%). See sim/patches/ for the details.
+# factor collapses to ~0.5%). See flyrat_play/gazebo/patches/ for the details.
 PATCHES_DIR="${SIM_DIR}/patches"
 for patch in "${PATCHES_DIR}"/*.patch; do
     [ -e "${patch}" ] || continue

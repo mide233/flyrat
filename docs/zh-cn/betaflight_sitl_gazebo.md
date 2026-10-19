@@ -2,32 +2,30 @@
 
 本文介绍如何在开发容器里把 **Betaflight SITL**、**Gazebo Harmonic** 和我们
 自己的 **自动驾驶算法** 串成一个闭环，用于验证飞控算法。底层仿真工程的细节
-见 [`sim/README.md`](../../sim/README.md)，本文侧重"从零到跑起来"的完整流程
+见 [`flyrat_play/gazebo/README.md`](../../flyrat_play/gazebo/README.md)，本文侧重"从零到跑起来"的完整流程
 以及踩过的坑。
 
 ## 1. 总体结构
 
 ```
-              ┌──────────────────────── 我们的代码 ────────────────────────┐
-              │                                                             │
-              │   autopilot/             (纯 C++17，无 ROS 依赖)            │
-              │   ros2_ws/src/flyrat_control  (控制节点，调用算法库)         │
-              │   ros2_ws/src/flyrat_msp      (MSP 桥接 + 虚拟接收机)        │
-              └───────────────┬───────────────────────────┬─────────────────┘
-                              │ MSP_SET_RAW_RC (AETR)      │ RC 帧 (ARM / MSP OVERRIDE)
-                              ▼                            ▼
-                        TCP 5761 (UART1)              UDP 9004 (RX_UDP)
-                              │                            │
-                    ┌─────────┴────────────────────────────┴─────────┐
-                    │              Betaflight SITL (ELf)              │
-                    └─────────┬────────────────────────────┬─────────┘
-                    电机 0..1 │ UDP 9002                    │ FDM 状态 UDP 9003
-                              ▼                             │
-                    ┌─────────────────────────────────────┴─────────┐
-                    │        Gazebo Harmonic + 桥接插件              │
-                    │        (libBetaflightPlugin.so)                │
-                    └────────────────────────────────────────────────┘
+┌──────────────── libflyrat/（纯 C++17，无 ROS 依赖）────────────────┐
+│  算法：State / Setpoint / Command / Autopilot / AttitudeHold        │
+│  传输：MspClient（TCP 或串口 MSP）+ RcReceiver（UDP 9004）          │
+└───────────────┬───────────────────────────────────┬───────────────┘
+                │                                   │
+   ┌────────────▼──────────────┐      ┌─────────────▼──────────────┐
+   │ flyrat_play/ros2_ws/      │      │ flyrat_pilot/              │
+   │   flyrat_msp   (MSP 桥)   │      │   实机程序（无 ROS，占位）  │
+   │   flyrat_control (控制)   │      │   预留串口 / TCP MSP 接入   │
+   └────────────┬──────────────┘      └─────────────┬──────────────┘
+                ▼                                   │ 实机
+   ┌──────────────────────────────┐                 ▼
+   │ Betaflight SITL × Gazebo     │        Betaflight 飞控（串口）
+   └──────────────────────────────┘
 ```
+
+仿真端与实机端共用同一份 `libflyrat`，区别只在传输后端：仿真走 TCP 5761 +
+UDP 9004，实机走串口 MSP。
 
 控制模型采用 **真·MSP OVERRIDE**：
 
@@ -47,28 +45,28 @@
 ## 3. 构建仿真
 
 ```bash
-sim/scripts/build_all.sh
+flyrat_play/gazebo/scripts/build_all.sh
 ```
 
 产物：
 
-- `sim/third_party/betaflight/obj/main/betaflight_SITL.elf`
-- `sim/third_party/aeroloop_gazebo/plugins/build/libBetaflightPlugin.so`
+- `flyrat_play/gazebo/third_party/betaflight/obj/main/betaflight_SITL.elf`
+- `flyrat_play/gazebo/third_party/aeroloop_gazebo/plugins/build/libBetaflightPlugin.so`
 
-细节（串行拉取固件子模块、`JOBS`、`CLEAN=1` 等）见 `sim/README.md`。
+细节（串行拉取固件子模块、`JOBS`、`CLEAN=1` 等）见 `flyrat_play/gazebo/README.md`。
 
-> `build_plugin.sh` 会先对上游插件子模块应用 `sim/patches/*.patch`。其中
+> `build_plugin.sh` 会先对上游插件子模块应用 `flyrat_play/gazebo/patches/*.patch`。其中
 > `aeroloop_gazebo-motor-recv-timeout.patch` 把物理步进内等待电机指令包的
 > 上限从 1000 ms 降到 2 ms——这是**必需修复**，否则丢一个包就会让整个仿真
 > 卡死（详见第 10 节）。
 
 ## 4. 一次性配置飞控
 
-飞控配置声明在 `sim/config/betaflight_sim.txt`，由脚本经 TCP 5761 送入 CLI
-后 `save` 持久化到 `sim/config/eeprom.bin`：
+飞控配置声明在 `flyrat_play/gazebo/config/betaflight_sim.txt`，由脚本经 TCP 5761 送入 CLI
+后 `save` 持久化到 `flyrat_play/gazebo/config/eeprom.bin`：
 
 ```bash
-sim/scripts/configure_fc.sh
+flyrat_play/gazebo/scripts/configure_fc.sh
 ```
 
 | 命令 | 作用 |
@@ -83,8 +81,8 @@ sim/scripts/configure_fc.sh
 ## 5. 启动仿真
 
 ```bash
-sim/scripts/launch_sim.sh                 # 无界面
-SHOW_GAZEBO=1 sim/scripts/launch_sim.sh   # 带 Gazebo GUI
+flyrat_play/gazebo/scripts/launch_sim.sh                 # 无界面
+SHOW_GAZEBO=1 flyrat_play/gazebo/scripts/launch_sim.sh   # 带 Gazebo GUI
 ```
 
 ## 6. 自检（不依赖 ROS 2）
@@ -92,7 +90,7 @@ SHOW_GAZEBO=1 sim/scripts/launch_sim.sh   # 带 Gazebo GUI
 先确认"飞控 ↔ 仿真"这条链路本身没问题：
 
 ```bash
-python3 sim/scripts/bringup_test.py --takeoff
+python3 flyrat_play/gazebo/scripts/bringup_test.py --takeoff
 ```
 
 脚本会依次验证：MSP 链路、MSP OVERRIDE 确实在接管 AETR、AUX1（ARM）仍由接收机
@@ -102,9 +100,9 @@ python3 sim/scripts/bringup_test.py --takeoff
 
 | 脚本 | 作用 |
 |---|---|
-| `sim/scripts/flyrat_msp.py` | MSP v1 客户端（`set_raw_rc` + 遥测），TCP 5761 |
-| `sim/scripts/rc_receiver.py` | 虚拟接收机，UDP 9004（AUX1=ARM，AUX2=MSP OVERRIDE） |
-| `sim/scripts/bringup_test.py` | 端到端自检 |
+| `flyrat_play/gazebo/scripts/flyrat_msp.py` | MSP v1 客户端（`set_raw_rc` + 遥测），TCP 5761 |
+| `flyrat_play/gazebo/scripts/rc_receiver.py` | 虚拟接收机，UDP 9004（AUX1=ARM，AUX2=MSP OVERRIDE） |
+| `flyrat_play/gazebo/scripts/bringup_test.py` | 端到端自检 |
 
 ## 7. 编译并运行 ROS 2 层
 
@@ -112,12 +110,12 @@ python3 sim/scripts/bringup_test.py --takeoff
 
 ```bash
 # 纯算法库（无 ROS）
-cmake -S autopilot -B autopilot/build -DCMAKE_BUILD_TYPE=Release
-cmake --build autopilot/build
-ctest --test-dir autopilot/build
+cmake -S libflyrat -B libflyrat/build -DCMAKE_BUILD_TYPE=Release
+cmake --build libflyrat/build
+ctest --test-dir libflyrat/build
 
 # ROS 2 包
-cd ros2_ws
+cd flyrat_play/ros2_ws
 colcon build --symlink-install
 ```
 
@@ -128,10 +126,10 @@ colcon build --symlink-install
 
 ```bash
 # 终端 A：仿真
-sim/scripts/launch_sim.sh
+flyrat_play/gazebo/scripts/launch_sim.sh
 # 终端 B：控制
 source /opt/ros/jazzy/setup.bash
-source ros2_ws/install/setup.bash
+source flyrat_play/ros2_ws/install/setup.bash
 ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
 ```
 
@@ -157,18 +155,37 @@ ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
 `rate`(50) / `telemetry_rate`(10)；`flyrat_control` 的 `control_rate`(50) /
 `state_timeout`(2.0) / `takeoff_throttle`(0.7) / `flight_seconds`(5)。
 
-## 8. 算法库（`autopilot/`）
+## 8. 算法库与实机程序
 
-与 ROS 解耦的纯 C++17 库，接口刻意保持极简：
+### 8.1 `libflyrat/`
+
+与 ROS 解耦的纯 C++17 库，同时包含算法与 Betaflight 传输：
 
 - `flyrat::State`：姿态（rad）、角速度、高度、电压、是否解锁等估计量。
 - `flyrat::Setpoint`：期望姿态 / 偏航角速度 / 油门。
 - `flyrat::Command`：归一化指令 `roll/pitch/yaw ∈ [-1,1]`、`throttle ∈ [0,1]`。
 - `flyrat::Autopilot`：`reset()` + `update(state, setpoint, dt) -> Command`。
 - `flyrat::AttitudeHold`：示例实现（P 姿态控制 + 偏航角速度阻尼 + 输出限幅）。
+- `flyrat::MspClient`：MSP v1 客户端，支持 TCP（SITL）与串口（实机）。
+- `flyrat::RcReceiver`：SITL 虚拟接收机（UDP 9004）。
 
-`flyrat_control` 通过 `add_subdirectory(.../autopilot)` 直接链接该库，因此算法
-可以脱离 ROS 单独编译和测试。
+`flyrat_control` 与 `flyrat_msp` 都通过 `add_subdirectory(.../libflyrat)` 直接链接
+该库，因此算法可以脱离 ROS 单独编译和测试。
+
+### 8.2 `flyrat_pilot/`
+
+实机端程序，**不依赖 ROS**，链接同一份 `libflyrat`。目前是**占位骨架**：
+只保留可编译的 `main()` 和 CMake 配置，运行时逻辑尚未实现。
+
+```bash
+cmake -S flyrat_pilot -B flyrat_pilot/build -DCMAKE_BUILD_TYPE=Release
+cmake --build flyrat_pilot/build -j
+./flyrat_pilot/build/flyrat_pilot
+```
+
+预留的接入点：`flyrat::MspClient`（TCP / 串口）、`flyrat::RcReceiver`（UDP 9004）、
+`flyrat::Autopilot`（算法）。建议采用“固定频率发送线程 + 独立遥测/算法线程”的结构。
+详见 `flyrat_pilot/README.md`。
 
 ## 9. 端口速查
 
@@ -203,10 +220,10 @@ ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
   上限设为 **1000 ms**（`BetaflightPlugin.cc` 的 `Recv(..., waitMs=1000)`）。
   只要丢一个包，物理线程就阻塞在这一步，之后 SITL 与插件的收发互相等待，
   正反馈式雪崩。
-- 修复：`sim/patches/aeroloop_gazebo-motor-recv-timeout.patch`（`waitMs=2`），
-  由 `sim/scripts/build_plugin.sh` 自动、幂等地应用。改动只影响"等多久"，
+- 修复：`flyrat_play/gazebo/patches/aeroloop_gazebo-motor-recv-timeout.patch`（`waitMs=2`），
+  由 `flyrat_play/gazebo/scripts/build_plugin.sh` 自动、幂等地应用。改动只影响"等多久"，
   不影响控制律。若手工改过子模块导致补丁打不上，先
-  `git -C sim/third_party/aeroloop_gazebo checkout -- .`。
+  `git -C flyrat_play/gazebo/third_party/aeroloop_gazebo checkout -- .`。
 
 **电机输出正常但飞机不升（无升力）**
 

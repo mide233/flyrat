@@ -44,8 +44,8 @@ Checks performed:
   * the RC stream stayed fresh (largest inter-frame gap < 300 ms).
 
 Run it against a live stack, e.g.
-    sim/scripts/launch_sim.sh &            # in another shell
-    python3 sim/scripts/bringup_test.py --takeoff
+    flyrat_play/gazebo/scripts/launch_sim.sh &            # in another shell
+    python3 flyrat_play/gazebo/scripts/bringup_test.py --takeoff
 """
 from __future__ import annotations
 

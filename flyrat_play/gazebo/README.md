@@ -37,14 +37,14 @@ Gazebo Harmonic（`gz sim --version` 应显示 `8.x`）、`cppzmq-dev`
 ## 1. 构建
 
 ```bash
-sim/scripts/build_all.sh
+flyrat_play/gazebo/scripts/build_all.sh
 ```
 
 - `build_betaflight.sh`：先串行 `git submodule update --init`（飞控 Makefile
   会自行拉取固件子模块，并行时会争抢 git 锁），再 `make TARGET=SITL`。
   产物：`third_party/betaflight/obj/main/betaflight_SITL.elf`。
   可用环境变量：`BETAFLIGHT_TARGET`、`JOBS`、`CLEAN=1`。
-- `build_plugin.sh`：先对上游子模块打补丁（`sim/patches/*.patch`，见下），
+- `build_plugin.sh`：先对上游子模块打补丁（`flyrat_play/gazebo/patches/*.patch`，见下），
   再构建 Gazebo 桥接插件。
   产物：`third_party/aeroloop_gazebo/plugins/build/libBetaflightPlugin.so`。
 
@@ -63,7 +63,7 @@ CLI 并 `save` 持久化。SITL 以**自身工作目录**解析 `eeprom.bin`，�
 配置 → 把生成的 `eeprom.bin` 存回 `config/eeprom.bin`"：
 
 ```bash
-sim/scripts/configure_fc.sh
+flyrat_play/gazebo/scripts/configure_fc.sh
 ```
 
 `launch_sim.sh` 每次启动都会把 `config/eeprom.bin` 安装到 ELF 目录，所以
@@ -86,25 +86,28 @@ sim/scripts/configure_fc.sh
 ## 3. 启动仿真
 
 ```bash
-sim/scripts/launch_sim.sh            # 无 GUI（headless）
-SHOW_GAZEBO=1 sim/scripts/launch_sim.sh   # 带 Gazebo GUI
-VERBOSE=1 sim/scripts/launch_sim.sh       # 打开启动器详细日志
+flyrat_play/gazebo/scripts/launch_sim.sh            # 无 GUI（headless）
+SHOW_GAZEBO=1 flyrat_play/gazebo/scripts/launch_sim.sh   # 带 Gazebo GUI
+VERBOSE=1 flyrat_play/gazebo/scripts/launch_sim.sh       # 打开启动器详细日志
 ```
 
 启动器（`betaloop/start.py`）会依次拉起 Gazebo 世界、SITL，并（默认
 禁用）网页配置器用的 websockify。
 
-## 4. 自动驾驶联调（ROS 2 + 算法库）
+## 4. 自动驾驶联调（ROS 2 / 实机程序 + 算法库）
 
-仿真本身跑通后，可以接上我们自己的算法做闭环：
+仿真本身跑通后，可以接上我们自己的算法做闭环。仓库分为三层：
 
-- `bringup_test.py`：不依赖 ROS 2 的链路自检（覆盖/解锁/拉升）。
-- `ros2_ws/src/flyrat_msp`：MSP 桥接与虚拟接收机（`msp_node`）。
-- `ros2_ws/src/flyrat_control`：控制节点（`control_node`，调用算法库）。
-- `autopilot/`：与 ROS 解耦的纯 C++17 算法库。
+- `libflyrat/`：与 ROS 解耦的纯 C++17 算法库 + Betaflight MSP/UDP 传输，仿真与实机共用。
+- `flyrat_play/ros2_ws/`：仿真用的 ROS 2 层
+  - `flyrat_msp`：MSP 桥接与虚拟接收机（`msp_node`）。
+  - `flyrat_control`：控制节点（`control_node`，调用算法库）。
+- `flyrat_pilot/`：实机端程序骨架（无 ROS，暂未实现运行逻辑），预留串口/TCP MSP 与算法接入。
+
+不依赖 ROS 的链路自检：`bringup_test.py`（覆盖 / 解锁 / 拉升）。
 
 完整流程、接口表和排查清单见
-[`docs/zh-cn/betaflight_sitl_gazebo.md`](../docs/zh-cn/betaflight_sitl_gazebo.md)。
+[`docs/zh-cn/betaflight_sitl_gazebo.md`](../../../docs/zh-cn/betaflight_sitl_gazebo.md)。
 
 ## 端口速查
 

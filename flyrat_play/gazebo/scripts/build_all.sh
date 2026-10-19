@@ -5,7 +5,7 @@
 #   2. the Gazebo Harmonic bridge plugin (libBetaflightPlugin.so)
 #
 # Usage:
-#   sim/scripts/build_all.sh
+#   flyrat_play/gazebo/scripts/build_all.sh
 #
 set -euo pipefail
 

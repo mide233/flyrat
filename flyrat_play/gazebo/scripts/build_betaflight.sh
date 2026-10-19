@@ -6,7 +6,7 @@
 # talks to it over UDP (9002/9003/9004) and MSP (TCP 5761).
 #
 # Usage:
-#   sim/scripts/build_betaflight.sh
+#   flyrat_play/gazebo/scripts/build_betaflight.sh
 #
 # Environment:
 #   BETAFLIGHT_TARGET   target to build (default: SITL)

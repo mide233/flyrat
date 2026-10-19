@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# (Re)generate sim/config/eeprom.bin from sim/config/betaflight_sim.txt.
+# (Re)generate flyrat_play/gazebo/config/eeprom.bin from flyrat_play/gazebo/config/betaflight_sim.txt.
 #
 # Betaflight SITL opens EEPROM_FILENAME ("eeprom.bin") relative to its own
 # working directory. The betaloop launcher starts the ELF with cwd set to the
@@ -9,10 +9,10 @@
 #
 # This script starts a throwaway SITL from obj/main, applies the CLI config
 # (which ends with "save" and makes SITL reboot/exit) and copies the resulting
-# eeprom.bin into sim/config/, where launch_sim.sh installs it next to the ELF.
+# eeprom.bin into flyrat_play/gazebo/config/, where launch_sim.sh installs it next to the ELF.
 #
 # Usage:
-#   sim/scripts/configure_fc.sh            # apply and persist to sim/config/
+#   flyrat_play/gazebo/scripts/configure_fc.sh            # apply and persist to flyrat_play/gazebo/config/
 #
 set -euo pipefail
 
@@ -26,7 +26,7 @@ LOG="${TMPDIR:-/tmp}/betaflight_configure.log"
 
 if [ ! -f "${ELF}" ]; then
     echo "error: SITL elf not found: ${ELF}" >&2
-    echo "       run: sim/scripts/build_betaflight.sh" >&2
+    echo "       run: flyrat_play/gazebo/scripts/build_betaflight.sh" >&2
     exit 1
 fi
 

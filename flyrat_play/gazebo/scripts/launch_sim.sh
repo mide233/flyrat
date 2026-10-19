@@ -8,8 +8,8 @@
 #   and wires up the environment (GZ_SIM_RESOURCE_PATH, plugin path, ...).
 #
 # Usage:
-#   sim/scripts/launch_sim.sh            # headless Gazebo server
-#   SHOW_GAZEBO=1 sim/scripts/launch_sim.sh   # with the Gazebo GUI
+#   flyrat_play/gazebo/scripts/launch_sim.sh            # headless Gazebo server
+#   SHOW_GAZEBO=1 flyrat_play/gazebo/scripts/launch_sim.sh   # with the Gazebo GUI
 #
 # Environment:
 #   SHOW_GAZEBO   set to 1 to open the Gazebo GUI (default: headless)
@@ -27,7 +27,7 @@ WORLD="${SIM_DIR}/worlds/betaflight_sitl.sdf"
 
 if [ ! -f "${ELF}" ]; then
     echo "error: SITL elf not found: ${ELF}" >&2
-    echo "       run: sim/scripts/build_all.sh" >&2
+    echo "       run: flyrat_play/gazebo/scripts/build_all.sh" >&2
     exit 1
 fi
 
@@ -38,7 +38,7 @@ fi
 
 if [ ! -f "${AERO_DIR}/plugins/build/libBetaflightPlugin.so" ]; then
     echo "error: bridge plugin not built (${AERO_DIR}/plugins/build)" >&2
-    echo "       run: sim/scripts/build_all.sh" >&2
+    echo "       run: flyrat_play/gazebo/scripts/build_all.sh" >&2
     exit 1
 fi
 
@@ -52,7 +52,7 @@ if [ -f "${EEPROM_SRC}" ]; then
     echo "[launch_sim] installed FC config: ${EEPROM_SRC} -> ${ELF_DIR}/eeprom.bin"
 else
     echo "warning: ${EEPROM_SRC} missing; SITL will boot with default settings" >&2
-    echo "         (no MSP override). Run: sim/scripts/configure_fc.sh" >&2
+    echo "         (no MSP override). Run: flyrat_play/gazebo/scripts/configure_fc.sh" >&2
 fi
 
 ARGS=(
@@ -75,7 +75,7 @@ fi
 
 echo "[launch_sim] starting Betaloop (world=${WORLD})"
 
-# Resource resolution: our model override (sim/models) plus the upstream
+# Resource resolution: our model override (flyrat_play/gazebo/models) plus the upstream
 # aeroloop assets. Betaloop appends its own worlds path, so pre-seed the
 # variables here to keep every lookup root on the search path.
 export GZ_SIM_RESOURCE_PATH="${SIM_DIR}/models:${AERO_DIR}/models:${AERO_DIR}/worlds${GZ_SIM_RESOURCE_PATH:+:${GZ_SIM_RESOURCE_PATH}}"

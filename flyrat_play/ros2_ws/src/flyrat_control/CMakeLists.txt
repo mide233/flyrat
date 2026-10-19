@@ -19,16 +19,16 @@ find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 
-# Pull the ROS-free autopilot core straight from the source tree. It is a plain
+# Pull the ROS-free libflyrat core straight from the source tree. It is a plain
 # CMake project so it can also be built and tested without ROS.
-set(FLYRAT_AUTOPILOT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(FLYRAT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(
-  "${CMAKE_CURRENT_SOURCE_DIR}/../../../autopilot"
-  "${CMAKE_CURRENT_BINARY_DIR}/flyrat_autopilot")
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../../../libflyrat"
+  "${CMAKE_CURRENT_BINARY_DIR}/flyrat")
 
 add_executable(control_node src/control_node.cpp)
 target_link_libraries(control_node PRIVATE
-  flyrat::autopilot
+  flyrat::flyrat
   rclcpp::rclcpp
   ${geometry_msgs_TARGETS}
   ${std_msgs_TARGETS}

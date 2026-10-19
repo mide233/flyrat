@@ -23,7 +23,7 @@ find_package(std_srvs REQUIRED)
 # libflyrat owns the ROS-free transport (MSP client + UDP RC receiver); this
 # package is only the ROS 2 adapter around it.
 add_subdirectory(
-  "${CMAKE_CURRENT_SOURCE_DIR}/../../../libflyrat"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../../../libflyrat"
   "${CMAKE_CURRENT_BINARY_DIR}/flyrat")
 
 add_executable(msp_node src/msp_node.cpp)
