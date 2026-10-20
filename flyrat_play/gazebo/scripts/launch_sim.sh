@@ -27,7 +27,7 @@ WORLD="${SIM_DIR}/worlds/betaflight_sitl.sdf"
 
 if [ ! -f "${ELF}" ]; then
     echo "error: SITL elf not found: ${ELF}" >&2
-    echo "       run: flyrat_play/gazebo/scripts/build_all.sh" >&2
+    echo "       run: .script/build_all.sh" >&2
     exit 1
 fi
 
@@ -38,7 +38,7 @@ fi
 
 if [ ! -f "${AERO_DIR}/plugins/build/libBetaflightPlugin.so" ]; then
     echo "error: bridge plugin not built (${AERO_DIR}/plugins/build)" >&2
-    echo "       run: flyrat_play/gazebo/scripts/build_all.sh" >&2
+    echo "       run: .script/build_all.sh" >&2
     exit 1
 fi
 

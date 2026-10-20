@@ -11,7 +11,7 @@
 # modified in place, so the fix is reproducible from a clean checkout.
 #
 # Usage:
-#   flyrat_play/gazebo/scripts/build_plugin.sh
+#   .script/build_plugin.sh
 #
 # Requires: gz-harmonic + dev packages (libgz-sim8-dev, libgz-plugin2-dev,
 #           libgz-math7-dev) and cppzmq-dev.
@@ -19,7 +19,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SIM_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SIM_DIR="${REPO_ROOT}/flyrat_play/gazebo"
 AERO_DIR="${SIM_DIR}/third_party/aeroloop_gazebo"
 
 if [ ! -d "${AERO_DIR}" ]; then

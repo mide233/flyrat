@@ -45,7 +45,7 @@ UDP 9004，实机走串口 MSP。
 ## 3. 构建仿真
 
 ```bash
-flyrat_play/gazebo/scripts/build_all.sh
+.script/build_all.sh
 ```
 
 产物：
@@ -54,6 +54,14 @@ flyrat_play/gazebo/scripts/build_all.sh
 - `flyrat_play/gazebo/third_party/aeroloop_gazebo/plugins/build/libBetaflightPlugin.so`
 
 细节（串行拉取固件子模块、`JOBS`、`CLEAN=1` 等）见 `flyrat_play/gazebo/README.md`。
+
+清理构建产物：
+
+```bash
+.script/clean_build.sh --dry-run   # 只列出将删除的路径
+.script/clean_build.sh             # 删除 SITL/插件/colcon/CMake 产物与缓存
+.script/clean_build.sh --keep-sim  # 保留 SITL ELF 与桥接插件
+```
 
 > `build_plugin.sh` 会先对上游插件子模块应用 `flyrat_play/gazebo/patches/*.patch`。其中
 > `aeroloop_gazebo-motor-recv-timeout.patch` 把物理步进内等待电机指令包的
@@ -221,7 +229,7 @@ cmake --build flyrat_pilot/build -j
   只要丢一个包，物理线程就阻塞在这一步，之后 SITL 与插件的收发互相等待，
   正反馈式雪崩。
 - 修复：`flyrat_play/gazebo/patches/aeroloop_gazebo-motor-recv-timeout.patch`（`waitMs=2`），
-  由 `flyrat_play/gazebo/scripts/build_plugin.sh` 自动、幂等地应用。改动只影响"等多久"，
+  由 `.script/build_plugin.sh` 自动、幂等地应用。改动只影响"等多久"，
   不影响控制律。若手工改过子模块导致补丁打不上，先
   `git -C flyrat_play/gazebo/third_party/aeroloop_gazebo checkout -- .`。
 

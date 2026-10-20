@@ -27,7 +27,7 @@ Betaflight SITL ──电机 0..1──► UDP 9002 ──► Gazebo 桥接插�
   - `betaloop`（`gz` 分支）：一键启动器。
 - `worlds/betaflight_sitl.sdf` —— 我们调好物理步长的世界（400 Hz）。
 - `config/betaflight_sim.txt` —— 飞控 CLI 配置（MSP 覆盖掩码 + 模式映射）。
-- `scripts/` —— 构建 / 配置 / 启动脚本。
+- `scripts/` —— 配置、启动与自检脚本；构建脚本在仓库根目录的 `.script/`。
 
 ## 前置依赖
 
@@ -37,7 +37,7 @@ Gazebo Harmonic（`gz sim --version` 应显示 `8.x`）、`cppzmq-dev`
 ## 1. 构建
 
 ```bash
-flyrat_play/gazebo/scripts/build_all.sh
+.script/build_all.sh
 ```
 
 - `build_betaflight.sh`：先串行 `git submodule update --init`（飞控 Makefile
@@ -47,6 +47,14 @@ flyrat_play/gazebo/scripts/build_all.sh
 - `build_plugin.sh`：先对上游子模块打补丁（`flyrat_play/gazebo/patches/*.patch`，见下），
   再构建 Gazebo 桥接插件。
   产物：`third_party/aeroloop_gazebo/plugins/build/libBetaflightPlugin.so`。
+
+清理构建产物（含 SITL ELF、插件、colcon 与 CMake 构建目录）：
+
+```bash
+.script/clean_build.sh --dry-run   # 先看会删什么
+.script/clean_build.sh             # 全部清理
+.script/clean_build.sh --keep-sim  # 保留 SITL ELF 与插件
+```
 
 > **关于 `patches/`**：上游插件在物理步进内用 `select` 等待电机指令包最多
 > **1000 ms**（`BetaflightPlugin.cc` 的 `waitMs = 1000`）。一旦丢一个包，

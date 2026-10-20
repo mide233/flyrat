@@ -6,7 +6,7 @@
 # talks to it over UDP (9002/9003/9004) and MSP (TCP 5761).
 #
 # Usage:
-#   flyrat_play/gazebo/scripts/build_betaflight.sh
+#   .script/build_betaflight.sh
 #
 # Environment:
 #   BETAFLIGHT_TARGET   target to build (default: SITL)
@@ -16,7 +16,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SIM_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SIM_DIR="${REPO_ROOT}/flyrat_play/gazebo"
 BF_DIR="${SIM_DIR}/third_party/betaflight"
 
 TARGET="${BETAFLIGHT_TARGET:-SITL}"

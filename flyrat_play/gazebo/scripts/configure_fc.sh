@@ -26,7 +26,7 @@ LOG="${TMPDIR:-/tmp}/betaflight_configure.log"
 
 if [ ! -f "${ELF}" ]; then
     echo "error: SITL elf not found: ${ELF}" >&2
-    echo "       run: flyrat_play/gazebo/scripts/build_betaflight.sh" >&2
+    echo "       run: .script/build_betaflight.sh" >&2
     exit 1
 fi
 
