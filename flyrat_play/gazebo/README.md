@@ -126,6 +126,9 @@ VERBOSE=1 flyrat_play/gazebo/scripts/launch_sim.sh       # 打开启动器详细
 完整流程、接口表和排查清单见
 [`docs/zh-cn/betaflight_sitl_gazebo.md`](../../../docs/zh-cn/betaflight_sitl_gazebo.md)。
 
+可视化：另开一个终端运行 `.script/foxglove.sh`，在主机上用 Foxglove
+Studio 连接 `ws://<主机地址>:8765`，即可看到 `/flyrat/*` 话题。
+
 ## 端口速查
 
 | 端口 | 方向 | 含义 |
@@ -135,3 +138,4 @@ VERBOSE=1 flyrat_play/gazebo/scripts/launch_sim.sh       # 打开启动器详细
 | UDP 9004 | 外部 → SITL | RC 帧 `{double 时间戳; uint16[16]}`（1000–2000） |
 | TCP 5761 | 双向 | UART1 MSP / CLI |
 | TCP 6761 | 双向 | websockify → 5761（网页配置器，默认禁用） |
+| TCP 8765 | 双向 | Foxglove bridge（`.script/foxglove.sh`） |

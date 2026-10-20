@@ -182,6 +182,22 @@ ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
 `rate`(50) / `telemetry_rate`(10)；`flyrat_control` 的 `control_rate`(50) /
 `state_timeout`(2.0) / `takeoff_throttle`(0.7) / `flight_seconds`(5)。
 
+### 7.4 可视化（Foxglove）
+
+`ros-jazzy-foxglove-bridge` 已随镜像安装。另开一个终端启动桥接：
+
+```bash
+.script/foxglove.sh                 # ws://<主机>:8765
+.script/foxglove.sh --port 9000     # 换端口
+```
+
+然后在**主机**上打开 Foxglove Studio，`Open connection` → `WebSocket` →
+`ws://<主机地址>:8765`。桥接默认监听 `0.0.0.0`，容器使用 host 网络，
+通常 `ws://127.0.0.1:8765` 也能直接连。
+
+可以订阅上面接口表里的全部 `/flyrat/*` 话题。这些话题使用系统时间戳，
+不需要打开 `use_sim_time`。
+
 ## 8. 算法库与实机程序
 
 ### 8.1 `libflyrat/`
@@ -222,6 +238,7 @@ ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
 | UDP 9004 | 外部 → SITL | RC 帧 `{double 时间戳; uint16[16]}`（1000–2000） |
 | TCP 5761 | 双向 | UART1，MSP / CLI（SITL 只允许**一个**客户端） |
 | TCP 6761 | 双向 | websockify → 5761（网页配置器，默认禁用） |
+| TCP 8765 | 双向 | Foxglove bridge（`.script/foxglove.sh`） |
 
 ## 10. 常见问题排查
 
