@@ -36,6 +36,15 @@ Gazebo Harmonic（`gz sim --version` 应显示 `8.x`）、`cppzmq-dev`
 
 ## 1. 构建
 
+只构建仿真相关产物：
+
+```bash
+.script/build_betaflight.sh
+.script/build_plugin.sh
+```
+
+构建仓库全部产物（算法库、实机程序、SITL、插件、ROS 2 包）：
+
 ```bash
 .script/build_all.sh
 ```

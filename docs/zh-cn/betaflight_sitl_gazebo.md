@@ -42,13 +42,33 @@ UDP 9004，实机走串口 MSP。
   插件）、`python3`、`websockify`；ROS 2 Jazzy。
 - 以上都已写入仓库根目录的 `Dockerfile`，构建镜像后即有。
 
-## 3. 构建仿真
+## 3. 构建
+
+一次构建全部产物（算法库、实机程序、SITL、桥接插件、ROS 2 包）：
 
 ```bash
 .script/build_all.sh
 ```
 
-产物：
+也可以只构建其中一部分：
+
+| 脚本 | 产物 |
+|---|---|
+| `.script/build_libflyrat.sh` | `libflyrat/build/libflyrat.a`（并运行单元测试） |
+| `.script/build_flyrat_pilot.sh` | `flyrat_pilot/build/flyrat_pilot` |
+| `.script/build_betaflight.sh` | `.../betaflight/obj/main/betaflight_SITL.elf` |
+| `.script/build_plugin.sh` | `.../aeroloop_gazebo/plugins/build/libBetaflightPlugin.so` |
+| `.script/build_ros2.sh` | `flyrat_play/ros2_ws/install/`（`flyrat_msp`、`flyrat_control`） |
+
+常用参数：
+
+- `--clean`：先删除对应构建目录再编译（`build_betaflight.sh` 用环境变量 `CLEAN=1`）。
+- `--no-sim` / `--no-ros`（仅 `build_all.sh`）：跳过仿真或 ROS 2 部分。
+- `--no-tests` / `--debug`（`build_libflyrat.sh`、`build_flyrat_pilot.sh`）：跳过单元测试 / 编译 Debug 版。
+- `build_ros2.sh` 的额外参数会透传给 colcon，例如 `--packages-select flyrat_msp`。
+- `JOBS`：并行编译数，默认 `nproc`。
+
+仿真侧的完整产物：
 
 - `flyrat_play/gazebo/third_party/betaflight/obj/main/betaflight_SITL.elf`
 - `flyrat_play/gazebo/third_party/aeroloop_gazebo/plugins/build/libBetaflightPlugin.so`
@@ -117,18 +137,17 @@ python3 flyrat_play/gazebo/scripts/bringup_test.py --takeoff
 ### 7.1 编译
 
 ```bash
-# 纯算法库（无 ROS）
-cmake -S libflyrat -B libflyrat/build -DCMAKE_BUILD_TYPE=Release
-cmake --build libflyrat/build
-ctest --test-dir libflyrat/build
+# 纯算法库（无 ROS）+ 单元测试
+.script/build_libflyrat.sh
 
-# ROS 2 包
-cd flyrat_play/ros2_ws
-colcon build --symlink-install
+# ROS 2 包（脚本内部会 source /opt/ros/jazzy/setup.bash）
+.script/build_ros2.sh
 ```
 
-> 在 zsh 里请用 `bash -c 'source /opt/ros/jazzy/setup.bash && ...'` 包一层再
-> source，直接 source 可能出错。
+两者都可以加 `--clean` 从零开始；`build_ros2.sh` 的额外参数会透传给 colcon。
+
+> 手动执行时，在 zsh 里请用 `bash -c 'source /opt/ros/jazzy/setup.bash && ...'`
+> 包一层再 source，直接 source 可能出错。
 
 ### 7.2 运行
 
@@ -186,8 +205,7 @@ ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
 只保留可编译的 `main()` 和 CMake 配置，运行时逻辑尚未实现。
 
 ```bash
-cmake -S flyrat_pilot -B flyrat_pilot/build -DCMAKE_BUILD_TYPE=Release
-cmake --build flyrat_pilot/build -j
+.script/build_flyrat_pilot.sh
 ./flyrat_pilot/build/flyrat_pilot
 ```
 
