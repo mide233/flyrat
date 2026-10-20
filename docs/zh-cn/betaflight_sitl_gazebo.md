@@ -109,8 +109,8 @@ flyrat_play/gazebo/scripts/configure_fc.sh
 ## 5. 启动仿真
 
 ```bash
-flyrat_play/gazebo/scripts/launch_sim.sh                 # 无界面
-SHOW_GAZEBO=1 flyrat_play/gazebo/scripts/launch_sim.sh   # 带 Gazebo GUI
+flyrat_play/gazebo/scripts/launch_sim.sh                 # 带 Gazebo GUI（默认）
+HIDE_GAZEBO=1 flyrat_play/gazebo/scripts/launch_sim.sh   # 无界面（headless）
 ```
 
 ## 6. 自检（不依赖 ROS 2）

@@ -8,11 +8,11 @@
 #   and wires up the environment (GZ_SIM_RESOURCE_PATH, plugin path, ...).
 #
 # Usage:
-#   flyrat_play/gazebo/scripts/launch_sim.sh            # headless Gazebo server
-#   SHOW_GAZEBO=1 flyrat_play/gazebo/scripts/launch_sim.sh   # with the Gazebo GUI
+#   flyrat_play/gazebo/scripts/launch_sim.sh            # with the Gazebo GUI
+#   HIDE_GAZEBO=1 flyrat_play/gazebo/scripts/launch_sim.sh   # headless Gazebo server
 #
 # Environment:
-#   SHOW_GAZEBO   set to 1 to open the Gazebo GUI (default: headless)
+#   HIDE_GAZEBO   set to 1 to run the Gazebo server without the GUI (default: GUI)
 #   VERBOSE       set to 1 for verbose (gz -v 4) logging
 #
 set -euo pipefail
@@ -65,7 +65,7 @@ ARGS=(
     --disable-websockify
 )
 
-if [ "${SHOW_GAZEBO:-0}" = "1" ]; then
+if [ "${HIDE_GAZEBO:-0}" = "0" ]; then
     ARGS+=(--gazebo)
 fi
 
