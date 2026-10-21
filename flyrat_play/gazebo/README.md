@@ -28,7 +28,7 @@ Betaflight SITL ──电机 0..1──► UDP 9002 ──► Gazebo 桥接插�
 - `worlds/betaflight_sitl.sdf` —— 我们调好物理步长的世界（400 Hz），含起飞坪、穿越门、
   集装箱、建筑、树木、矮墙和抬高的降落平台等静态场景。
 - `models/betaflight_iris/` —— 本地机型覆盖：修正电机顺序，并在机身挂了一个前视相机
-  （640×480@30 Hz，经 `.script/camera.sh` 转发到 ROS 2 `/flyrat/camera/*`）。
+  （640×480@30 Hz，由 `flyrat_sitl.launch.py` 默认桥接，或 `.script/camera.sh` 单独启动，转发到 ROS 2 `/flyrat/camera/*`）。
 - `config/betaflight_sim.txt` —— 飞控 CLI 配置（MSP 覆盖掩码 + 模式映射）。
 - `scripts/` —— 配置、启动与自检脚本；构建脚本在仓库根目录的 `.script/`。
 
@@ -132,10 +132,13 @@ VERBOSE=1 flyrat_play/gazebo/scripts/launch_sim.sh       # 打开启动器详细
 可视化：另开一个终端运行 `.script/foxglove.sh`，在主机上用 Foxglove
 Studio 连接 `ws://<主机地址>:8765`，即可看到 `/flyrat/*` 话题。
 
-机身前视相机：仿真启动后再开一个终端运行 `.script/camera.sh`，图像会出现在
+机身前视相机：`flyrat_sitl.launch.py` 默认就把桥接一起拉起来（`camera:=false` 可关，
+`camera_prefix:=/cam` 可换命名空间），图像会出现在
 `/flyrat/camera/image_raw`（`sensor_msgs/Image`，`rgb8`，640×480，≈30 Hz），
 `/flyrat/camera/camera_info` 同时发布，`/clock` 也会被桥接（图像的
 `header.stamp` 是仿真时间）。这几个话题都会由 Foxglove 一并转发。
+
+如果只想看图像、不启动控制节点，再单独跑 `.script/camera.sh`（不要和 launch 同时开）。
 
 画面闪烁几乎都是**残留的旧仿真栈**导致的（两个 `gz sim` 同名话题，一个 bridge
 在两份画面间切换）：`launch_sim.sh` 现在检测到已有栈会直接拒绝启动，先

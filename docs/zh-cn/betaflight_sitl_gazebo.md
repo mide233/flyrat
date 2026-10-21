@@ -189,7 +189,7 @@ ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
 | `/flyrat/battery` | `std_msgs/Float32` | 电压（V） |
 | `/flyrat/set_arm` | `std_srvs/SetBool`（服务） | 拨动 ARM 开关（AUX1） |
 | `/flyrat/set_msp_override` | `std_srvs/SetBool`（服务） | 拨动 MSP OVERRIDE 开关（AUX2） |
-| `/flyrat/camera/image_raw` | `sensor_msgs/Image`（发布） | 机身前视相机，`rgb8`，640×480，≈30 Hz（`.script/camera.sh`） |
+| `/flyrat/camera/image_raw` | `sensor_msgs/Image`（发布） | 机身前视相机，`rgb8`，640×480，≈30 Hz（`flyrat_sitl.launch.py` 默认桥接，或 `.script/camera.sh`） |
 | `/flyrat/camera/camera_info` | `sensor_msgs/CameraInfo`（发布） | 相机内参（同上） |
 
 常用参数：`flyrat_msp` 的 `host` / `msp_port`(5761) / `rc_port`(9004) /
@@ -222,14 +222,26 @@ ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
 /world/betaflight_sitl/model/iris/link/base_link/sensor/camera/camera_info
 ```
 
-仿真启动后，另开一个终端做桥接：
+仿真启动后，桥接随 ROS 2 的 launch 一起起来（默认开启）：
+
+```bash
+ros2 launch flyrat_control flyrat_sitl.launch.py                # 默认带相机
+ros2 launch flyrat_control flyrat_sitl.launch.py camera:=false  # 不要相机
+ros2 launch flyrat_control flyrat_sitl.launch.py camera_prefix:=/cam
+```
+
+如果只想看图像、不启动控制节点，也可以用独立脚本：
 
 ```bash
 .script/camera.sh                        # -> /flyrat/camera/{image_raw,camera_info}
 .script/camera.sh --prefix /cam          # 换命名空间
 ```
 
-桥接由 `ros_gz_bridge` 完成（`ros-jazzy-ros-gz-bridge`，已随镜像安装）。图像是
+注意两者**不要同时开**：会出现两个 `/flyrat/camera` 发布者和两个 `/clock` 发布者。
+
+桥接由 `ros_gz_bridge` 完成（`ros-jazzy-ros-gz-bridge`，已随镜像安装），除了图像和
+`camera_info`，还会把 Gazebo 的 `/clock` 桥接成 `rosgraph_msgs/msg/Clock`（400 Hz，
+与物理步长一致），需要时查看端可以打开 `use_sim_time`。图像是
 `sensor_msgs/msg/Image`（`rgb8`），`header.frame_id` 为 `iris/base_link/camera`。
 
 ```bash
