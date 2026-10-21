@@ -42,6 +42,23 @@ if [ ! -f "${AERO_DIR}/plugins/build/libBetaflightPlugin.so" ]; then
     exit 1
 fi
 
+# Refuse to start a second stack. Two simulators publish the same scoped Gazebo
+# topics (including the camera image), so a single bridge alternates between
+# them and the picture visibly flickers. The SITL also cannot bind its ports.
+if pgrep -f 'betaloop/start\.py' > /dev/null 2>&1; then
+    echo "error: a simulation stack is already running" >&2
+    echo "       stop it first, then relaunch:" >&2
+    echo "         kill -TERM -\$(pgrep -f 'betaloop/start\\.py' | head -n 1)" >&2
+    exit 1
+fi
+
+if awk 'NR > 1 { split($2, addr, ":"); if (addr[2] == "1681" && $4 == "0A") { found = 1 } }
+        END { exit found ? 0 : 1 }' /proc/net/tcp 2> /dev/null; then
+    echo "error: port 5761 (SITL MSP) is already in use by another process" >&2
+    echo "       find it with: ls -l /proc/*/exe 2>/dev/null | grep betaflight" >&2
+    exit 1
+fi
+
 # Betaflight SITL reads "eeprom.bin" relative to its own working directory, and
 # the betaloop launcher runs it with cwd set to the ELF's directory. Install the
 # version-controlled flight-controller config there so MSP override stays armed.
@@ -72,6 +89,14 @@ fi
 if [ "${VERBOSE:-0}" = "1" ]; then
     ARGS+=(--verbose)
 fi
+
+# ros-jazzy-ros-gz-bridge installs the gz_*_vendor packages, whose setup hooks
+# prepend a `gz` shim and a GZ_CONFIG_PATH that only lists the vendor's own
+# commands. That hides /usr/share/gz, so the `sim` command disappears and Gazebo
+# prints its help text instead of starting. Use the system toolchain for the
+# simulator process; the ROS bridge sources its own environment separately.
+export PATH="/usr/bin:${PATH}"
+unset GZ_CONFIG_PATH
 
 echo "[launch_sim] starting Betaloop (world=${WORLD})"
 

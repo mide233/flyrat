@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import re
 import subprocess
 import sys
@@ -221,10 +222,16 @@ class BringupTest:
     # the bridge independently of the (unreliable in SITL) MSP_ALTITUDE.
     def _gazebo_pose(self):
         """Return (x, y, z, roll, pitch, yaw) of the iris, or None."""
+        # `gz` has to resolve to the system toolchain. Sourcing a ROS 2 workspace
+        # puts the gz_*_vendor shim first on PATH and exports GZ_CONFIG_PATH,
+        # which hides /usr/share/gz, so `gz model` silently does nothing.
+        env = dict(os.environ)
+        env.pop("GZ_CONFIG_PATH", None)
+        env["PATH"] = "/usr/bin:" + env.get("PATH", "")
         try:
             out = subprocess.run(["gz", "model", "-m", "iris", "-p"],
                                  capture_output=True, text=True,
-                                 timeout=3.0).stdout
+                                 timeout=3.0, env=env).stdout
         except (OSError, subprocess.SubprocessError):
             return None
         triples = re.findall(r"\[\s*([-\d.eE]+)\s+([-\d.eE]+)\s+([-\d.eE]+)\s*\]",
@@ -262,7 +269,8 @@ class BringupTest:
                        abs(math.degrees(peak_pose[4])))
         else:
             self._check("vehicle climbed under throttle", False,
-                        "Gazebo pose oracle unavailable")
+                        "Gazebo pose oracle unavailable (is `gz model` working? "
+                        "unset GZ_CONFIG_PATH if ROS 2 is sourced)")
             tilt = 0.0
         self._check("vehicle stayed upright", tilt < 45.0,
                     f"tilt (Gazebo pose) = {tilt:.1f} deg")
