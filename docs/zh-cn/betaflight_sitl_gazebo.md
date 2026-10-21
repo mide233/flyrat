@@ -35,6 +35,8 @@ UDP 9004，实机走串口 MSP。
   飞控侧通过 `set msp_override_channels_mask = 15` 只开放这 4 个通道。
 - 反馈只使用 Betaflight 自己的估计状态（MSP 遥测），不引入 Gazebo 真值。
   Gazebo 位姿只在 bring-up 自检里当作独立的地面真值参考。
+- 相机是**独立的单向可视化通路**（Gazebo sensors → `ros_gz_bridge` → ROS 2
+  `/flyrat/camera/*`），不参与控制回路，见 7.5。
 
 ## 2. 前置依赖
 
@@ -113,6 +115,16 @@ flyrat_play/gazebo/scripts/launch_sim.sh                 # 带 Gazebo GUI（默�
 HIDE_GAZEBO=1 flyrat_play/gazebo/scripts/launch_sim.sh   # 无界面（headless）
 ```
 
+世界（`worlds/betaflight_sitl.sdf`）除地面和太阳外还包含一组静态场景，方便验证
+避障、低空飞行和定点降落，全部由基本几何体构成，不依赖外部 mesh：
+
+- 起飞坪（视觉）、6 m 外高 3.2 m 的穿越门、两个集装箱、三根细杆；
+- 6 栋 4–10 m 高的建筑、6 棵树、两道 1.5 m 高的矮墙；
+- 一个抬高 0.6 m 的降落平台（`(6, 6)`），可作为精确降落目标。
+
+原点附近约 3 m 内保持净空，起飞/悬停行为与最小世界一致。场景均为 `static`，
+实测飞行时 `real_time_factor` 仍稳定在 ~1.0。
+
 ## 6. 自检（不依赖 ROS 2）
 
 先确认"飞控 ↔ 仿真"这条链路本身没问题：
@@ -177,6 +189,8 @@ ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
 | `/flyrat/battery` | `std_msgs/Float32` | 电压（V） |
 | `/flyrat/set_arm` | `std_srvs/SetBool`（服务） | 拨动 ARM 开关（AUX1） |
 | `/flyrat/set_msp_override` | `std_srvs/SetBool`（服务） | 拨动 MSP OVERRIDE 开关（AUX2） |
+| `/flyrat/camera/image_raw` | `sensor_msgs/Image`（发布） | 机身前视相机，`rgb8`，640×480，≈30 Hz（`.script/camera.sh`） |
+| `/flyrat/camera/camera_info` | `sensor_msgs/CameraInfo`（发布） | 相机内参（同上） |
 
 常用参数：`flyrat_msp` 的 `host` / `msp_port`(5761) / `rc_port`(9004) /
 `rate`(50) / `telemetry_rate`(10)；`flyrat_control` 的 `control_rate`(50) /
@@ -197,6 +211,67 @@ ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
 
 可以订阅上面接口表里的全部 `/flyrat/*` 话题。这些话题使用系统时间戳，
 不需要打开 `use_sim_time`。
+
+### 7.5 相机（Gazebo → ROS 2）
+
+`flyrat_play/gazebo/models/betaflight_iris/model.sdf` 在机身 `base_link` 上挂了一个
+前视相机（640×480、30 Hz、水平视场 60°）。Gazebo 的 sensors 系统发布在
+
+```
+/world/betaflight_sitl/model/iris/link/base_link/sensor/camera/image
+/world/betaflight_sitl/model/iris/link/base_link/sensor/camera/camera_info
+```
+
+仿真启动后，另开一个终端做桥接：
+
+```bash
+.script/camera.sh                        # -> /flyrat/camera/{image_raw,camera_info}
+.script/camera.sh --prefix /cam          # 换命名空间
+```
+
+桥接由 `ros_gz_bridge` 完成（`ros-jazzy-ros-gz-bridge`，已随镜像安装）。图像是
+`sensor_msgs/msg/Image`（`rgb8`），`header.frame_id` 为 `iris/base_link/camera`。
+
+```bash
+ros2 topic hz /flyrat/camera/image_raw   # ≈30 Hz
+ros2 run rqt_image_view rqt_image_view   # 直接看图
+```
+
+也可以直接用 7.4 的 Foxglove 桥接查看，`/flyrat/camera/*` 会一并转发。
+
+脚本同时把 Gazebo 的 `/clock` 桥到 ROS 2（`rosgraph_msgs/msg/Clock`，400 Hz），
+所以图像的 `header.stamp` 是**仿真时间**而不是系统时间。查看端如果按时间戳
+渲染，请让它使用仿真时钟：
+
+```bash
+ros2 param set /<查看节点名> use_sim_time true
+```
+
+**画面一闪一闪？**
+
+本仓库侧的链路已实测干净：无界面、带 GUI、以及飞行过程中分别抓了 300–900 帧，
+都是 30 Hz、最大间隔 < 50 ms、没有黑帧（逐帧均值完全一致）。所以闪烁基本只会
+来自下面两类原因：
+
+1. **重复的仿真栈（最常见）**：两个 `gz sim` 会发布同名的 Gazebo 话题，一个
+   bridge 在两份画面之间来回切换，看起来就是闪烁。确认只有一个栈：
+
+   ```bash
+   pgrep -af 'betaloop/start.py'                 # 应该只有 1 条
+   env -u GZ_CONFIG_PATH PATH="/usr/bin:$PATH" \
+     gz topic -i -t /world/betaflight_sitl/model/iris/link/base_link/sensor/camera/image
+   # Publisher count 应为 1
+   ```
+
+   `launch_sim.sh` 现在会在检测到已有栈（或 5761 已被占用）时直接拒绝启动。
+   注意：在 source 过 ROS 2 的终端里，`gz` 会解析到 `gz_*_vendor` 的精简版
+   命令行（没有 `sim` 命令），所以上面用了 `env -u GZ_CONFIG_PATH PATH=...`。
+
+2. **查看端带宽**：640×480 `rgb8` @ 30 Hz 约 **28 MB/s**，浏览器里的 Foxglove
+   或 rviz2 解码这么大的未压缩流时，弱机器/远程连接会掉帧。可先停掉
+   `.script/camera.sh`，用 `ros2 topic hz` 确认发布端仍是 30 Hz 来区分；
+   确属带宽问题就把 `models/betaflight_iris/model.sdf` 里的 `<update_rate>`
+   降到 15、分辨率降到 320×240，然后重启仿真。
 
 ## 8. 算法库与实机程序
 
@@ -282,6 +357,16 @@ ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
   分开，且 `set_raw_rc` **不要**在每帧等待 ACK（会拖慢到 ~20 Hz）。
 - SITL 的 5761 只允许一个 TCP 客户端。若出现 `ConnectionReset`/`Broken pipe`，
   多半是有残留的 `msp_node` 还占着连接——先杀掉旧节点。
+
+**相机画面一闪一闪**
+
+- 先按 7.5 的清单区分"重复仿真栈"和"查看端带宽"：数据链路本身实测是 30 Hz、
+  无丢帧、无黑帧，闪烁来自查看侧。
+- 最常见的原因是残留的旧栈：两个 `gz sim` 同名话题会让一个 bridge 在两张画面
+  之间切换。`launch_sim.sh` 已加检测，启动前会直接拒绝并提示先停掉旧栈。
+- 从 source 过 ROS 2 的终端里 `gz` 会指向 `gz_*_vendor` 的精简版命令行（没有
+  `sim` 命令），需要时用
+  `env -u GZ_CONFIG_PATH PATH="/usr/bin:$PATH" gz ...`。
 
 **`state telemetry stale` 反复出现**
 
