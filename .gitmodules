@@ -1,11 +1,11 @@
 [submodule "sim/third_party/betaflight"]
 	path = flyrat_play/gazebo/third_party/betaflight
-	url = https://github.com/betaflight/betaflight.git
+	url = https://github.com/mide233/betaflight.git
 [submodule "sim/third_party/aeroloop_gazebo"]
 	path = flyrat_play/gazebo/third_party/aeroloop_gazebo
-	url = https://github.com/betaflight/aeroloop_gazebo.git
+	url = https://github.com/mide233/aeroloop_gazebo.git
 	branch = gz
 [submodule "sim/third_party/betaloop"]
 	path = flyrat_play/gazebo/third_party/betaloop
-	url = https://github.com/betaflight/betaloop.git
+	url = https://github.com/mide233/betaloop.git
 	branch = gz
