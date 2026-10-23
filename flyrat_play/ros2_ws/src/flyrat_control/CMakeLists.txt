@@ -18,6 +18,7 @@ find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 
 # Pull the ROS-free libflyrat core straight from the source tree. It is a plain
 # CMake project so it can also be built and tested without ROS.
@@ -32,10 +33,11 @@ target_link_libraries(control_node PRIVATE
   rclcpp::rclcpp
   ${geometry_msgs_TARGETS}
   ${std_msgs_TARGETS}
-  ${std_srvs_TARGETS})
+  ${std_srvs_TARGETS}
+  ${sensor_msgs_TARGETS})
 target_compile_options(control_node PRIVATE -Wall -Wextra)
 
 install(TARGETS control_node RUNTIME DESTINATION lib/${PROJECT_NAME})
-install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY launch config DESTINATION share/${PROJECT_NAME})
 
 ament_package()

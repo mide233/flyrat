@@ -68,8 +68,14 @@ constexpr uint16_t kRcMax = 2000;
 constexpr uint16_t kSwitchHigh = 1800;
 
 // Raw IMU scaling used by the SITL simulator.
-constexpr double kAccOneG = 2048.0;
-constexpr double kGyroLsbPerDps = 16.4;
+// MSP_RAW_IMU does not report raw sensor counts. The SITL fills the
+// accelerometer with `accADC = acc_mps2 * 256 / 9.80665`
+// (src/platform/SIMULATOR/sitl.c: ACC_SCALE), i.e. 256 counts per g, and the
+// gyro with `gyroRateDps()`, which is already in degrees per second. Using the
+// datasheet-style 2048 counts/g and 16.4 LSB/(deg/s) made the published
+// acceleration 8x too small and the angular rate 16x too fast.
+constexpr double kAccOneG = 256.0;
+constexpr double kGyroLsbPerDps = 1.0;
 constexpr double kStandardGravity = 9.80665;
 
 constexpr double kPi = 3.14159265358979323846;
@@ -86,7 +92,9 @@ public:
         msp_port_ = declare_parameter<int>("msp_port", 5761);
         rc_port_ = declare_parameter<int>("rc_port", 9004);
         rate_ = declare_parameter<double>("rate", 50.0);
-        telemetry_rate_ = declare_parameter<double>("telemetry_rate", 10.0);
+        // 50 Hz: the MPC runs at 100 Hz and needs a state sample every control
+        // cycle; 10 Hz forced the controller to extrapolate over 100 ms.
+        telemetry_rate_ = declare_parameter<double>("telemetry_rate", 50.0);
         rc_timeout_ = declare_parameter<double>("rc_timeout", 0.25);
         override_enabled_ = declare_parameter<bool>("msp_override", true);
         armed_ = declare_parameter<bool>("arm_on_start", false);
@@ -303,6 +311,11 @@ private:
 
         publish_position(stamp, altitude);
 
+        // The gyro and accelerometer are part of the state feedback (body rates
+        // for the MPC, specific force for the thrust model), so they ride on the
+        // fast path rather than with the slow extras.
+        publish_imu(stamp);
+
         if (!extras)
             return;
 
@@ -326,6 +339,16 @@ private:
         motor_msg.data = motors.motors;
         motor_pub_->publish(motor_msg);
 
+
+        const AnalogFrame analog = client_.analog();
+        std_msgs::msg::Float32 battery_msg;
+        battery_msg.data = static_cast<float>(analog.voltage_v);
+        battery_pub_->publish(battery_msg);
+    }
+
+    // GPS -> local ENU. A failed MSP_RAW_GPS read must not take down the rest
+    // of the telemetry stream, so it only disables the position output.
+    void publish_imu(const rclcpp::Time& stamp) {
         const ImuSample imu = client_.raw_imu();
         sensor_msgs::msg::Imu imu_msg;
         imu_msg.header.stamp = stamp;
@@ -342,15 +365,8 @@ private:
         imu_msg.linear_acceleration.y = imu.acc[1] / kAccOneG * kStandardGravity;
         imu_msg.linear_acceleration.z = imu.acc[2] / kAccOneG * kStandardGravity;
         imu_pub_->publish(imu_msg);
-
-        const AnalogFrame analog = client_.analog();
-        std_msgs::msg::Float32 battery_msg;
-        battery_msg.data = static_cast<float>(analog.voltage_v);
-        battery_pub_->publish(battery_msg);
     }
 
-    // GPS -> local ENU. A failed MSP_RAW_GPS read must not take down the rest
-    // of the telemetry stream, so it only disables the position output.
     void publish_position(const rclcpp::Time& stamp, const AltitudeFrame& altitude) {
         GpsFrame gps;
         try {

@@ -14,9 +14,10 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+from launch_ros.substitutions import FindPackageShare
 
 # Scoped Gazebo topics of the sensor declared on the airframe base_link in
 # flyrat_play/gazebo/models/betaflight_iris/model.sdf.
@@ -26,6 +27,8 @@ GZ_CAMERA = '/world/betaflight_sitl/model/iris/link/base_link/sensor/camera'
 def generate_launch_description():
     auto_takeoff = LaunchConfiguration('auto_takeoff')
     msp_override = LaunchConfiguration('msp_override')
+    controller = LaunchConfiguration('controller')
+    params_file = LaunchConfiguration('params_file')
     camera = LaunchConfiguration('camera')
     camera_prefix = LaunchConfiguration('camera_prefix')
 
@@ -34,8 +37,16 @@ def generate_launch_description():
             'auto_takeoff', default_value='false',
             description='Have flyrat_control arm and climb automatically.'),
         DeclareLaunchArgument(
+            'params_file',
+            default_value=PathJoinSubstitution(
+                [FindPackageShare('flyrat_control'), 'config', 'mpc.yaml']),
+            description='MPC weights and limits.'),
+        DeclareLaunchArgument(
             'msp_override', default_value='true',
             description='Hold the MSP OVERRIDE switch high from startup.'),
+        DeclareLaunchArgument(
+            'controller', default_value='attitude_hold',
+            description="Autopilot: 'attitude_hold' or 'ommpc'."),
         DeclareLaunchArgument(
             'camera', default_value='true',
             description='Bridge the Gazebo camera and /clock into ROS 2.'),
@@ -56,9 +67,13 @@ def generate_launch_description():
             executable='control_node',
             name='flyrat_control',
             output='screen',
-            parameters=[{
-                'auto_takeoff': ParameterValue(auto_takeoff, value_type=bool),
-            }],
+            parameters=[
+                params_file,
+                {
+                    'auto_takeoff': ParameterValue(auto_takeoff, value_type=bool),
+                    'controller': ParameterValue(controller, value_type=str),
+                },
+            ],
         ),
         Node(
             package='ros_gz_bridge',

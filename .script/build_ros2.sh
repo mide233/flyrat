@@ -64,7 +64,10 @@ cd "$2"
 shift 2
 workers="$1"
 shift
-colcon build --symlink-install --parallel-workers "$workers" "$@"
+# colcon leaves CMAKE_BUILD_TYPE empty, which means -O0: the MPC solve takes
+# 12 ms instead of 1 ms. The control loop runs at 100 Hz, so build optimised.
+colcon build --symlink-install --parallel-workers "$workers" \
+    --cmake-args -DCMAKE_BUILD_TYPE=Release "$@"
 ' _ "${ROS_SETUP}" "${WS_DIR}" "${JOBS}" "${EXTRA[@]}"
 
 echo "[build_ros2] done: ${WS_DIR}/install"
