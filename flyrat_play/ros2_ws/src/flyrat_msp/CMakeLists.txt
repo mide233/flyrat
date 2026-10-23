@@ -16,6 +16,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
@@ -31,6 +32,7 @@ target_link_libraries(msp_node PRIVATE
   flyrat::flyrat
   rclcpp::rclcpp
   ${geometry_msgs_TARGETS}
+  ${nav_msgs_TARGETS}
   ${sensor_msgs_TARGETS}
   ${std_msgs_TARGETS}
   ${std_srvs_TARGETS})

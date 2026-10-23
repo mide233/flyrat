@@ -373,6 +373,8 @@ StatusFrame MspClient::status(bool extended) {
     s.flight_mode_flags = read_u32(p, 6, "MSP_STATUS");
     s.armed = box_active(p, kBoxArm);
     s.msp_override = box_active(p, kBoxMspOverride);
+    if (extended && p.size() >= 4)
+        s.arming_disable_flags = read_u32(p, p.size() - 4, "MSP_STATUS_EX");
     return s;
 }
 

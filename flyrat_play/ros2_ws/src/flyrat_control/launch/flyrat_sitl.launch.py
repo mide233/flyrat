@@ -28,7 +28,9 @@ def generate_launch_description():
     auto_takeoff = LaunchConfiguration('auto_takeoff')
     msp_override = LaunchConfiguration('msp_override')
     controller = LaunchConfiguration('controller')
+    flight_seconds = LaunchConfiguration('flight_seconds')
     params_file = LaunchConfiguration('params_file')
+    use_ground_truth = LaunchConfiguration('use_ground_truth')
     camera = LaunchConfiguration('camera')
     camera_prefix = LaunchConfiguration('camera_prefix')
 
@@ -36,6 +38,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'auto_takeoff', default_value='false',
             description='Have flyrat_control arm and climb automatically.'),
+        DeclareLaunchArgument(
+            'flight_seconds', default_value='60.0',
+            description='Seconds to hold position before the automatic disarm.'),
         DeclareLaunchArgument(
             'params_file',
             default_value=PathJoinSubstitution(
@@ -47,6 +52,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'controller', default_value='attitude_hold',
             description="Autopilot: 'attitude_hold' or 'ommpc'."),
+        DeclareLaunchArgument(
+            'use_ground_truth', default_value='true',
+            description='Publish /flyrat/position from the Gazebo ground truth odometry '
+                        '(60 Hz) instead of the 10 Hz GPS path.'),
         DeclareLaunchArgument(
             'camera', default_value='true',
             description='Bridge the Gazebo camera and /clock into ROS 2.'),
@@ -60,7 +69,19 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'msp_override': ParameterValue(msp_override, value_type=bool),
+                'use_ground_truth': ParameterValue(use_ground_truth, value_type=bool),
             }],
+        ),
+        # Ground-truth odometry published by the airframe's OdometryPublisher.
+        # msp_node republishes it on /flyrat/position and /flyrat/velocity so
+        # the controller does not need to know where the state came from.
+        Node(
+            package='ros_gz_bridge',
+            executable='parameter_bridge',
+            name='ground_truth_bridge',
+            output='screen',
+            arguments=['/model/iris/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry'],
+            remappings=[('/model/iris/odometry', '/flyrat/ground_truth/odometry')],
         ),
         Node(
             package='flyrat_control',
@@ -72,6 +93,7 @@ def generate_launch_description():
                 {
                     'auto_takeoff': ParameterValue(auto_takeoff, value_type=bool),
                     'controller': ParameterValue(controller, value_type=str),
+                    'flight_seconds': ParameterValue(flight_seconds, value_type=float),
                 },
             ],
         ),

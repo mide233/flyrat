@@ -64,8 +64,14 @@ const Eigen::Matrix3d& frd_from_flu() {
 }
 
 Eigen::Matrix3d attitude_flu_enu(double roll, double pitch, double yaw) {
+    // The flight controller reports pitch as positive-forward in this
+    // airframe: an open-loop +48 deg/s pitch stick both increased the reported
+    // pitch and accelerated the vehicle north. The MPC's world frame therefore
+    // needs the negated pitch, otherwise the attitude it believes the vehicle
+    // has is mirrored in the pitch axis and every correction pushes the wrong
+    // way (the exact runaway seen before this fix).
     const Eigen::Matrix3d r_ned_frd = (Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
-                                       Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY()) *
+                                       Eigen::AngleAxisd(-pitch, Eigen::Vector3d::UnitY()) *
                                        Eigen::AngleAxisd(roll, Eigen::Vector3d::UnitX()))
                                           .toRotationMatrix();
     return enu_from_ned() * r_ned_frd * frd_from_flu();
@@ -127,6 +133,7 @@ public:
         mpc_params.max_body_rate_xy = declare_parameter<double>("mpc_max_body_rate_xy", 6.0);
         mpc_params.max_body_rate_z = declare_parameter<double>("mpc_max_body_rate_z", 4.0);
         max_rate_slew_ = declare_parameter<double>("mpc_max_rate_slew", 0.0);
+        yaw_offset_ = declare_parameter<double>("mpc_yaw_offset", 0.0);
         // Throttle -> acceleration. The airframe hovers at about 0.69 throttle,
         // so one unit of throttle buys 9.81/0.69 m/s^2. Adapting this online
         // was tried first and drifted into the model's clamp; a fixed value
@@ -171,6 +178,15 @@ public:
                 state_.vel_east = msg->vector.x;
                 state_.vel_north = msg->vector.y;
                 state_.vel_up = msg->vector.z;
+            });
+        target_sub_ = create_subscription<geometry_msgs::msg::Vector3Stamped>(
+            "/flyrat/target", 10, [this](geometry_msgs::msg::Vector3Stamped::ConstSharedPtr msg) {
+                target_east_ = msg->vector.x;
+                target_north_ = msg->vector.y;
+                target_up_ = msg->vector.z;
+                RCLCPP_INFO(
+                    get_logger(), "target offset set to (%.2f %.2f %.2f)", target_east_,
+                    target_north_, target_up_);
             });
         imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
             "/flyrat/imu", 10, [this](sensor_msgs::msg::Imu::ConstSharedPtr msg) {
@@ -350,14 +366,17 @@ private:
         const MpcState state = mpc_state(stamp);
 
         MpcReference reference;
-        reference.position = {hold_east_, hold_north_,
-                              phase_ == Phase::kClimb ? takeoff_z() : hold_up_ + takeoff_height_};
+        // The hold point is the arming position plus whatever offset the
+        // mission layer asks for through /flyrat/target.
+        reference.position = {hold_east_ + target_east_, hold_north_ + target_north_,
+                              (phase_ == Phase::kClimb ? takeoff_z() : hold_up_ + takeoff_height_) +
+                                  target_up_};
         reference.velocity.setZero();
         reference.acceleration.setZero();
         // Hold the heading captured at arming. Following the measured yaw
         // (the previous behaviour) left the controller indifferent to a yaw
         // disturbance, so nothing opposed the spin that started at liftoff.
-        reference.yaw = hold_yaw_;
+        reference.yaw = hold_yaw_ + yaw_offset_;
 
         const MpcCommand command = mpc_->solve(state, reference);
         if (!command.solved) {
@@ -402,9 +421,13 @@ private:
                 rates[i] = std::clamp(rates[i], last_rates_[i] - step, last_rates_[i] + step);
         }
         last_rates_ = rates;
+        // The simulated airframe pitches nose-down for a positive stick and
+        // therefore accelerates along +x_body (verified with an open-loop
+        // step: +48 deg/s pitch -> 2.8 m/s north). The MPC's body rate is in
+        // the same convention, so the sign goes through unchanged.
         return {
             clamp_channel(rc_.pulse_from_stick(rc_.stick_from_rate(rates.x()))),
-            clamp_channel(rc_.pulse_from_stick(rc_.stick_from_rate(-rates.y()))),
+            clamp_channel(rc_.pulse_from_stick(rc_.stick_from_rate(rates.y()))),
             clamp_channel(rc_.pulse_from_throttle(throttle)),
             clamp_channel(rc_.pulse_from_stick(rc_.stick_from_rate(-rates.z())))};
     }
@@ -436,6 +459,7 @@ private:
     AttitudeHold autopilot_;
     std::unique_ptr<Ommpc> mpc_;
     double max_rate_slew_ = 0.0;
+    double yaw_offset_ = 0.0;
     double thrust_to_accel_ = 14.2;
     bool adapt_thrust_ = false;
     Eigen::Vector3d last_rates_ = Eigen::Vector3d::Zero();
@@ -455,6 +479,11 @@ private:
     double hold_east_ = 0.0;
     double hold_north_ = 0.0;
     double hold_up_ = 0.0;
+
+    // Offset from the hold point commanded through /flyrat/target.
+    double target_east_ = 0.0;
+    double target_north_ = 0.0;
+    double target_up_ = 0.0;
     double hold_yaw_ = 0.0;
 
     double last_throttle_ = 0.0;
@@ -468,6 +497,7 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr attitude_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr position_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr velocity_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr target_sub_;
     rclcpp::Subscription<std_msgs::msg::Int32MultiArray>::SharedPtr status_sub_;
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr altitude_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;

@@ -77,6 +77,9 @@ struct StatusFrame {
     uint32_t flight_mode_flags = 0; // boxes 0..31 only
     bool armed = false;
     bool msp_override = false;
+    // Only filled by status(true) (MSP_STATUS_EX). Bit 0 set means "no reason
+    // to block arming"; the other bits are Betaflight's ARMING_DISABLED_*.
+    uint32_t arming_disable_flags = 0;
 };
 
 struct AnalogFrame {

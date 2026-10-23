@@ -11,6 +11,7 @@
 // The autopilot never sees Gazebo ground truth: everything published here comes
 // from Betaflight itself.
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -25,6 +26,7 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <geometry_msgs/msg/vector3_stamped.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float32.hpp>
@@ -98,6 +100,10 @@ public:
         rc_timeout_ = declare_parameter<double>("rc_timeout", 0.25);
         override_enabled_ = declare_parameter<bool>("msp_override", true);
         armed_ = declare_parameter<bool>("arm_on_start", false);
+        // When the simulator is the position source, /flyrat/position and
+        // /flyrat/velocity are republished from the ground-truth odometry at
+        // 60 Hz instead of the 10 Hz GPS path.
+        use_ground_truth_ = declare_parameter<bool>("use_ground_truth", false);
 
         if (rate_ <= 0.0)
             throw std::runtime_error("rate must be > 0");
@@ -118,6 +124,56 @@ public:
             create_publisher<geometry_msgs::msg::Vector3Stamped>("/flyrat/position", qos);
         velocity_pub_ =
             create_publisher<geometry_msgs::msg::Vector3Stamped>("/flyrat/velocity", qos);
+
+        if (use_ground_truth_) {
+            ground_truth_timer_ = create_wall_timer(std::chrono::microseconds(16667), [this] {
+                std::array<double, 3> p, v;
+                {
+                    std::lock_guard<std::mutex> lock(ground_truth_mutex_);
+                    if (!ground_truth_valid_)
+                        return;
+                    p = ground_truth_position_;
+                    v = ground_truth_velocity_;
+                }
+                const rclcpp::Time stamp = now();
+                geometry_msgs::msg::Vector3Stamped pos;
+                pos.header.stamp = stamp;
+                pos.header.frame_id = "map";
+                pos.vector.x = p[0];
+                pos.vector.y = p[1];
+                pos.vector.z = p[2];
+                position_pub_->publish(pos);
+
+                geometry_msgs::msg::Vector3Stamped vel;
+                vel.header = pos.header;
+                vel.vector.x = v[0];
+                vel.vector.y = v[1];
+                vel.vector.z = v[2];
+                velocity_pub_->publish(vel);
+            });
+        }
+
+        ground_truth_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+            "/flyrat/ground_truth/odometry", rclcpp::SensorDataQoS(),
+            [this](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
+                const auto& p = msg->pose.pose.position;
+                const auto& o = msg->pose.pose.orientation;
+                const auto& v = msg->twist.twist.linear;
+                // Gazebo reports the twist in the body frame; rotate it into
+                // the world (ENU) frame with the published orientation.
+                const double x = o.x, y = o.y, z = o.z, w = o.w;
+                const double vx = v.x, vy = v.y, vz = v.z;
+                std::lock_guard<std::mutex> lock(ground_truth_mutex_);
+                ground_truth_position_ = {p.x, p.y, p.z};
+                ground_truth_velocity_ = {
+                    (1 - 2 * (y * y + z * z)) * vx + 2 * (x * y - w * z) * vy +
+                        2 * (x * z + w * y) * vz,
+                    2 * (x * y + w * z) * vx + (1 - 2 * (x * x + z * z)) * vy +
+                        2 * (y * z - w * x) * vz,
+                    2 * (x * z - w * y) * vx + 2 * (y * z + w * x) * vy +
+                        (1 - 2 * (x * x + y * y)) * vz};
+                ground_truth_valid_ = true;
+            });
         battery_pub_ = create_publisher<std_msgs::msg::Float32>("/flyrat/battery", qos);
 
         rc_override_sub_ = create_subscription<std_msgs::msg::Float64MultiArray>(
@@ -193,7 +249,11 @@ private:
                 channels[i] = override_[i];
         }
         channels[kChAux1] = armed_ ? kSwitchHigh : kRcMin;
-        channels[kChAux2] = override_enabled_ ? kSwitchHigh : kRcMin;
+        // Keep the MSP override low until the FC is armed: Betaflight sets
+        // ARMING_DISABLED_MSP while an override is active, which blocked
+        // every arming attempt. The same channels already reach the FC
+        // through the UDP receiver, so nothing changes before arming.
+        channels[kChAux2] = (override_enabled_ && fc_armed_) ? kSwitchHigh : kRcMin;
         return channels;
     }
 
@@ -289,6 +349,7 @@ private:
         attitude_pub_->publish(a);
 
         const StatusFrame status = client_.status(true);
+        fc_armed_ = status.armed;
         const bool armed = status.armed;
         const bool msp_override = status.msp_override;
         std_msgs::msg::Int32MultiArray status_msg;
@@ -296,6 +357,10 @@ private:
             armed ? 1 : 0, msp_override ? 1 : 0, static_cast<int32_t>(status.cycletime),
             static_cast<int32_t>(status.sensors)};
         status_pub_->publish(status_msg);
+        if (!status.armed) {
+            RCLCPP_INFO_THROTTLE(
+                get_logger(), *get_clock(), 2000, "arming blocked: flags=0x%08x", status.arming_disable_flags);
+        }
 
         std_msgs::msg::Bool armed_msg;
         armed_msg.data = armed;
@@ -368,6 +433,11 @@ private:
     }
 
     void publish_position(const rclcpp::Time& stamp, const AltitudeFrame& altitude) {
+        // Ground truth is republished by its own 60 Hz timer, which is faster
+        // than the MSP telemetry loop.
+        if (use_ground_truth_)
+            return;
+
         GpsFrame gps;
         try {
             gps = client_.raw_gps();
@@ -422,6 +492,8 @@ private:
     std::mutex link_mutex_;
     bool armed_ = false;
     bool override_enabled_ = true;
+    // True once the flight controller itself reports armed.
+    std::atomic<bool> fc_armed_{false};
     bool has_override_ = false;
 
     std::vector<uint16_t> override_;
@@ -442,6 +514,13 @@ private:
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr armed_pub_;
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr altitude_pub_;
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr battery_pub_;
+    bool use_ground_truth_ = false;
+    std::mutex ground_truth_mutex_;
+    std::array<double, 3> ground_truth_position_{{0.0, 0.0, 0.0}};
+    std::array<double, 3> ground_truth_velocity_{{0.0, 0.0, 0.0}};
+    bool ground_truth_valid_ = false;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr ground_truth_sub_;
+    rclcpp::TimerBase::SharedPtr ground_truth_timer_;
     rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr position_pub_;
     rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr velocity_pub_;
 

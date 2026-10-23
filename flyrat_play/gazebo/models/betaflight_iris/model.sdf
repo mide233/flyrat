@@ -719,6 +719,18 @@
       </rotor>
     </plugin>
 
+    <!-- Ground-truth odometry, used when the controller should run on the
+         simulator's state instead of the GPS path. 60 Hz matches the ROS
+         side's fast telemetry rate. -->
+    <plugin filename="gz-sim-odometry-publisher-system"
+            name="gz::sim::systems::OdometryPublisher">
+      <odom_frame>map</odom_frame>
+      <robot_base_frame>iris/base_link</robot_base_frame>
+      <dimensions>3</dimensions>
+      <odom_publish_frequency>60</odom_publish_frequency>
+      <odom_topic>/model/iris/odometry</odom_topic>
+    </plugin>
+
     <static>0</static>
   </model>
 </sdf>
