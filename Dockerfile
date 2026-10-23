@@ -43,6 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-$ROS_DISTRO-pcl-ros ros-$ROS_DISTRO-pcl-conversions ros-$ROS_DISTRO-pcl-msgs \
     ros-$ROS_DISTRO-navigation2 ros-$ROS_DISTRO-nav2-msgs ros-$ROS_DISTRO-mavlink \
     ros-$ROS_DISTRO-ros-gz-bridge \
+    ros-$ROS_DISTRO-osqp-vendor \
     lua5.4 liblua5.4-0 liblua5.4-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/*

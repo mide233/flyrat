@@ -42,6 +42,9 @@ UDP 9004，实机走串口 MSP。
 
 - Gazebo Harmonic（`gz sim --version` 显示 `8.x`）、`cppzmq-dev`（编译桥接
   插件）、`python3`、`websockify`；ROS 2 Jazzy。
+- `libflyrat` 的控制器需要 **Eigen3** 和 **OSQP**（`libeigen3-dev`、
+  `ros-$ROS_DISTRO-osqp-vendor`，后者提供 0.6.2 的 `libosqp.so` 和 CMake 配置）。
+  缺 OSQP 时 CMake 会明确报错。
 - 以上都已写入仓库根目录的 `Dockerfile`，构建镜像后即有。
 
 ## 3. 构建
@@ -348,6 +351,13 @@ Gazebo 世界球坐标（spherical_coordinates）
   位置/速度（原点锁定、0.25 m/s 速度死区、无 GPS 时保留原点）。实机换 VSLAM 时
   直接替换这一层的输入。
 - `flyrat::RcReceiver`：SITL 虚拟接收机（UDP 9004）。
+- `flyrat::so3`：`exp/log/hat/leftJacobian`，头文件实现，SO(3) 上做误差与线性化。
+- `flyrat::Ommpc`：on-manifold MPC（Lu/Xu/Zhang, IEEE TIE 2023）。误差状态
+  `(δp, δv, Log(RᵀR_d))` 共 9 维，输入为归一化推力 + 机体角速度；沿参考轨迹逐点
+  一阶线性化得到 LTV 模型，用 OSQP 解 80 变量 QP。默认 N=20 / 10 ms，单元测试里
+  2200 次求解平均 0.86 ms、最大 1.17 ms。
+- `flyrat::ThrustModel`：`油门 → 加速度` 的递归最小二乘在线辨识（遗忘因子
+  0.998，用约 40 ms 前的指令对齐执行器延迟）。
 
 `flyrat_control` 与 `flyrat_msp` 都通过 `add_subdirectory(.../libflyrat)` 直接链接
 该库，因此算法可以脱离 ROS 单独编译和测试。
