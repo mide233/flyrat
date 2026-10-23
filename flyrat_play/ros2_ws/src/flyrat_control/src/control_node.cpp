@@ -381,8 +381,8 @@ private:
                 trajectory_start_time_ = stamp;
                 trajectory_origin_ = state.position;
                 RCLCPP_INFO(
-                    get_logger(), "tracking a %.1f m circle, %.1f s per lap",
-                    trajectory_radius_, trajectory_period_);
+                    get_logger(), "tracking %s: radius %.1f m, %.1f s per lap",
+                    trajectory_.c_str(), trajectory_radius_, trajectory_period_);
             }
             const double t = (stamp - trajectory_start_time_).seconds();
             const double omega = 2.0 * M_PI / std::max(trajectory_period_, 1.0);
