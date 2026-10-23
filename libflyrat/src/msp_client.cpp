@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "flyrat/msp_client.hpp"
 
+#include "msp_codec.hpp"
+
 #include <cerrno>
 #include <chrono>
 #include <cmath>
@@ -15,6 +17,8 @@
 #include <unistd.h>
 
 namespace flyrat {
+
+using namespace codec;
 namespace {
 
 constexpr char kHeader0 = '$';
@@ -22,38 +26,6 @@ constexpr char kHeader1 = 'M';
 constexpr char kKindReply = '>';
 constexpr char kKindError = '!';
 constexpr char kKindRequest = '<';
-
-uint16_t read_u16(const std::vector<uint8_t>& p, size_t o, const char* what) {
-    if (o + 2 > p.size())
-        throw MspError(std::string("short ") + what);
-    return static_cast<uint16_t>(p[o]) | static_cast<uint16_t>(p[o + 1]) << 8;
-}
-
-int16_t read_i16(const std::vector<uint8_t>& p, size_t o, const char* what) {
-    return static_cast<int16_t>(read_u16(p, o, what));
-}
-
-uint32_t read_u32(const std::vector<uint8_t>& p, size_t o, const char* what) {
-    if (o + 4 > p.size())
-        throw MspError(std::string("short ") + what);
-    return static_cast<uint32_t>(p[o]) | static_cast<uint32_t>(p[o + 1]) << 8
-         | static_cast<uint32_t>(p[o + 2]) << 16 | static_cast<uint32_t>(p[o + 3]) << 24;
-}
-
-// MSP_STATUS/STATUS_EX carry the first 32 flight-mode bits inline; boxes above
-// 31 (e.g. MSP OVERRIDE = 50) live in an extension block whose length is a
-// byte at offset 15 and whose bytes start at offset 16.
-bool box_active(const std::vector<uint8_t>& p, uint16_t box) {
-    if (box < 32) {
-        return (read_u32(p, 6, "MSP_STATUS") >> box) & 1u;
-    }
-    const size_t index = box - 32;
-    const size_t byte = index / 8;
-    const size_t offset = 16 + byte;
-    if (offset >= p.size())
-        return false;
-    return (p[offset] >> (index % 8)) & 1u;
-}
 
 speed_t baud_constant(int baud) {
     switch (baud) {
@@ -312,135 +284,6 @@ std::vector<uint8_t>
         }
     }
     throw MspError("MSP timeout waiting for command " + std::to_string(want));
-}
-
-ApiVersion MspClient::api_version() {
-    const auto p = request(kApiVersion, {}, -1, 16);
-    if (p.size() < 3)
-        throw MspError("short MSP_API_VERSION");
-    return ApiVersion{p[0], p[1], p[2]};
-}
-
-Attitude MspClient::attitude() {
-    const auto p = request(kAttitude, {}, -1, 16);
-    Attitude a;
-    a.roll_deg = read_i16(p, 0, "MSP_ATTITUDE") / 10.0;
-    a.pitch_deg = read_i16(p, 2, "MSP_ATTITUDE") / 10.0;
-    // Betaflight reports yaw in whole degrees, unsigned, in [0, 360). Put it
-    // on the same [-180, 180) convention as the other two axes so a caller can
-    // subtract headings without a 2*pi jump at north.
-    a.yaw_deg = read_i16(p, 4, "MSP_ATTITUDE");
-    if (a.yaw_deg > 180.0)
-        a.yaw_deg -= 360.0;
-    return a;
-}
-
-RcFrame MspClient::rc() {
-    const auto p = request(kRc, {}, -1, 16);
-    RcFrame f;
-    for (size_t o = 0; o + 2 <= p.size(); o += 2) {
-        f.channels.push_back(read_u16(p, o, "MSP_RC"));
-    }
-    return f;
-}
-
-MotorFrame MspClient::motor() {
-    const auto p = request(kMotor, {}, -1, 16);
-    MotorFrame f;
-    for (size_t o = 0; o + 2 <= p.size(); o += 2) {
-        f.motors.push_back(read_u16(p, o, "MSP_MOTOR"));
-    }
-    return f;
-}
-
-ImuSample MspClient::raw_imu() {
-    const auto p = request(kRawImu, {}, -1, 16);
-    ImuSample s;
-    for (int i = 0; i < 3; ++i) {
-        s.acc[i] = read_i16(p, 2 * i, "MSP_RAW_IMU");
-        s.gyro[i] = read_i16(p, 6 + 2 * i, "MSP_RAW_IMU");
-        s.mag[i] = read_i16(p, 12 + 2 * i, "MSP_RAW_IMU");
-    }
-    return s;
-}
-
-StatusFrame MspClient::status(bool extended) {
-    const auto p = request(extended ? kStatusEx : kStatus, {}, -1, 16);
-    StatusFrame s;
-    s.cycletime = read_u16(p, 0, "MSP_STATUS");
-    s.i2c_errors = read_u16(p, 2, "MSP_STATUS");
-    s.sensors = read_u16(p, 4, "MSP_STATUS");
-    s.flight_mode_flags = read_u32(p, 6, "MSP_STATUS");
-    s.armed = box_active(p, kBoxArm);
-    s.msp_override = box_active(p, kBoxMspOverride);
-    if (extended && p.size() >= 4)
-        s.arming_disable_flags = read_u32(p, p.size() - 4, "MSP_STATUS_EX");
-    return s;
-}
-
-AnalogFrame MspClient::analog() {
-    const auto p = request(kAnalog, {}, -1, 16);
-    if (p.size() < 9)
-        throw MspError("short MSP_ANALOG");
-    AnalogFrame a;
-    a.voltage_v = p[0] / 10.0;
-    a.mah = read_u16(p, 1, "MSP_ANALOG");
-    a.rssi = read_u16(p, 3, "MSP_ANALOG");
-    a.amperage_a = read_u16(p, 5, "MSP_ANALOG") / 100.0;
-    a.voltage_v = read_u16(p, 7, "MSP_ANALOG") / 100.0;
-    return a;
-}
-
-AltitudeFrame MspClient::altitude() {
-    const auto p = request(kAltitude, {}, -1, 16);
-    AltitudeFrame a;
-    const uint32_t cm = read_u32(p, 0, "MSP_ALTITUDE");
-    a.vario_m_s = read_i16(p, 4, "MSP_ALTITUDE") / 100.0;
-    // The SITL reports 0xFFFFFFFx when it has no estimate.
-    a.valid = cm < 0xFFFFFF00u;
-    a.altitude_m = a.valid ? cm / 100.0 : 0.0;
-    return a;
-}
-
-DebugFrame MspClient::debug() {
-    const auto p = request(kDebug, {}, -1, 16);
-    DebugFrame f;
-    for (size_t i = 0; i < f.value.size() && (i + 1) * 2 <= p.size(); ++i)
-        f.value[i] = read_i16(p, i * 2, "MSP_DEBUG");
-    return f;
-}
-
-GpsFrame MspClient::raw_gps() {
-    const auto p = request(kRawGps, {}, -1, 16);
-    if (p.size() < 16)
-        throw MspError("short MSP_RAW_GPS");
-    GpsFrame g;
-    g.fix = p[0] != 0;
-    g.satellites = p[1];
-    // Latitude/longitude are signed but travel as u32 two's complement.
-    g.lat_deg = static_cast<int32_t>(read_u32(p, 2, "MSP_RAW_GPS")) / 1e7;
-    g.lon_deg = static_cast<int32_t>(read_u32(p, 6, "MSP_RAW_GPS")) / 1e7;
-    g.altitude_m = read_u16(p, 10, "MSP_RAW_GPS");
-    g.ground_speed_mps = read_u16(p, 12, "MSP_RAW_GPS") / 100.0;
-    g.ground_course_deg = read_u16(p, 14, "MSP_RAW_GPS") / 10.0;
-    // DOP fields were appended over several MSP API revisions; tolerate short
-    // replies from older firmware.
-    if (p.size() >= 18)
-        g.pdop = read_u16(p, 16, "MSP_RAW_GPS") / 100.0;
-    if (p.size() >= 20)
-        g.hdop = read_u16(p, 18, "MSP_RAW_GPS") / 100.0;
-    if (p.size() >= 22)
-        g.vdop = read_u16(p, 20, "MSP_RAW_GPS") / 100.0;
-    return g;
-}
-
-bool MspClient::is_armed() { return status(true).armed; }
-
-bool MspClient::is_msp_override_active() { return status(true).msp_override; }
-
-bool MspClient::is_box_active(uint16_t box) {
-    const auto p = request(kStatusEx, {}, -1, 16);
-    return box_active(p, box);
 }
 
 void MspClient::set_raw_rc(const std::vector<uint16_t>& channels, double drain_timeout) {

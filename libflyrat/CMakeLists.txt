@@ -42,6 +42,7 @@ add_library(flyrat
   src/attitude_hold.cpp
   src/local_estimator.cpp
   src/msp_client.cpp
+    src/msp_telemetry.cpp
   src/ommpc.cpp
   src/rc_receiver.cpp)
 add_library(flyrat::flyrat ALIAS flyrat)

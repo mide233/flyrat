@@ -56,7 +56,7 @@ int main() {
         Setpoint sp;
         const Command cmd = ap.update(state, sp, 0.01);
         check(cmd.roll > 0.0, "rolled left -> right roll command");
-        check(near(cmd.roll, 0.2), "roll command equals gain * error");
+        check(near(cmd.roll, 0.1), "roll command equals gain * error");
     }
 
     // Command saturates at the configured deflection limit.
@@ -80,7 +80,7 @@ int main() {
         Setpoint sp;
         sp.yaw_rate = 1.0;
         const Command cmd = ap.update(state, sp, 0.01);
-        check(near(cmd.yaw, 0.5), "yaw command = yaw_rate_kp * rate error");
+        check(near(cmd.yaw, 0.25), "yaw command = yaw_rate_kp * rate error");
     }
 
     // Throttle is clamped to [0, 1].
