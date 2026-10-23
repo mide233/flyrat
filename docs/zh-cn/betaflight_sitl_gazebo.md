@@ -9,7 +9,8 @@
 
 ```
 ┌──────────────── libflyrat/（纯 C++17，无 ROS 依赖）────────────────┐
-│  算法：State / Setpoint / Command / Autopilot / AttitudeHold        │
+│  算法：State / Setpoint / Command / AttitudeHold / Ommpc / SO(3)   │
+│  模型：ThrustModel（油门→加速度）、RcMapping（角速度→摇杆）        │
 │  传输：MspClient（TCP 或串口 MSP）+ RcReceiver（UDP 9004）          │
 └───────────────┬───────────────────────────────────┬───────────────┘
                 │                                   │
@@ -33,8 +34,19 @@ UDP 9004，实机走串口 MSP。
   关键通道，永远由接收机（我们的 9004 推送）决定，**绝不**放到 MSP 侧。
 - 通道 1–4（roll/pitch/yaw/throttle）由伴飞计算机经 `MSP_SET_RAW_RC` 覆盖。
   飞控侧通过 `set msp_override_channels_mask = 15` 只开放这 4 个通道。
-- 反馈只使用 Betaflight 自己的估计状态（MSP 遥测），不引入 Gazebo 真值。
-  Gazebo 位姿只在 bring-up 自检里当作独立的地面真值参考。
+- 反馈分两路：
+
+  | 量 | 来源 | 频率 |
+  |---|---|---|
+  | 姿态、机体角速度 | 飞控 MSP 遥测（`MSP_ATTITUDE` / `MSP_RAW_IMU`），`msp_node` 转发 | 50 Hz |
+  | 位置、速度 | Gazebo 里程计 → `/flyrat/position`、`/flyrat/velocity` | 60 Hz |
+  | 高度 | 飞控 `MSP_ALTITUDE`（EKF 气压），备用/对比 | 50 Hz |
+
+  控制节点以 100 Hz 运行，用最新一帧状态做预测。
+
+  仿真里没有 VSLAM，所以位置默认取 Gazebo 真值；**接口与实机一致**，实机上把
+  这一路换成 VSLAM 的话题即可，见 7.6。`use_ground_truth:=false` 可退回飞控的
+  10 Hz GPS 通路（精度与延迟都更差，仅用于自检）。
 - 相机是**独立的单向可视化通路**（Gazebo sensors → `ros_gz_bridge` → ROS 2
   `/flyrat/camera/*`），不参与控制回路，见 7.5。
 
@@ -107,6 +119,9 @@ flyrat_play/gazebo/scripts/configure_fc.sh
 | `set msp_override_channels_mask = 15` | 允许伴飞覆盖通道 1–4（AETR） |
 | `aux 0 0 0 1700 2100` | ARM 绑到 AUX1（通道 5），接收机驱动 |
 | `aux 1 50 1 1700 2100` | MSP OVERRIDE（box 50）绑到 AUX2（通道 6），接收机驱动 |
+| `rates_type = BETAFLIGHT` + `*_rc_rate = 200` + `*_expo = 0` + `*_srate = 0` | 线性速率曲线 `400 × 摇杆`（deg/s），控制器可以一个比例系数把角速度指令换成摇杆量 |
+| `yaw_motors_reversed = ON` | 本机型 1/4 号电机与默认混控的转向相反，不反转 yaw 混控会让偏航正反馈直到翻滚 |
+| `debug_mode = ALTITUDE` | `MSP_DEBUG` 暴露高度估计的垂直通道，排查高度/比力问题用 |
 
 `launch_sim.sh` 每次启动都会把 `eeprom.bin` 安装到 ELF 所在目录（SITL 以自身
 工作目录解析它），所以 `make clean` 也不会丢配置。
@@ -177,6 +192,20 @@ ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
 
 `auto_takeoff:=true` 会走一遍"解锁 → 缓慢加油门 → 悬停 → 自动上锁"的流程。
 
+用 on-manifold MPC 飞 8 字轨迹（目前验证过的完整配置）：
+
+```bash
+ros2 launch flyrat_control flyrat_sitl.launch.py \
+  controller:=ommpc auto_takeoff:=true \
+  flight_seconds:=120 msp_override:=false
+```
+
+关于 `msp_override:=false`：飞控在 **MSP OVERRIDE 处于接管状态时会拒绝解锁**
+（`ARMING_DISABLED_MSP`），本项目的 `msp_node` 已经做了门控——AUX2 在飞控报告
+解锁之前保持低电平，解锁后才拉高。若仍遇到解锁被拒，用 `msp_override:=false`
+最稳：此时 AETR 不经 MSP 覆盖，而是直接由 9004 接收机通道下发，`msp_node`
+往里推的就是同一份控制量，闭环行为完全一致。
+
 ### 7.3 接口一览
 
 | 名称 | 类型 | 说明 |
@@ -189,17 +218,25 @@ ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
 | `/flyrat/status` | `std_msgs/Int32MultiArray` | `[armed, msp_override, cycletime, sensors]` |
 | `/flyrat/armed` | `std_msgs/Bool` | 解锁状态 |
 | `/flyrat/altitude` | `std_msgs/Float32` | 气压/EKF 高度（m，无效时为 NaN） |
-| `/flyrat/position` | `geometry_msgs/Vector3Stamped`（发布） | 本地 ENU 位置（m），`frame_id=map`，≈10 Hz |
+| `/flyrat/position` | `geometry_msgs/Vector3Stamped`（发布） | 本地 ENU 位置（m），`frame_id=map`；默认 **60 Hz**，来自 Gazebo 里程计；`use_ground_truth:=false` 时为 10 Hz 的 GPS 通路 |
 | `/flyrat/velocity` | `geometry_msgs/Vector3Stamped`（发布） | 本地 ENU 速度（m/s），同上 |
+| `/flyrat/ground_truth/odometry` | `nav_msgs/Odometry`（内部） | `ros_gz_bridge` 从 `/model/iris/odometry` 转来的 Gazebo 真值，`msp_node` 再转成上面两个话题 |
+| `/flyrat/target` | `geometry_msgs/Vector3Stamped`（订阅） | 相对悬停点的位置偏置（m），给任务层用；轨迹模式的参考由控制节点自己生成 |
 | `/flyrat/battery` | `std_msgs/Float32` | 电压（V） |
 | `/flyrat/set_arm` | `std_srvs/SetBool`（服务） | 拨动 ARM 开关（AUX1） |
 | `/flyrat/set_msp_override` | `std_srvs/SetBool`（服务） | 拨动 MSP OVERRIDE 开关（AUX2） |
 | `/flyrat/camera/image_raw` | `sensor_msgs/Image`（发布） | 机身前视相机，`mono8`，1280×800，≈30 Hz（`flyrat_sitl.launch.py` 默认桥接，或 `.script/camera.sh`） |
 | `/flyrat/camera/camera_info` | `sensor_msgs/CameraInfo`（发布） | 相机内参（同上） |
 
-常用参数：`flyrat_msp` 的 `host` / `msp_port`(5761) / `rc_port`(9004) /
-`rate`(50) / `telemetry_rate`(10)；`flyrat_control` 的 `control_rate`(50) /
-`state_timeout`(2.0) / `takeoff_throttle`(0.7) / `flight_seconds`(5)。
+常用参数：
+
+- `flyrat_msp`：`host` / `msp_port`(5761) / `rc_port`(9004) / `rate`(50，RC 发送) /
+  `telemetry_rate`(50) / `rc_timeout`(0.25) / `msp_override`(true) /
+  `use_ground_truth`（节点默认 false，launch 默认 true）。
+- `flyrat_control`：`control_rate`(100) / `controller`(`attitude_hold` 或 `ommpc`) /
+  `auto_takeoff`(false) / `state_timeout`(2.0) / `takeoff_throttle`(0.7) /
+  `takeoff_height`(1.0) / `takeoff_seconds`(2.0) / `flight_seconds`(60) /
+  `disarm_after_flight`(true)，以及 7.7 节列出的全部 `mpc_*` 与 `trajectory*`。
 
 ### 7.4 可视化（Foxglove）
 
@@ -290,12 +327,25 @@ ros2 param set /<查看节点名> use_sim_time true
    确属带宽问题就把 `models/betaflight_iris/model.sdf` 里的 `<update_rate>`
    降到 15、分辨率降到 320×240，然后重启仿真。
 
-### 7.6 定位：GPS → 本地 ENU（实机换 VSLAM）
+### 7.6 定位：Gazebo 真值 / GPS → 本地 ENU（实机换 VSLAM）
 
-四旋翼的几何 MPC 需要位置和速度，而 `MSP_ATTITUDE` 只给姿态。仿真里用飞控自己的
-GPS，实机上换成 VSLAM，**两者走同一个接口**。
+MPC 需要位置和速度，而 `MSP_ATTITUDE` 只给姿态。位置有两条通路，**接口相同**
+（`/flyrat/position` + `/flyrat/velocity`，ENU，`frame_id=map`）：
 
-数据链：
+**默认：Gazebo 里程计真值（60 Hz）**
+
+```
+model.sdf 的 OdometryPublisher（/model/iris/odometry）
+  → ros_gz_bridge → /flyrat/ground_truth/odometry（nav_msgs/Odometry）
+  → msp_node 的 60 Hz 定时器：位置直接取，机体系速度用姿态旋到世界系
+  → /flyrat/position, /flyrat/velocity（60 Hz）
+```
+
+这是仿真里最"实机化"的替身：实机的 VSLAM 只要发布同样语义的 60 Hz 位置/速度，
+`libflyrat` 和 `flyrat_control` 一行都不用改。真值只用于**位置/速度**，姿态仍来自
+飞控，所以姿态环、角速度环、电机混控都还是真的在跑。
+
+**备用：飞控 GPS 通路（10 Hz，`use_ground_truth:=false`）**
 
 ```
 Gazebo 世界球坐标（spherical_coordinates）
@@ -306,11 +356,13 @@ Gazebo 世界球坐标（spherical_coordinates）
   → /flyrat/position, /flyrat/velocity（≈10 Hz）
 ```
 
-**坐标契约**：本地切平面 ENU，`x=东`、`y=北`、`z=上`，原点在**第一次有效定位**
-处锁定。实机的 VSLAM 只要发布同样语义的 `/flyrat/position` + `/flyrat/velocity`，
-`libflyrat` 与 `flyrat_control` 都不需要改。
+这条链路用来验证"没有外部定位时"的退化行为，精度和延迟都不如真值，**不要**用它
+评估 MPC 性能。
 
-各通道的来源和取舍：
+**坐标契约**：本地切平面 ENU，`x=东`、`y=北`、`z=上`，原点在**第一次有效定位**
+处锁定。Gazebo 真值通路的原点就是世界原点（起飞点在地面上方 0.195 m）。
+
+各通道的来源和取舍（GPS 通路）：
 
 | 量 | 来源 | 说明 |
 |---|---|---|
@@ -320,12 +372,14 @@ Gazebo 世界球坐标（spherical_coordinates）
 
 注意事项：
 
-- **z 原点是相对的**。原点取第一次定位时的气压高度，与 Gazebo 地面 `z=0.195` 之间
-  有 0.1–0.35 m 的常值偏差。控制器只需要相对高度，但**评估时**要用
-  `gz model -m iris -p` 对比，别直接和 0 比。
-- 解锁瞬间飞控会重置估计器，高度会短暂掉到 0 再收敛；`has_position` 仍然为真。
-- 位置话题是 **10 Hz**，对 50 Hz 的姿态环够用，但**做 100 Hz MPC 时位置需要预测/
-  插值**，或者改用更高频的里程计（实机的 VSLAM 通常能给 30–60 Hz）。
+- **气压高度的原点是相对的**。GPS 通路的原点取第一次定位时的气压高度，与 Gazebo
+  地面之间通常有 **0.1–0.35 m 的常值偏差**（实测约 0.16 m）。所以日志里
+  `err_z ≈ -0.16` 而飞机实际悬停高度是对的；评估位置误差请以 Gazebo 位姿或
+  60 Hz 真值为准。
+- 解锁瞬间飞控会重置估计器，GPS 通路的高度会短暂掉到 0 再收敛；`has_position`
+  仍然为真。
+- 60 Hz 真值通路的延迟约一个物理步长（2.5 ms）加桥接开销，100 Hz MPC 直接用，
+  不需要插值；10 Hz 的 GPS 通路则必须做预测，否则相位滞后会把闭环推向振荡。
 
 **踩过的坑：IMU 比力**。上游 Gazebo Harmonic 插件把 Gazebo 的世界系运动学加速度
 （不含重力）直接塞进 `imuLinearAccelerationXYZ`，飞控因此认为静止时是 0 g，位置估计器
@@ -333,6 +387,67 @@ Gazebo 世界球坐标（spherical_coordinates）
 `flyrat_play/gazebo/patches/aeroloop_gazebo-imu-specific-force.patch`：
 在世界系加回 `+9.81 ẑ`，再用 IMU 姿态旋到机体系（FLU）。验证方法是把 `debug_mode`
 设为 `ALTITUDE`，看 `DEBUG_ALTITUDE` 第 6 项（垂直加速度），静止时应为 0 而不是 -981。
+
+### 7.7 on-manifold MPC（`controller:=ommpc`）
+
+`flyrat_control` 内置两种控制器：
+
+- `controller:=attitude_hold`（默认）：姿态 P 控制 + 偏航阻尼，不带位置环。
+- `controller:=ommpc`：把飞控当成"角速度 + 推力"的执行器，外层跑 OMMPC。
+
+控制链（100 Hz）：
+
+```
+/flyrat/position, /flyrat/velocity (60 Hz) ┐
+/flyrat/attitude, /flyrat/imu (50 Hz)      ├─► Ommpc::solve → (a_T, ω)
+参考轨迹（定点 / circle / figure8）        ┘
+   a_T → throttle = a_T / mpc_thrust_to_accel
+   ω   → 摇杆（400 deg/s 线性曲线）+ 限幅（mpc_max_body_rate_*）+ 限速（mpc_max_rate_slew）
+   → /flyrat/rc_override → msp_node → UDP 9004 / MSP_SET_RAW_RC
+```
+
+姿态参考由 MPC 的期望加速度反解（`attitude_from_acceleration`），偏航角保持
+起飞时的朝向（`mpc_yaw_offset` 可加偏置）。
+
+**轨迹**：`trajectory: none | circle | figure8`，圆心/8 字原点取进入 hold 相位时的
+位置，半径 `trajectory_radius`（默认 1.5 m），周期 `trajectory_period`（圆 20 s，
+8 字 10 s）。8 字是 Gerono 双纽线 `(a sin θ, b sin 2θ)`，其中 `a` 为半径、`b = a/2`；
+圆则把圆心沿 x 平移一个半径，使 t=0 时参考点正好在起飞点上，不会出现参考位置跳变。
+
+**调参**：全部在 `flyrat_control/config/mpc.yaml`，改完重启节点生效。
+
+| 参数 | 含义 | 经验 |
+|---|---|---|
+| `mpc_horizon` / `mpc_step` | 前瞻步数 × 步长 | 40 × 10 ms，覆盖速率环延迟 |
+| `mpc_q_position_xy` | 水平位置权重 | 8 字轨迹用 60；25 时误差 0.3–0.6 m |
+| `mpc_q_position_z` | 高度权重 | 120 |
+| `mpc_q_velocity` | 速度权重 | 2.0 |
+| `mpc_q_attitude_*` | 姿态跟踪权重 | 40，太高会和内环打架 |
+| `mpc_r_body_rate_xy` | 角速度代价 | 1.2 |
+| `mpc_max_body_rate_xy` | 角速度限幅 | 1.5 rad/s；1.0 时 8 字跟不上 |
+| `mpc_max_rate_slew` | 角速度变化率上限 | 8 rad/s²，抑制指令跳变 |
+| `mpc_thrust_to_accel` | 油门→加速度标定 | 14.2（本机型实测） |
+
+**实测性能**（Gazebo，100 Hz 求解）：
+
+| 场景 | 结果 |
+|---|---|
+| 定高悬停 | 1.35 m，`att_err=0`，`thr=0.58` |
+| 1 m 位置阶跃 | 上升 1.18 s，超调 13.2 %，稳定 4.04 s，稳态误差 0.000 m |
+| 1.5 m 圆 / 20 s | 0.46 m/s，跟踪误差 ~2 cm |
+| 1.5 m 8 字 / 10 s | ~1.0 m/s，跟踪误差 4–15 cm，`att_err` 1–2° |
+
+稳态求解 4.7–5.4 ms（`it=25`），在 100 Hz 下大约占 50 % 的单核实时预算；
+再提高控制频率或加大 horizon 之前，先确认这台机器的求解时间。
+
+每个控制周期会打一行（`RCLCPP_INFO_THROTTLE`，10 Hz）：
+
+```
+mpc: cmd=(...) att_err=.. vel=(.. .. ..) att_thr=.. thr2acc=.. thr=.. err=(.. .. ..) solve=..ms it=..
+```
+
+`err` 是参考位置减当前位置，`att_err` 是当前姿态与期望姿态的 SO(3) 测地角，
+排振荡时先看这两个量和 `solve`。
 
 ## 8. 算法库与实机程序
 
@@ -347,6 +462,8 @@ Gazebo 世界球坐标（spherical_coordinates）
 - `flyrat::AttitudeHold`：示例实现（P 姿态控制 + 偏航角速度阻尼 + 输出限幅）。
 - `flyrat::MspClient`：MSP v1 客户端，支持 TCP（SITL）与串口（实机）；
   `raw_gps()` / `altitude()` / `debug()` 分别读 GPS、EKF 高度和调试通道。
+  实现分两层：`msp_client.cpp` 只做连接与收发，`msp_telemetry.cpp` 放各条
+  遥测的解析，共享的线格式辅助在内网头 `msp_codec.hpp` 里。
 - `flyrat::LocalEstimator`：把 `MSP_RAW_GPS` + `MSP_ALTITUDE` 转成本地 ENU
   位置/速度（原点锁定、0.25 m/s 速度死区、无 GPS 时保留原点）。实机换 VSLAM 时
   直接替换这一层的输入。
@@ -354,10 +471,14 @@ Gazebo 世界球坐标（spherical_coordinates）
 - `flyrat::so3`：`exp/log/hat/leftJacobian`，头文件实现，SO(3) 上做误差与线性化。
 - `flyrat::Ommpc`：on-manifold MPC（Lu/Xu/Zhang, IEEE TIE 2023）。误差状态
   `(δp, δv, Log(RᵀR_d))` 共 9 维，输入为归一化推力 + 机体角速度；沿参考轨迹逐点
-  一阶线性化得到 LTV 模型，用 OSQP 解 80 变量 QP。默认 N=20 / 10 ms，单元测试里
-  2200 次求解平均 0.86 ms、最大 1.17 ms。
+  一阶线性化得到 LTV 模型，用 OSQP 解 QP。库内默认 N=20 / 10 ms；仿真里用
+  `mpc_horizon=40`（0.4 s 前瞻，因为 Betaflight 速率环本身有 ~40 ms 延迟）。
+  单元测试在 2200 次求解里平均 0.86 ms、最大 1.17 ms。
+- `flyrat::RcMapping`：把机体角速度（rad/s）换成摇杆量。仿真侧把速率曲线配置成
+  线性的 400 deg/s（见第 4 节），于是只剩一个比例系数。
 - `flyrat::ThrustModel`：`油门 → 加速度` 的递归最小二乘在线辨识（遗忘因子
-  0.998，用约 40 ms 前的指令对齐执行器延迟）。
+  0.998，用约 40 ms 前的指令对齐执行器延迟）。仿真里默认用实测标定的固定系数
+  `mpc_thrust_to_accel=14.2`，`mpc_adapt_thrust:=true` 才启用在线辨识。
 
 `flyrat_control` 与 `flyrat_msp` 都通过 `add_subdirectory(.../libflyrat)` 直接链接
 该库，因此算法可以脱离 ROS 单独编译和测试。
@@ -450,6 +571,40 @@ Gazebo 世界球坐标（spherical_coordinates）
 
 - SITL 的 stdout 经启动器管道缓冲，时间戳会滞后，且这行在能正常飞行的运行里
   也会出现，不能单凭它判断故障。请以 `bringup_test.py` / 位姿判定为准。
+
+**`arming blocked: flags=0x...` 每 2 秒刷一次**
+
+- 这是 `msp_node` 在"未解锁"时打的诊断（位图是 Betaflight 的 arming disable
+  flags），启动阶段刷几秒、随后解锁就消失，属正常。
+- 若一直不解锁，按位图排查最常见的三类：
+  - **MSP**：MSP OVERRIDE 处于接管状态时飞控拒绝解锁（`ARMING_DISABLED_MSP`）。
+    本项目已把 AUX2 门控成"解锁后才拉高"，仍被拒时用 `msp_override:=false`
+    最稳，此时 AETR 直接由 9004 接收机通道下发，闭环等价。
+  - **ARM 开关**：AUX1 必须"先低后高"。`auto_takeoff:=true` 会等链路稳定后拉高；
+    手动飞则调用 `/flyrat/set_arm`。
+  - **THROTTLE**：解锁瞬间油门必须在最低，别提前给油（会触发
+    `RUNAWAY THROTTLE`）。
+- 无头批量起多个实例时特别容易命中：SITL 还没就绪就开始拉 ARM，之后不会重试。
+  目前的行为是时序相关的，批量脚本需要给每个实例留足启动时间。
+
+**一起飞就自旋 / 翻滚**
+
+- 检查 `config/betaflight_sim.txt` 里的 `yaw_motors_reversed = ON`：本机型 1/4 号
+  电机的转向与 Betaflight 默认混控相反，不反转 yaw 混控会让偏航环变成正反馈，
+  直到整机翻滚。
+- 同时确认速率曲线是线性的（`rates_type = BETAFLIGHT`、
+  `*_rc_rate = 200`、`*_expo = 0`、`*_srate = 0`）。控制器的"角速度 → 摇杆"
+  换算依赖这条 400 deg/s 的直线，改成曲线会让增益随杆量变化。
+
+**8 字 / 圆轨迹越飞越偏**
+
+- 先看 MPC 日志里的 `err` 和 `att_err`：
+  - `att_err` 长期大于 5°：角速度指令超出速率环带宽，降低
+    `mpc_max_body_rate_xy`（1.5 → 1.0）或 `mpc_q_position_xy`（60 → 25）；
+  - `err` 有明显相位滞后而 `att_err` 很小：位置权重或前瞻不够，适当加大
+    `mpc_q_position_xy` / `mpc_horizon`。
+- 确认位置是 60 Hz 真值：`ros2 topic hz /flyrat/position` 应约 60 Hz；只有
+  10 Hz 说明 `use_ground_truth:=false`，闭环会因滞后而振荡。
 
 **`aux` 配置像是没保存**
 

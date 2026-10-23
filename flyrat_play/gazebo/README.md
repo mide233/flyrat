@@ -9,7 +9,10 @@
   **MSP OVERRIDE** 开关，属于安全关键通道，始终由接收机决定。
 - 通道 1–4（roll/pitch/yaw/throttle，即 AETR）交给伴飞计算机（我们的
   算法），经 `MSP_SET_RAW_RC` 覆盖写入。
-- 反馈只取 Betaflight 的估计状态（MSP 遥测），不引入 Gazebo 真值。
+- 反馈分两路：姿态/角速度取飞控的 MSP 遥测；**位置/速度默认取 Gazebo 里程计
+  真值（60 Hz）**，由 `flyrat_msp` 转成 `/flyrat/position`、`/flyrat/velocity`。
+  实机上把这一路换成 VSLAM 即可；`use_ground_truth:=false` 可退回飞控的 10 Hz
+  GPS 通路（仅用于自检）。
 
 ```
 伴飞/算法 ──MSP_SET_RAW_RC(AETR)──► TCP 5761
@@ -95,6 +98,9 @@ flyrat_play/gazebo/scripts/configure_fc.sh
 | `set msp_override_channels_mask = 15` | 允许伴飞覆盖通道 1–4（AETR） |
 | `aux 0 0 0 1700 2100` | ARM 绑到 AUX1（通道 5），由 9004 接收机驱动 |
 | `aux 1 50 1 1700 2100` | MSP OVERRIDE（box 50）绑到 AUX2（通道 6），由 9004 驱动 |
+| `rates_type = BETAFLIGHT` + `*_rc_rate = 200` + `*_expo = 0` + `*_srate = 0` | 线性速率曲线 400 deg/s，控制器用一个比例系数就能把角速度换算成摇杆 |
+| `yaw_motors_reversed = ON` | 本机型电机转向与默认混控相反，不反转 yaw 混控会正反馈到翻滚 |
+| `debug_mode = ALTITUDE` | `MSP_DEBUG` 暴露高度估计通道，排查高度问题用 |
 
 配置持久化在 `config/eeprom.bin` 中。注意：`save` 后 SITL 会重启，通常表现
 为进程退出——这就是 `configure_fc.sh` 里临时 SITL 结束的方式。
@@ -119,14 +125,23 @@ VERBOSE=1 flyrat_play/gazebo/scripts/launch_sim.sh       # 打开启动器详细
 仿真本身跑通后，可以接上我们自己的算法做闭环。仓库分为三层：
 
 - `libflyrat/`：与 ROS 解耦的纯 C++17 算法库 + Betaflight MSP/UDP 传输，仿真与实机共用。
+  控制器包括姿态保持与 on-manifold MPC（`flyrat::Ommpc`）。
 - `flyrat_play/ros2_ws/`：仿真用的 ROS 2 层
-  - `flyrat_msp`：MSP 桥接与虚拟接收机（`msp_node`）。
-  - `flyrat_control`：控制节点（`control_node`，调用算法库）。
+  - `flyrat_msp`：MSP 桥接与虚拟接收机（`msp_node`），另外把 Gazebo 里程计
+    转成 `/flyrat/position`、`/flyrat/velocity`（60 Hz）。
+  - `flyrat_control`：控制节点（`control_node`，`controller:=attitude_hold|ommpc`）。
 - `flyrat_pilot/`：实机端程序骨架（无 ROS，暂未实现运行逻辑），预留串口/TCP MSP 与算法接入。
+
+MPC 闭环（8 字轨迹）的启动方式：
+
+```bash
+ros2 launch flyrat_control flyrat_sitl.launch.py \
+  controller:=ommpc auto_takeoff:=true flight_seconds:=120 msp_override:=false
+```
 
 不依赖 ROS 的链路自检：`bringup_test.py`（覆盖 / 解锁 / 拉升）。
 
-完整流程、接口表和排查清单见
+完整流程、接口表、MPC 调参与排查清单见
 [`docs/zh-cn/betaflight_sitl_gazebo.md`](../../../docs/zh-cn/betaflight_sitl_gazebo.md)。
 
 可视化：另开一个终端运行 `.script/foxglove.sh`，在主机上用 Foxglove
@@ -138,10 +153,11 @@ Studio 连接 `ws://<主机地址>:8765`，即可看到 `/flyrat/*` 话题。
 `/flyrat/camera/camera_info` 同时发布，`/clock` 也会被桥接（图像的
 `header.stamp` 是仿真时间）。这几个话题都会由 Foxglove 一并转发。
 
-定位：仿真里用飞控自己的 GPS（世界已有 `spherical_coordinates`，插件以 virtual GPS
-喂给 SITL），经 `flyrat::LocalEstimator` 转成本地 ENU，发布
-`/flyrat/position` 和 `/flyrat/velocity`（≈10 Hz，`frame_id=map`）。实机上换成 VSLAM，
-接口不变。坐标契约、垂直通道和 IMU 比力补丁见
+定位：默认用 Gazebo 的里程计真值（`model.sdf` 的 `OdometryPublisher` →
+`ros_gz_bridge` → `/flyrat/ground_truth/odometry` → `msp_node` 的 60 Hz 定时器 →
+`/flyrat/position`、`/flyrat/velocity`，`frame_id=map`）。实机上换成 VSLAM，接口不变。
+`use_ground_truth:=false` 退回飞控 GPS + `flyrat::LocalEstimator` 的 10 Hz 通路，
+只用于自检。坐标契约、两条数据链和 IMU 比力补丁见
 [`docs/zh-cn/betaflight_sitl_gazebo.md`](../../../docs/zh-cn/betaflight_sitl_gazebo.md) 7.6 节。
 
 如果只想看图像、不启动控制节点，再单独跑 `.script/camera.sh`（不要和 launch 同时开）。
