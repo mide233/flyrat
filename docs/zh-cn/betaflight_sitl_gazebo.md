@@ -189,7 +189,7 @@ ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
 | `/flyrat/battery` | `std_msgs/Float32` | 电压（V） |
 | `/flyrat/set_arm` | `std_srvs/SetBool`（服务） | 拨动 ARM 开关（AUX1） |
 | `/flyrat/set_msp_override` | `std_srvs/SetBool`（服务） | 拨动 MSP OVERRIDE 开关（AUX2） |
-| `/flyrat/camera/image_raw` | `sensor_msgs/Image`（发布） | 机身前视相机，`rgb8`，640×480，≈30 Hz（`flyrat_sitl.launch.py` 默认桥接，或 `.script/camera.sh`） |
+| `/flyrat/camera/image_raw` | `sensor_msgs/Image`（发布） | 机身前视相机，`mono8`，1280×800，≈30 Hz（`flyrat_sitl.launch.py` 默认桥接，或 `.script/camera.sh`） |
 | `/flyrat/camera/camera_info` | `sensor_msgs/CameraInfo`（发布） | 相机内参（同上） |
 
 常用参数：`flyrat_msp` 的 `host` / `msp_port`(5761) / `rc_port`(9004) /
@@ -215,7 +215,7 @@ ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
 ### 7.5 相机（Gazebo → ROS 2）
 
 `flyrat_play/gazebo/models/betaflight_iris/model.sdf` 在机身 `base_link` 上挂了一个
-前视相机（640×480、30 Hz、水平视场 60°）。Gazebo 的 sensors 系统发布在
+前视相机（灰度 `mono8`、1280×800、30 Hz、水平视场 60°）。Gazebo 的 sensors 系统发布在
 
 ```
 /world/betaflight_sitl/model/iris/link/base_link/sensor/camera/image
@@ -242,7 +242,7 @@ ros2 launch flyrat_control flyrat_sitl.launch.py camera_prefix:=/cam
 桥接由 `ros_gz_bridge` 完成（`ros-jazzy-ros-gz-bridge`，已随镜像安装），除了图像和
 `camera_info`，还会把 Gazebo 的 `/clock` 桥接成 `rosgraph_msgs/msg/Clock`（400 Hz，
 与物理步长一致），需要时查看端可以打开 `use_sim_time`。图像是
-`sensor_msgs/msg/Image`（`rgb8`），`header.frame_id` 为 `iris/base_link/camera`。
+`sensor_msgs/msg/Image`（`mono8`），`header.frame_id` 为 `iris/base_link/camera`。
 
 ```bash
 ros2 topic hz /flyrat/camera/image_raw   # ≈30 Hz
@@ -279,7 +279,7 @@ ros2 param set /<查看节点名> use_sim_time true
    注意：在 source 过 ROS 2 的终端里，`gz` 会解析到 `gz_*_vendor` 的精简版
    命令行（没有 `sim` 命令），所以上面用了 `env -u GZ_CONFIG_PATH PATH=...`。
 
-2. **查看端带宽**：640×480 `rgb8` @ 30 Hz 约 **28 MB/s**，浏览器里的 Foxglove
+2. **查看端带宽**：1280×800 `mono8` @ 30 Hz 约 **31 MB/s**，浏览器里的 Foxglove
    或 rviz2 解码这么大的未压缩流时，弱机器/远程连接会掉帧。可先停掉
    `.script/camera.sh`，用 `ros2 topic hz` 确认发布端仍是 30 Hz 来区分；
    确属带宽问题就把 `models/betaflight_iris/model.sdf` 里的 `<update_rate>`
