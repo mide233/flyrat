@@ -134,6 +134,9 @@ public:
         mpc_params.max_body_rate_z = declare_parameter<double>("mpc_max_body_rate_z", 4.0);
         max_rate_slew_ = declare_parameter<double>("mpc_max_rate_slew", 0.0);
         yaw_offset_ = declare_parameter<double>("mpc_yaw_offset", 0.0);
+        trajectory_ = declare_parameter<std::string>("trajectory", "none");
+        trajectory_radius_ = declare_parameter<double>("trajectory_radius", 1.5);
+        trajectory_period_ = declare_parameter<double>("trajectory_period", 20.0);
         // Throttle -> acceleration. The airframe hovers at about 0.69 throttle,
         // so one unit of throttle buys 9.81/0.69 m/s^2. Adapting this online
         // was tried first and drifted into the model's clamp; a fixed value
@@ -280,6 +283,7 @@ private:
                 hold_east_ = state_.east;
                 hold_north_ = state_.north;
                 hold_up_ = state_.up;
+                trajectory_started_ = false;
                 hold_yaw_ = std::atan2(
                     attitude_flu_enu(state_.roll, state_.pitch, state_.yaw)(1, 0),
                     attitude_flu_enu(state_.roll, state_.pitch, state_.yaw)(0, 0));
@@ -365,20 +369,62 @@ private:
 
         const MpcState state = mpc_state(stamp);
 
+        const int horizon = mpc_->parameters().horizon;
+        const double step = mpc_->parameters().step;
+        std::vector<MpcReference> references(static_cast<std::size_t>(horizon));
         MpcReference reference;
-        // The hold point is the arming position plus whatever offset the
-        // mission layer asks for through /flyrat/target.
-        reference.position = {hold_east_ + target_east_, hold_north_ + target_north_,
-                              (phase_ == Phase::kClimb ? takeoff_z() : hold_up_ + takeoff_height_) +
-                                  target_up_};
-        reference.velocity.setZero();
-        reference.acceleration.setZero();
-        // Hold the heading captured at arming. Following the measured yaw
-        // (the previous behaviour) left the controller indifferent to a yaw
-        // disturbance, so nothing opposed the spin that started at liftoff.
-        reference.yaw = hold_yaw_ + yaw_offset_;
 
-        const MpcCommand command = mpc_->solve(state, reference);
+        const bool tracking = trajectory_ != "none" && phase_ == Phase::kHold;
+        if (tracking) {
+            if (!trajectory_started_) {
+                trajectory_started_ = true;
+                trajectory_start_time_ = stamp;
+                trajectory_origin_ = state.position;
+                RCLCPP_INFO(
+                    get_logger(), "tracking a %.1f m circle, %.1f s per lap",
+                    trajectory_radius_, trajectory_period_);
+            }
+            const double t = (stamp - trajectory_start_time_).seconds();
+            const double omega = 2.0 * M_PI / std::max(trajectory_period_, 1.0);
+            // Put the arming point on the circle so the path starts where the
+            // vehicle already is instead of teleporting the reference.
+            const Eigen::Vector3d centre(
+                trajectory_origin_.x() - trajectory_radius_, trajectory_origin_.y(),
+                trajectory_origin_.z());
+            for (int i = 0; i < horizon; ++i) {
+                const double theta = omega * (t + i * step);
+                MpcReference& r = references[static_cast<std::size_t>(i)];
+                r.position = centre + Eigen::Vector3d(trajectory_radius_ * std::cos(theta),
+                                                      trajectory_radius_ * std::sin(theta), 0.0);
+                r.velocity = Eigen::Vector3d(-trajectory_radius_ * omega * std::sin(theta),
+                                             trajectory_radius_ * omega * std::cos(theta), 0.0);
+                r.acceleration = Eigen::Vector3d(
+                    -trajectory_radius_ * omega * omega * std::cos(theta),
+                    -trajectory_radius_ * omega * omega * std::sin(theta), 0.0);
+                // Keep the heading captured at arming. Pointing the nose
+                // along the tangent is a step of up to 180 deg at t=0, which
+                // saturated the yaw channel before the position loop engaged.
+                r.yaw = hold_yaw_;
+                r.yaw_rate = 0.0;
+            }
+            reference = references.front();
+        } else {
+            // The hold point is the arming position plus whatever offset the
+            // mission layer asks for through /flyrat/target.
+            reference.position = {hold_east_ + target_east_, hold_north_ + target_north_,
+                                  (phase_ == Phase::kClimb ? takeoff_z() : hold_up_ + takeoff_height_) +
+                                      target_up_};
+            reference.velocity.setZero();
+            reference.acceleration.setZero();
+            // Hold the heading captured at arming. Following the measured yaw
+            // (the previous behaviour) left the controller indifferent to a yaw
+            // disturbance, so nothing opposed the spin that started at liftoff.
+            reference.yaw = hold_yaw_ + yaw_offset_;
+            for (auto& r : references)
+                r = reference;
+        }
+
+        const MpcCommand command = mpc_->solve(state, references);
         if (!command.solved) {
             RCLCPP_WARN_THROTTLE(
                 get_logger(), *get_clock(), 1000, "MPC did not converge, holding level");
@@ -460,6 +506,14 @@ private:
     std::unique_ptr<Ommpc> mpc_;
     double max_rate_slew_ = 0.0;
     double yaw_offset_ = 0.0;
+
+    // Optional trajectory tracking (currently a horizontal circle).
+    std::string trajectory_ = "none";
+    double trajectory_radius_ = 1.5;
+    double trajectory_period_ = 20.0;
+    bool trajectory_started_ = false;
+    rclcpp::Time trajectory_start_time_{0, 0, RCL_ROS_TIME};
+    Eigen::Vector3d trajectory_origin_ = Eigen::Vector3d::Zero();
     double thrust_to_accel_ = 14.2;
     bool adapt_thrust_ = false;
     Eigen::Vector3d last_rates_ = Eigen::Vector3d::Zero();

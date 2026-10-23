@@ -39,3 +39,8 @@ flyrat_control:
     # Give the vehicle time to leave the ground before the position loop
     # starts chasing GPS drift.
     takeoff_seconds: 4.0
+
+    # Circle trajectory: enabled while the controller is in the hold phase.
+    trajectory: circle
+    trajectory_radius: 1.5
+    trajectory_period: 20.0
