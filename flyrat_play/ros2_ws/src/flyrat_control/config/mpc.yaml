@@ -13,7 +13,7 @@ flyrat_control:
     mpc_step: 0.01
 
     # Position vs. velocity authority.
-    mpc_q_position_xy: 25.0
+    mpc_q_position_xy: 60.0
     mpc_q_position_z: 120.0
     mpc_q_velocity: 2.0
 
@@ -28,7 +28,7 @@ flyrat_control:
     mpc_weight_decay: 0.5
 
     # Actuator envelope, matching the linear 400 deg/s rate curve.
-    mpc_max_body_rate_xy: 1.0
+    mpc_max_body_rate_xy: 1.5
     mpc_max_body_rate_z: 2.0
 
     # rad/s^2. Zero disables the filter; 20 keeps a 100 Hz step at 0.2 rad/s,
@@ -41,6 +41,6 @@ flyrat_control:
     takeoff_seconds: 4.0
 
     # Circle trajectory: enabled while the controller is in the hold phase.
-    trajectory: circle
+    trajectory: figure8
     trajectory_radius: 1.5
-    trajectory_period: 20.0
+    trajectory_period: 10.0

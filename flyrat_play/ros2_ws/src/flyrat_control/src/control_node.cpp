@@ -388,19 +388,33 @@ private:
             const double omega = 2.0 * M_PI / std::max(trajectory_period_, 1.0);
             // Put the arming point on the circle so the path starts where the
             // vehicle already is instead of teleporting the reference.
+            const bool figure8 = trajectory_ == "figure8";
+            // A Gerono lemniscate starts at its own centre, so the arming point
+            // is the centre; the circle is shifted by one radius so that it too
+            // starts where the vehicle already is.
             const Eigen::Vector3d centre(
-                trajectory_origin_.x() - trajectory_radius_, trajectory_origin_.y(),
+                trajectory_origin_.x() - (figure8 ? 0.0 : trajectory_radius_), trajectory_origin_.y(),
                 trajectory_origin_.z());
             for (int i = 0; i < horizon; ++i) {
                 const double theta = omega * (t + i * step);
                 MpcReference& r = references[static_cast<std::size_t>(i)];
-                r.position = centre + Eigen::Vector3d(trajectory_radius_ * std::cos(theta),
-                                                      trajectory_radius_ * std::sin(theta), 0.0);
-                r.velocity = Eigen::Vector3d(-trajectory_radius_ * omega * std::sin(theta),
-                                             trajectory_radius_ * omega * std::cos(theta), 0.0);
-                r.acceleration = Eigen::Vector3d(
-                    -trajectory_radius_ * omega * omega * std::cos(theta),
-                    -trajectory_radius_ * omega * omega * std::sin(theta), 0.0);
+                const double a = trajectory_radius_;
+                if (figure8) {
+                    const double b = 0.5 * trajectory_radius_;
+                    r.position = centre + Eigen::Vector3d(a * std::sin(theta),
+                                                          b * std::sin(2.0 * theta), 0.0);
+                    r.velocity = Eigen::Vector3d(a * omega * std::cos(theta),
+                                                 2.0 * b * omega * std::cos(2.0 * theta), 0.0);
+                    r.acceleration = Eigen::Vector3d(
+                        -a * omega * omega * std::sin(theta),
+                        -4.0 * b * omega * omega * std::sin(2.0 * theta), 0.0);
+                } else {
+                    r.position = centre + Eigen::Vector3d(a * std::cos(theta), a * std::sin(theta), 0.0);
+                    r.velocity = Eigen::Vector3d(-a * omega * std::sin(theta), a * omega * std::cos(theta), 0.0);
+                    r.acceleration = Eigen::Vector3d(
+                        -a * omega * omega * std::cos(theta),
+                        -a * omega * omega * std::sin(theta), 0.0);
+                }
                 // Keep the heading captured at arming. Pointing the nose
                 // along the tangent is a step of up to 180 deg at t=0, which
                 // saturated the yaw channel before the position loop engaged.
