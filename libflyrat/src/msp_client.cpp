@@ -326,7 +326,12 @@ Attitude MspClient::attitude() {
     Attitude a;
     a.roll_deg = read_i16(p, 0, "MSP_ATTITUDE") / 10.0;
     a.pitch_deg = read_i16(p, 2, "MSP_ATTITUDE") / 10.0;
+    // Betaflight reports yaw in whole degrees, unsigned, in [0, 360). Put it
+    // on the same [-180, 180) convention as the other two axes so a caller can
+    // subtract headings without a 2*pi jump at north.
     a.yaw_deg = read_i16(p, 4, "MSP_ATTITUDE");
+    if (a.yaw_deg > 180.0)
+        a.yaw_deg -= 360.0;
     return a;
 }
 
