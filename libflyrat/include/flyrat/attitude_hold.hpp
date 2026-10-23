@@ -15,10 +15,16 @@ class AttitudeHold : public Autopilot {
 public:
     struct Gains {
         // Stick deflection per radian of attitude error.
-        double roll_kp = 1.0;
-        double pitch_kp = 1.0;
+        //
+        // The flight controller is configured with a linear 400 deg/s rate
+        // curve (rc_rate = 200, expo = 0, srate = 0), i.e. full stick is
+        // 6.98 rad/s. One stick unit per radian would therefore command
+        // 400 deg/s of rate per radian of error, which is far too hot; half a
+        // stick per radian gives a well damped 200 deg/s.
+        double roll_kp = 0.5;
+        double pitch_kp = 0.5;
         // Stick deflection per rad/s of yaw-rate error.
-        double yaw_rate_kp = 0.5;
+        double yaw_rate_kp = 0.25;
         // Deflection limits.
         double max_roll = 1.0;
         double max_pitch = 1.0;
