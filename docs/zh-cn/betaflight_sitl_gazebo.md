@@ -100,10 +100,16 @@ UDP 9004，实机走串口 MSP。
 .script/clean_build.sh --keep-sim  # 保留 SITL ELF 与桥接插件
 ```
 
-> `build_plugin.sh` 会先对上游插件子模块应用 `flyrat_play/gazebo/patches/*.patch`。其中
-> `aeroloop_gazebo-motor-recv-timeout.patch` 把物理步进内等待电机指令包的
-> 上限从 1000 ms 降到 2 ms——这是**必需修复**，否则丢一个包就会让整个仿真
-> 卡死（详见第 10 节）。
+> 桥接插件需要的两处修复已经作为提交放在 `mide233/aeroloop_gazebo` 的 `gz` 分支上，
+> 由子模块指针固定：
+>
+> - 物理步进内等待电机指令包的上限从 1000 ms 降到 **2 ms**，否则丢一个包就会让
+>   整个仿真卡死（详见第 10 节）；
+> - IMU 输出**比力**（世界系加回重力后旋到机体系），否则飞控的高度估计不可用。
+>
+> 所以 `.script/build_plugin.sh` **不再打补丁**：干净的 checkout 直接
+> `git submodule update --init --recursive` 就能构建出修好的插件，脚本会检查
+> `waitMs = 2` 以防子模块没更新。
 
 ## 4. 一次性配置飞控
 
@@ -383,8 +389,8 @@ Gazebo 世界球坐标（spherical_coordinates）
 
 **踩过的坑：IMU 比力**。上游 Gazebo Harmonic 插件把 Gazebo 的世界系运动学加速度
 （不含重力）直接塞进 `imuLinearAccelerationXYZ`，飞控因此认为静止时是 0 g，位置估计器
-一直积分 `-9.81 m/s²`，`MSP_ALTITUDE` 永远是 0。修复在
-`flyrat_play/gazebo/patches/aeroloop_gazebo-imu-specific-force.patch`：
+一直积分 `-9.81 m/s²`，`MSP_ALTITUDE` 永远是 0。修复已提交在
+`mide233/aeroloop_gazebo`（`gz` 分支，`06f5236`）：
 在世界系加回 `+9.81 ẑ`，再用 IMU 姿态旋到机体系（FLU）。验证方法是把 `debug_mode`
 设为 `ALTITUDE`，看 `DEBUG_ALTITUDE` 第 6 项（垂直加速度），静止时应为 0 而不是 -981。
 
@@ -531,10 +537,10 @@ mpc: cmd=(...) att_err=.. vel=(.. .. ..) att_thr=.. thr2acc=.. thr=.. err=(.. ..
   上限设为 **1000 ms**（`BetaflightPlugin.cc` 的 `Recv(..., waitMs=1000)`）。
   只要丢一个包，物理线程就阻塞在这一步，之后 SITL 与插件的收发互相等待，
   正反馈式雪崩。
-- 修复：`flyrat_play/gazebo/patches/aeroloop_gazebo-motor-recv-timeout.patch`（`waitMs=2`），
-  由 `.script/build_plugin.sh` 自动、幂等地应用。改动只影响"等多久"，
-  不影响控制律。若手工改过子模块导致补丁打不上，先
-  `git -C flyrat_play/gazebo/third_party/aeroloop_gazebo checkout -- .`。
+- 修复：`Recv(..., waitMs=2)`，已作为 commit `06f5236` 放在
+  `mide233/aeroloop_gazebo` 的 `gz` 分支，由子模块指针固定，
+  `git submodule update --init --recursive` 即可获得。改动只影响"等多久"，
+  不影响控制律。
 
 **电机输出正常但飞机不升（无升力）**
 

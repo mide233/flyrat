@@ -59,8 +59,8 @@ Gazebo Harmonic（`gz sim --version` 应显示 `8.x`）、`cppzmq-dev`
   会自行拉取固件子模块，并行时会争抢 git 锁），再 `make TARGET=SITL`。
   产物：`third_party/betaflight/obj/main/betaflight_SITL.elf`。
   可用环境变量：`BETAFLIGHT_TARGET`、`JOBS`、`CLEAN=1`。
-- `build_plugin.sh`：先对上游子模块打补丁（`flyrat_play/gazebo/patches/*.patch`，见下），
-  再构建 Gazebo 桥接插件。
+- `build_plugin.sh`：直接构建子模块里的桥接插件。插件所需的两处修复已经提交在
+  `mide233/aeroloop_gazebo` 的 `gz` 分支，由子模块指针固定（见下）。
   产物：`third_party/aeroloop_gazebo/plugins/build/libBetaflightPlugin.so`。
 
 清理构建产物（含 SITL ELF、插件、colcon 与 CMake 构建目录）：
@@ -71,11 +71,18 @@ Gazebo Harmonic（`gz sim --version` 应显示 `8.x`）、`cppzmq-dev`
 .script/clean_build.sh --keep-sim  # 保留 SITL ELF 与插件
 ```
 
-> **关于 `patches/`**：上游插件在物理步进内用 `select` 等待电机指令包最多
-> **1000 ms**（`BetaflightPlugin.cc` 的 `waitMs = 1000`）。一旦丢一个包，
-> 整个仿真会卡在这一步，实时率（real_time_factor）从 1.0 掉到 ~0.5%，
-> 表现为"飞机不升 / MSP 遥测超时 / 下一次运行连不上"。补丁把它降到 2 ms，
-> 只影响等待上限，不改变控制逻辑。补丁由 `build_plugin.sh` 幂等应用。
+> **关于下游修复**：插件有两个修复提交在 `mide233/aeroloop_gazebo` 的 `gz` 分支，
+> 由子模块指针固定，不再以 patch 形式维护：
+>
+> - 上游在物理步进内用 `select` 等待电机指令包最多 **1000 ms**
+>   （`BetaflightPlugin.cc` 的 `waitMs = 1000`）。一旦丢一个包，整个仿真会卡在
+>   这一步，实时率从 1.0 掉到 ~0.5%，表现为"飞机不升 / MSP 遥测超时 / 下一次
+>   运行连不上"。修复把它降到 2 ms，只影响等待上限，不改变控制逻辑。
+> - IMU 输出改为真正的**比力**（世界系加回 `+9.81 ẑ` 后旋到机体系 FLU），否则
+>   飞控的高度估计不可用。
+>
+> `build_plugin.sh` 不再打补丁，只检查 `waitMs = 2` 是否存在；子模块没更新时会
+> 直接报错并提示 `git submodule update --init --recursive`。
 
 ## 2. 配置飞控（一次性）
 
