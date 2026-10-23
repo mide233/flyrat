@@ -332,7 +332,10 @@ private:
             setpoint.roll = 0.0;
             setpoint.pitch = 0.0;
             RCLCPP_WARN_THROTTLE(
-                get_logger(), *get_clock(), 2000, "state telemetry stale (%.2fs), commanding idle",
+                get_logger(), *get_clock(), 2000,
+                "state telemetry stale (%.2fs), commanding idle: no attitude from the flight "
+                "controller. Check the MSP link in the flyrat_msp log (a silent SITL is reported "
+                "there); arming cannot succeed until it recovers.",
                 age);
         }
 

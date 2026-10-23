@@ -68,6 +68,15 @@ constexpr uint16_t kRcMin = 1000;
 constexpr uint16_t kRcMid = 1500;
 constexpr uint16_t kRcMax = 2000;
 constexpr uint16_t kSwitchHigh = 1800;
+// Betaflight latches ARMING_DISABLED_NOT_DISARMED when the RX link recovers
+// while the ARM switch is already high, and ARMING_DISABLED_ARM_SWITCH while
+// any other block is active with the switch high. Both only clear once the
+// switch has been low with a good RX link, so every arm request has to start
+// with a short low pulse instead of holding the switch high forever.
+constexpr auto kArmPulseLow = std::chrono::milliseconds(250);
+// While an arm request is outstanding, repeat the pulse so a link glitch that
+// re-latches the flags does not leave the vehicle disarmed until a restart.
+constexpr auto kArmRetryPeriod = std::chrono::seconds(3);
 
 // Raw IMU scaling used by the SITL simulator.
 // MSP_RAW_IMU does not report raw sensor counts. The SITL fills the
@@ -83,6 +92,17 @@ constexpr double kStandardGravity = 9.80665;
 constexpr double kPi = 3.14159265358979323846;
 
 double to_radians(double degrees) { return degrees * kPi / 180.0; }
+
+// How long a single MSP request may wait for its reply while the link is being
+// established or validated.
+constexpr double kHandshakeTimeout = 0.3;
+// Reply window for normal telemetry: the SITL can be slow while the vehicle is
+// flying (the physics thread hogs the CPU), so keep the generous timeout the
+// link was tuned with instead of the short handshake one.
+constexpr double kTelemetryTimeout = 0.5;
+// Consecutive silent telemetry cycles tolerated before the link is dropped and
+// re-established (the scheduler runs at telemetry_rate, so ~0.3 s at 10 Hz).
+constexpr int kMaxTelemetryFailures = 3;
 
 } // namespace
 
@@ -197,9 +217,19 @@ public:
                 {
                     std::lock_guard<std::mutex> lock(mutex_);
                     armed_ = req->data;
+                    if (req->data) {
+                        // Drop AUX1 before raising it: Betaflight latches
+                        // NOT_DISARMED (and ARM_SWITCH) when the switch is
+                        // already high, and only clears them on a low with a
+                        // healthy RX link, so a retry without the pulse can
+                        // never arm.
+                        const auto now = std::chrono::steady_clock::now();
+                        arm_release_ = now + kArmPulseLow;
+                        last_arm_pulse_ = now;
+                    }
                 }
                 res->success = true;
-                res->message = req->data ? "ARM switch high" : "ARM switch low";
+                res->message = req->data ? "ARM switch high (after a low pulse)" : "ARM switch low";
                 RCLCPP_INFO(get_logger(), "ARM switch -> %s", req->data ? "high" : "low");
             });
 
@@ -227,10 +257,24 @@ public:
         client_.close();
     }
 
+    // The UDP receiver is independent of MSP: open it once at startup and retry
+    // from the telemetry thread only, so the RC stream never waits for the
+    // handshake.
+    void ensure_receiver() {
+        if (receiver_.is_open()) {
+            return;
+        }
+        std::lock_guard<std::mutex> lock(link_mutex_);
+        if (!receiver_.is_open()) {
+            receiver_.open(host_, rc_port_);
+        }
+    }
+
     void start() {
         override_.assign(kChannelCount, kRcMid);
         override_[kChThrottle] = kRcMin;
         running_ = true;
+        ensure_receiver();
         connect_links();
         sender_thread_ = std::thread([this] { sender_loop(); });
         thread_ = std::thread([this] { loop(); });
@@ -248,7 +292,13 @@ private:
             for (size_t i = 0; i < 4; ++i)
                 channels[i] = override_[i];
         }
-        channels[kChAux1] = armed_ ? kSwitchHigh : kRcMin;
+        // Re-pulse while the request is outstanding: an RX glitch re-latches
+        // the arming flags, and the FC only clears them on a fresh edge.
+        if (armed_ && !fc_armed_.load() && now - last_arm_pulse_ >= kArmRetryPeriod) {
+            arm_release_ = now + kArmPulseLow;
+            last_arm_pulse_ = now;
+        }
+        channels[kChAux1] = (armed_ && now >= arm_release_) ? kSwitchHigh : kRcMin;
         // Keep the MSP override low until the FC is armed: Betaflight sets
         // ARMING_DISABLED_MSP while an override is active, which blocked
         // every arming attempt. The same channels already reach the FC
@@ -259,39 +309,65 @@ private:
 
     void connect_links() {
         std::lock_guard<std::mutex> lock(link_mutex_);
-        if (!receiver_.is_open()) {
-            receiver_.open(host_, rc_port_);
+        if (client_.connected()) {
+            return;
         }
-        if (!client_.connected()) {
-            client_.connect(host_, msp_port_);
-            // The SITL can be slow to answer while the vehicle is flying (heavy
-            // physics load), so allow a generous reply window; telemetry runs on its
-            // own thread and can afford to block without stalling the RC stream.
-            client_.set_timeout(0.5);
-            RCLCPP_INFO(
-                get_logger(), "connected to SITL MSP at %s:%d, RC -> %s:%d", host_.c_str(),
-                msp_port_, host_.c_str(), rc_port_);
+
+        // Both threads call this on every tick, so back off after a failed
+        // handshake instead of hammering a wedged flight controller.
+        const auto now = std::chrono::steady_clock::now();
+        if (now < next_connect_attempt_) {
+            return;
         }
+
+        client_.connect(host_, msp_port_);
+        client_.set_timeout(kHandshakeTimeout);
+
+        // A TCP connection proves nothing: the SITL accepts the socket from its
+        // own thread even while the flight controller never processes MSP (a
+        // previous client can leave the port wedged, and a stale SITL or any
+        // other program can own the port). Require one real reply before
+        // declaring the link usable, otherwise the node sits on a silent socket
+        // forever and arming silently never happens.
+        try {
+            client_.api_version();
+        } catch (const std::exception& exc) {
+            client_.close();
+            next_connect_attempt_ = now + std::chrono::seconds(1);
+            RCLCPP_ERROR_THROTTLE(
+                get_logger(), *get_clock(), 2000,
+                "SITL at %s:%d accepted the TCP connection but never answered "
+                "MSP_API_VERSION (%s). The flight controller is not processing MSP: "
+                "restart the simulation stack (a stale SITL or another program may "
+                "own port %d).",
+                host_.c_str(), msp_port_, exc.what(), msp_port_);
+            return;
+        }
+
+        client_.set_timeout(kTelemetryTimeout);
+        telemetry_failures_ = 0;
+        RCLCPP_INFO(
+            get_logger(), "connected to SITL MSP at %s:%d, RC -> %s:%d", host_.c_str(), msp_port_,
+            host_.c_str(), rc_port_);
     }
 
     // Dedicated RC sender. It runs at the full control rate and never blocks on
-    // a telemetry read, so the virtual receiver (UDP 9004) and the MSP override
-    // stay fresh even while the CPU-starved SITL is slow to answer telemetry.
-    // Concurrent send() from this thread and recv() from loop() are safe: every
-    // MSP frame goes out in a single send() call and buf_/flush() are only
-    // touched by the reader.
+    // the MSP link: the handshake can take up to a second when the flight
+    // controller is wedged, and starving the UDP receiver for that long makes
+    // Betaflight raise RXLOSS (which in turn latches the arming flags).
     void sender_loop() {
         const auto period = std::chrono::duration<double>(1.0 / rate_);
         auto next = std::chrono::steady_clock::now();
         while (running_ && rclcpp::ok()) {
             try {
-                connect_links();
                 const std::vector<uint16_t> channels = build_channels();
                 const double ts = std::chrono::duration<double>(
                                       std::chrono::steady_clock::now().time_since_epoch())
                                       .count();
                 receiver_.send(channels, ts);
-                client_.set_raw_rc(channels);
+                if (client_.connected()) {
+                    client_.set_raw_rc(channels);
+                }
             } catch (const std::exception& exc) {
                 RCLCPP_WARN_THROTTLE(
                     get_logger(), *get_clock(), 5000, "SITL link error: %s", exc.what());
@@ -322,10 +398,35 @@ private:
         int telemetry_ticks = 0;
         while (running_ && rclcpp::ok()) {
             try {
+                ensure_receiver();
                 connect_links();
                 publish_telemetry((telemetry_ticks % 25) == 0);
+                telemetry_failures_ = 0;
                 ++telemetry_ticks;
             } catch (const std::exception& exc) {
+                // A read timeout does not close the socket, and set_raw_rc() keeps
+                // succeeding on it, so nothing else would ever notice that the
+                // flight controller stopped answering. Drop the link after a few
+                // silent cycles: connect_links() then reconnects and re-validates
+                // it instead of letting the node sit on a dead socket forever.
+                bool dropped = false;
+                {
+                    std::lock_guard<std::mutex> lock(link_mutex_);
+                    if (++telemetry_failures_ >= kMaxTelemetryFailures) {
+                        telemetry_failures_ = 0;
+                        if (client_.connected()) {
+                            client_.close();
+                            dropped = true;
+                        }
+                    }
+                }
+                if (dropped) {
+                    RCLCPP_ERROR(
+                        get_logger(),
+                        "MSP link went silent (%s); dropped it so the next tick "
+                        "reconnects and re-validates the link",
+                        exc.what());
+                }
                 RCLCPP_WARN_THROTTLE(
                     get_logger(), *get_clock(), 5000, "telemetry read failed: %s", exc.what());
             }
@@ -490,6 +591,13 @@ private:
 
     std::mutex mutex_;
     std::mutex link_mutex_;
+    // Link supervision: when the next reconnect may be attempted and how many
+    // telemetry cycles in a row have timed out.
+    std::chrono::steady_clock::time_point next_connect_attempt_{};
+    int telemetry_failures_ = 0;
+    // ARM switch gating: AUX1 stays low until arm_release_ (the pulse), and
+    std::chrono::steady_clock::time_point arm_release_{};
+    std::chrono::steady_clock::time_point last_arm_pulse_{};
     bool armed_ = false;
     bool override_enabled_ = true;
     // True once the flight controller itself reports armed.

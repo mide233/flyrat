@@ -522,8 +522,15 @@ mpc: cmd=(...) att_err=.. vel=(.. .. ..) att_thr=.. thr2acc=.. thr=.. err=(.. ..
 - MSP OVERRIDE 需要 **fresh** 帧：`MSP_SET_RAW_RC` 必须持续推送（固件的新鲜度
   窗口是 300 ms；本项目按 50 Hz 推送 16 通道），一旦停发，飞控会退回接收机
   通道。所以"发送"必须和"读取遥测"分离到不同线程，读遥测不能把发送卡住。
-- 解锁必须 **先低后高**：AUX1 若一开始就是高电平，飞控会因 `NOT_DISARMED`
-  拒绝解锁。请先保持 AUX1 低，等链路稳定后再拉高。
+- 解锁必须 **先低后高**：AUX1 若在高位时遇到一次 RC 抖动（`RXLOSS`），飞控会把
+  `NOT_DISARMED` / `ARM_SWITCH` 同时锁存，而这两个标志只有在开关回到低位时才会
+  清除。`msp_node` 现在会在每次 `/flyrat/set_arm(true)` 时先拉低 250 ms 再拉高，
+  并在「已请求解锁但飞控未 armed」期间每 3 s 重复一次。完整分析见
+  [`arming_and_msp_link.md`](arming_and_msp_link.md)。
+- 若日志出现 `accepted the TCP connection but never answered MSP_API_VERSION`，
+  说明 5761 端口被别的进程（多半是上一轮残留的 SITL）占着，或飞控没在处理 MSP：
+  先 `ss -ltnp | grep 5761` 看归属，再重启仿真栈。该错误由 `msp_node` 的握手校验
+  打印，同一条链路的静默超时会自动断开重连，不会无限挂死。
 - 油门低起飞前不要提前加油门，否则会触发 `RUNAWAY THROTTLE` 而拒绝解锁。
 
 **仿真时间几乎不前进（飞机"悬不住"、MSP 突然全超时）**

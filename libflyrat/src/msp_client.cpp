@@ -131,6 +131,10 @@ void MspClient::connect_serial(const std::string& device, int baud, double timeo
 }
 
 void MspClient::close() {
+    // Serialise with send_frame(): the RC thread may be inside send() while the
+    // telemetry thread decides the link is dead. Closing the descriptor under it
+    // would let the write land on a recycled fd.
+    std::lock_guard<std::mutex> lock(send_mutex_);
     if (fd_ >= 0) {
         ::close(fd_);
         fd_ = -1;
