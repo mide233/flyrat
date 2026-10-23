@@ -8,6 +8,7 @@
 
 #include <fcntl.h>
 #include <netdb.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <termios.h>
@@ -108,6 +109,11 @@ void MspClient::connect(const std::string& host, int port, double timeout_s) {
 
     if (fd < 0)
         throw MspError("cannot connect to " + host + ":" + port_str);
+    // MSP is a request/response protocol with tiny frames. With Nagle enabled
+    // every request stalls for the delayed-ACK timer (~40 ms on Linux), which
+    // is what kept the telemetry loop at half its configured rate.
+    const int one = 1;
+    ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     fd_ = fd;
     is_socket_ = true;
     buf_.clear();
@@ -387,6 +393,38 @@ AltitudeFrame MspClient::altitude() {
     a.valid = cm < 0xFFFFFF00u;
     a.altitude_m = a.valid ? cm / 100.0 : 0.0;
     return a;
+}
+
+DebugFrame MspClient::debug() {
+    const auto p = request(kDebug, {}, -1, 16);
+    DebugFrame f;
+    for (size_t i = 0; i < f.value.size() && (i + 1) * 2 <= p.size(); ++i)
+        f.value[i] = read_i16(p, i * 2, "MSP_DEBUG");
+    return f;
+}
+
+GpsFrame MspClient::raw_gps() {
+    const auto p = request(kRawGps, {}, -1, 16);
+    if (p.size() < 16)
+        throw MspError("short MSP_RAW_GPS");
+    GpsFrame g;
+    g.fix = p[0] != 0;
+    g.satellites = p[1];
+    // Latitude/longitude are signed but travel as u32 two's complement.
+    g.lat_deg = static_cast<int32_t>(read_u32(p, 2, "MSP_RAW_GPS")) / 1e7;
+    g.lon_deg = static_cast<int32_t>(read_u32(p, 6, "MSP_RAW_GPS")) / 1e7;
+    g.altitude_m = read_u16(p, 10, "MSP_RAW_GPS");
+    g.ground_speed_mps = read_u16(p, 12, "MSP_RAW_GPS") / 100.0;
+    g.ground_course_deg = read_u16(p, 14, "MSP_RAW_GPS") / 10.0;
+    // DOP fields were appended over several MSP API revisions; tolerate short
+    // replies from older firmware.
+    if (p.size() >= 18)
+        g.pdop = read_u16(p, 16, "MSP_RAW_GPS") / 100.0;
+    if (p.size() >= 20)
+        g.hdop = read_u16(p, 18, "MSP_RAW_GPS") / 100.0;
+    if (p.size() >= 22)
+        g.vdop = read_u16(p, 20, "MSP_RAW_GPS") / 100.0;
+    return g;
 }
 
 bool MspClient::is_armed() { return status(true).armed; }

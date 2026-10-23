@@ -138,6 +138,12 @@ Studio 连接 `ws://<主机地址>:8765`，即可看到 `/flyrat/*` 话题。
 `/flyrat/camera/camera_info` 同时发布，`/clock` 也会被桥接（图像的
 `header.stamp` 是仿真时间）。这几个话题都会由 Foxglove 一并转发。
 
+定位：仿真里用飞控自己的 GPS（世界已有 `spherical_coordinates`，插件以 virtual GPS
+喂给 SITL），经 `flyrat::LocalEstimator` 转成本地 ENU，发布
+`/flyrat/position` 和 `/flyrat/velocity`（≈10 Hz，`frame_id=map`）。实机上换成 VSLAM，
+接口不变。坐标契约、垂直通道和 IMU 比力补丁见
+[`docs/zh-cn/betaflight_sitl_gazebo.md`](../../../docs/zh-cn/betaflight_sitl_gazebo.md) 7.6 节。
+
 如果只想看图像、不启动控制节点，再单独跑 `.script/camera.sh`（不要和 launch 同时开）。
 
 画面闪烁几乎都是**残留的旧仿真栈**导致的（两个 `gz sim` 同名话题，一个 bridge

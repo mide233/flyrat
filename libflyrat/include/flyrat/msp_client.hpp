@@ -28,12 +28,14 @@ enum MspCommand : uint8_t {
     kRawImu = 102,
     kMotor = 104,
     kRc = 105,
+    kRawGps = 106,
     kAttitude = 108,
     kAltitude = 109,
     kAnalog = 110,
     kStatusEx = 150,
     kAttitudeQuaternion = 167,
     kSetRawRc = 200,
+    kDebug = 254,
 };
 
 enum BoxId : uint16_t {
@@ -90,6 +92,30 @@ struct AltitudeFrame {
     bool valid = false;
 };
 
+// MSP_DEBUG. Eight 16-bit slots whose meaning depends on the firmware's
+// `debug_mode` setting; used to inspect the flight controller's estimator.
+struct DebugFrame {
+    std::array<int16_t, 8> value{{0, 0, 0, 0, 0, 0, 0, 0}};
+};
+
+// MSP_RAW_GPS. The flight controller's GPS solution (in the SITL this comes
+// from the simulated GPS, which the Gazebo plugin feeds with the vehicle pose).
+// Note the deliberately low resolution of the altitude field: MSP kept one
+// metre per LSB for backwards compatibility, so use MSP_ALTITUDE for height.
+struct GpsFrame {
+    bool fix = false;
+    uint8_t satellites = 0;
+    double lat_deg = 0.0;
+    double lon_deg = 0.0;
+    double altitude_m = 0.0;
+    double ground_speed_mps = 0.0;
+    // Degrees clockwise from north, only meaningful while moving.
+    double ground_course_deg = 0.0;
+    double pdop = 0.0;
+    double hdop = 0.0;
+    double vdop = 0.0;
+};
+
 // Thrown when the link is gone or a response never arrives.
 class MspError : public std::runtime_error {
 public:
@@ -120,6 +146,8 @@ public:
     StatusFrame status(bool extended = false);
     AnalogFrame analog();
     AltitudeFrame altitude();
+    DebugFrame debug();
+    GpsFrame raw_gps();
 
     bool is_armed();
     bool is_msp_override_active();

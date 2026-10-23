@@ -33,6 +33,7 @@
 #include <std_msgs/msg/u_int16_multi_array.hpp>
 #include <std_srvs/srv/set_bool.hpp>
 
+#include "flyrat/local_estimator.hpp"
 #include "flyrat/msp_client.hpp"
 #include "flyrat/rc_receiver.hpp"
 
@@ -41,7 +42,10 @@ namespace flyrat_msp {
 using flyrat::AltitudeFrame;
 using flyrat::AnalogFrame;
 using flyrat::Attitude;
+using flyrat::GpsFrame;
 using flyrat::ImuSample;
+using flyrat::LocalEstimator;
+using flyrat::LocalPosition;
 using flyrat::MotorFrame;
 using flyrat::MspClient;
 using flyrat::RcFrame;
@@ -102,6 +106,10 @@ public:
         status_pub_ = create_publisher<std_msgs::msg::Int32MultiArray>("/flyrat/status", qos);
         armed_pub_ = create_publisher<std_msgs::msg::Bool>("/flyrat/armed", qos);
         altitude_pub_ = create_publisher<std_msgs::msg::Float32>("/flyrat/altitude", qos);
+        position_pub_ =
+            create_publisher<geometry_msgs::msg::Vector3Stamped>("/flyrat/position", qos);
+        velocity_pub_ =
+            create_publisher<geometry_msgs::msg::Vector3Stamped>("/flyrat/velocity", qos);
         battery_pub_ = create_publisher<std_msgs::msg::Float32>("/flyrat/battery", qos);
 
         rc_override_sub_ = create_subscription<std_msgs::msg::Float64MultiArray>(
@@ -237,7 +245,12 @@ private:
     // busy (expected in SITL while the vehicle is flying). That must not disturb
     // the RC stream, which lives in sender_loop().
     void loop() {
-        const double period = 1.0 / telemetry_rate_;
+        const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<double>(1.0 / telemetry_rate_));
+        // Deadline based, not "sleep after work": every tick costs several MSP
+        // round trips (attitude, status, altitude, GPS), and a plain sleep would
+        // make the effective rate depend on the link latency.
+        auto next = std::chrono::steady_clock::now();
         int telemetry_ticks = 0;
         while (running_ && rclcpp::ok()) {
             try {
@@ -248,9 +261,11 @@ private:
                 RCLCPP_WARN_THROTTLE(
                     get_logger(), *get_clock(), 5000, "telemetry read failed: %s", exc.what());
             }
-            std::this_thread::sleep_for(
-                std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                    std::chrono::duration<double>(period)));
+            next += period;
+            std::this_thread::sleep_until(next);
+            if (std::chrono::steady_clock::now() > next + period * 5) {
+                next = std::chrono::steady_clock::now(); // fell behind, resync
+            }
         }
     }
 
@@ -277,6 +292,16 @@ private:
         std_msgs::msg::Bool armed_msg;
         armed_msg.data = armed;
         armed_pub_->publish(armed_msg);
+
+        // Altitude and GPS are needed for the position estimate, so they are
+        // read on every tick instead of riding along with the slow extras.
+        const AltitudeFrame altitude = client_.altitude();
+        std_msgs::msg::Float32 altitude_msg;
+        altitude_msg.data = altitude.valid ? static_cast<float>(altitude.altitude_m)
+                                           : std::numeric_limits<float>::quiet_NaN();
+        altitude_pub_->publish(altitude_msg);
+
+        publish_position(stamp, altitude);
 
         if (!extras)
             return;
@@ -318,16 +343,56 @@ private:
         imu_msg.linear_acceleration.z = imu.acc[2] / kAccOneG * kStandardGravity;
         imu_pub_->publish(imu_msg);
 
-        const AltitudeFrame altitude = client_.altitude();
-        std_msgs::msg::Float32 altitude_msg;
-        altitude_msg.data = altitude.valid ? static_cast<float>(altitude.altitude_m)
-                                           : std::numeric_limits<float>::quiet_NaN();
-        altitude_pub_->publish(altitude_msg);
-
         const AnalogFrame analog = client_.analog();
         std_msgs::msg::Float32 battery_msg;
         battery_msg.data = static_cast<float>(analog.voltage_v);
         battery_pub_->publish(battery_msg);
+    }
+
+    // GPS -> local ENU. A failed MSP_RAW_GPS read must not take down the rest
+    // of the telemetry stream, so it only disables the position output.
+    void publish_position(const rclcpp::Time& stamp, const AltitudeFrame& altitude) {
+        GpsFrame gps;
+        try {
+            gps = client_.raw_gps();
+        } catch (const std::exception& exc) {
+            RCLCPP_WARN_THROTTLE(
+                get_logger(), *get_clock(), 5000, "GPS read failed: %s", exc.what());
+            return;
+        }
+
+        if (gps.fix != last_fix_) {
+            last_fix_ = gps.fix;
+            if (gps.fix) {
+                RCLCPP_INFO(
+                    get_logger(), "GPS fix acquired (%u sats): local origin locked",
+                    static_cast<unsigned>(gps.satellites));
+            } else {
+                RCLCPP_WARN(
+                    get_logger(), "GPS fix lost (%u sats)",
+                    static_cast<unsigned>(gps.satellites));
+            }
+        }
+
+        if (!estimator_.update(gps, altitude.valid, altitude.altitude_m, altitude.vario_m_s))
+            return;
+
+        const LocalPosition& p = estimator_.position();
+        geometry_msgs::msg::Vector3Stamped pos;
+        pos.header.stamp = stamp;
+        pos.header.frame_id = "map";
+        pos.vector.x = p.east_m;
+        pos.vector.y = p.north_m;
+        pos.vector.z = p.up_m;
+        position_pub_->publish(pos);
+
+        geometry_msgs::msg::Vector3Stamped vel;
+        vel.header.stamp = stamp;
+        vel.header.frame_id = "map";
+        vel.vector.x = p.vel_east_mps;
+        vel.vector.y = p.vel_north_mps;
+        vel.vector.z = p.vel_up_mps;
+        velocity_pub_->publish(vel);
     }
 
     std::string host_;
@@ -361,6 +426,11 @@ private:
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr armed_pub_;
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr altitude_pub_;
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr battery_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr position_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr velocity_pub_;
+
+    LocalEstimator estimator_;
+    bool last_fix_ = false;
     rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr rc_override_sub_;
     rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr set_arm_srv_;
     rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr set_override_srv_;

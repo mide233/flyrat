@@ -26,3 +26,9 @@ aux 0 0 0 1700 2100
 # MSP OVERRIDE on AUX2 (channel 6), active above ~1700us. Driven by UDP 9004;
 # while this switch is high the masked channels come from MSP_SET_RAW_RC.
 aux 1 50 1 1700 2100
+
+# Debug telemetry (MSP_DEBUG). ALTITUDE exposes the position estimator's
+# vertical channel: [0]=rangefinder cm [1]=baro cm [2]=gps cm
+# [3]=estimated altitude cm [4]=gps vz cm/s [5]=estimated vz cm/s
+# [6]=vertical accel [7]=estimated vertical accel.
+set debug_mode = ALTITUDE

@@ -75,6 +75,24 @@ public:
                 if (std::isfinite(msg->data))
                     state_.altitude = msg->data;
             });
+        position_sub_ = create_subscription<geometry_msgs::msg::Vector3Stamped>(
+            "/flyrat/position", 10,
+            [this](geometry_msgs::msg::Vector3Stamped::ConstSharedPtr msg) {
+                state_.east = msg->vector.x;
+                state_.north = msg->vector.y;
+                state_.up = msg->vector.z;
+                if (!state_.has_position) {
+                    state_.has_position = true;
+                    RCLCPP_INFO(get_logger(), "local position available (ENU origin locked)");
+                }
+            });
+        velocity_sub_ = create_subscription<geometry_msgs::msg::Vector3Stamped>(
+            "/flyrat/velocity", 10,
+            [this](geometry_msgs::msg::Vector3Stamped::ConstSharedPtr msg) {
+                state_.vel_east = msg->vector.x;
+                state_.vel_north = msg->vector.y;
+                state_.vel_up = msg->vector.z;
+            });
 
         const auto period = std::chrono::duration<double>(1.0 / control_rate_);
         timer_ = create_wall_timer(
@@ -197,6 +215,8 @@ private:
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr rc_override_pub_;
     rclcpp::Client<std_srvs::srv::SetBool>::SharedPtr arm_client_;
     rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr attitude_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr position_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr velocity_sub_;
     rclcpp::Subscription<std_msgs::msg::Int32MultiArray>::SharedPtr status_sub_;
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr altitude_sub_;
     rclcpp::TimerBase::SharedPtr timer_;

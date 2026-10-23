@@ -27,6 +27,18 @@ struct State {
     // Climb rate, metres per second.
     double climb_rate = 0.0;
 
+    // Local position and velocity in the estimator's tangent plane:
+    // x = east, y = north, z = up (metres), origin locked at the first fix.
+    // In simulation the fix comes from the flight controller's GPS, on the
+    // real machine from VSLAM; the autopilot cannot tell them apart.
+    double east = 0.0;
+    double north = 0.0;
+    double up = 0.0;
+    double vel_east = 0.0;
+    double vel_north = 0.0;
+    double vel_up = 0.0;
+    bool has_position = false;
+
     // Supply voltage, volts.
     double battery_voltage = 0.0;
 

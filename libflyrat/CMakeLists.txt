@@ -27,6 +27,7 @@ find_package(Threads REQUIRED)
 
 add_library(flyrat
   src/attitude_hold.cpp
+  src/local_estimator.cpp
   src/msp_client.cpp
   src/rc_receiver.cpp)
 add_library(flyrat::flyrat ALIAS flyrat)
@@ -60,4 +61,9 @@ if(FLYRAT_BUILD_TESTS)
   target_link_libraries(test_attitude_hold PRIVATE flyrat)
   target_compile_options(test_attitude_hold PRIVATE -Wall -Wextra)
   add_test(NAME test_attitude_hold COMMAND test_attitude_hold)
+
+  add_executable(test_local_estimator tests/test_local_estimator.cpp)
+  target_link_libraries(test_local_estimator PRIVATE flyrat)
+  target_compile_options(test_local_estimator PRIVATE -Wall -Wextra)
+  add_test(NAME test_local_estimator COMMAND test_local_estimator)
 endif()

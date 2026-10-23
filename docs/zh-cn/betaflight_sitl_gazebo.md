@@ -185,7 +185,9 @@ ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
 | `/flyrat/imu` | `sensor_msgs/Imu` | 陀螺 / 加速度 |
 | `/flyrat/status` | `std_msgs/Int32MultiArray` | `[armed, msp_override, cycletime, sensors]` |
 | `/flyrat/armed` | `std_msgs/Bool` | 解锁状态 |
-| `/flyrat/altitude` | `std_msgs/Float32` | 高度（m，无效时为 NaN） |
+| `/flyrat/altitude` | `std_msgs/Float32` | 气压/EKF 高度（m，无效时为 NaN） |
+| `/flyrat/position` | `geometry_msgs/Vector3Stamped`（发布） | 本地 ENU 位置（m），`frame_id=map`，≈10 Hz |
+| `/flyrat/velocity` | `geometry_msgs/Vector3Stamped`（发布） | 本地 ENU 速度（m/s），同上 |
 | `/flyrat/battery` | `std_msgs/Float32` | 电压（V） |
 | `/flyrat/set_arm` | `std_srvs/SetBool`（服务） | 拨动 ARM 开关（AUX1） |
 | `/flyrat/set_msp_override` | `std_srvs/SetBool`（服务） | 拨动 MSP OVERRIDE 开关（AUX2） |
@@ -285,6 +287,50 @@ ros2 param set /<查看节点名> use_sim_time true
    确属带宽问题就把 `models/betaflight_iris/model.sdf` 里的 `<update_rate>`
    降到 15、分辨率降到 320×240，然后重启仿真。
 
+### 7.6 定位：GPS → 本地 ENU（实机换 VSLAM）
+
+四旋翼的几何 MPC 需要位置和速度，而 `MSP_ATTITUDE` 只给姿态。仿真里用飞控自己的
+GPS，实机上换成 VSLAM，**两者走同一个接口**。
+
+数据链：
+
+```
+Gazebo 世界球坐标（spherical_coordinates）
+  → 插件把局部位置转成 lat/lon/alt 并发给 SITL（virtual GPS）
+  → 飞控 GPS + 气压计 → EKF
+  → MSP_RAW_GPS / MSP_ALTITUDE
+  → flyrat::LocalEstimator（libflyrat，无 ROS）
+  → /flyrat/position, /flyrat/velocity（≈10 Hz）
+```
+
+**坐标契约**：本地切平面 ENU，`x=东`、`y=北`、`z=上`，原点在**第一次有效定位**
+处锁定。实机的 VSLAM 只要发布同样语义的 `/flyrat/position` + `/flyrat/velocity`，
+`libflyrat` 与 `flyrat_control` 都不需要改。
+
+各通道的来源和取舍：
+
+| 量 | 来源 | 说明 |
+|---|---|---|
+| 水平位置 | `MSP_RAW_GPS` 经纬度 | 以原点为参考做等距圆柱投影（`R=6378137`），10 Hz |
+| 水平速度 | `MSP_RAW_GPS` 地速 + 航向 | 悬停时航向噪声大，加了 **0.25 m/s 死区** |
+| 垂直位置/速度 | `MSP_ALTITUDE` | 用 EKF 高度和升降率；**不用 GPS 高度**（字段分辨率 1 m） |
+
+注意事项：
+
+- **z 原点是相对的**。原点取第一次定位时的气压高度，与 Gazebo 地面 `z=0.195` 之间
+  有 0.1–0.35 m 的常值偏差。控制器只需要相对高度，但**评估时**要用
+  `gz model -m iris -p` 对比，别直接和 0 比。
+- 解锁瞬间飞控会重置估计器，高度会短暂掉到 0 再收敛；`has_position` 仍然为真。
+- 位置话题是 **10 Hz**，对 50 Hz 的姿态环够用，但**做 100 Hz MPC 时位置需要预测/
+  插值**，或者改用更高频的里程计（实机的 VSLAM 通常能给 30–60 Hz）。
+
+**踩过的坑：IMU 比力**。上游 Gazebo Harmonic 插件把 Gazebo 的世界系运动学加速度
+（不含重力）直接塞进 `imuLinearAccelerationXYZ`，飞控因此认为静止时是 0 g，位置估计器
+一直积分 `-9.81 m/s²`，`MSP_ALTITUDE` 永远是 0。修复在
+`flyrat_play/gazebo/patches/aeroloop_gazebo-imu-specific-force.patch`：
+在世界系加回 `+9.81 ẑ`，再用 IMU 姿态旋到机体系（FLU）。验证方法是把 `debug_mode`
+设为 `ALTITUDE`，看 `DEBUG_ALTITUDE` 第 6 项（垂直加速度），静止时应为 0 而不是 -981。
+
 ## 8. 算法库与实机程序
 
 ### 8.1 `libflyrat/`
@@ -296,7 +342,11 @@ ros2 param set /<查看节点名> use_sim_time true
 - `flyrat::Command`：归一化指令 `roll/pitch/yaw ∈ [-1,1]`、`throttle ∈ [0,1]`。
 - `flyrat::Autopilot`：`reset()` + `update(state, setpoint, dt) -> Command`。
 - `flyrat::AttitudeHold`：示例实现（P 姿态控制 + 偏航角速度阻尼 + 输出限幅）。
-- `flyrat::MspClient`：MSP v1 客户端，支持 TCP（SITL）与串口（实机）。
+- `flyrat::MspClient`：MSP v1 客户端，支持 TCP（SITL）与串口（实机）；
+  `raw_gps()` / `altitude()` / `debug()` 分别读 GPS、EKF 高度和调试通道。
+- `flyrat::LocalEstimator`：把 `MSP_RAW_GPS` + `MSP_ALTITUDE` 转成本地 ENU
+  位置/速度（原点锁定、0.25 m/s 速度死区、无 GPS 时保留原点）。实机换 VSLAM 时
+  直接替换这一层的输入。
 - `flyrat::RcReceiver`：SITL 虚拟接收机（UDP 9004）。
 
 `flyrat_control` 与 `flyrat_msp` 都通过 `add_subdirectory(.../libflyrat)` 直接链接
