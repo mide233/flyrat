@@ -4,11 +4,12 @@
 
 
 # Sysroot source images for rat-develop-full.
-# CI overrides these with digest-pinned references. For local builds, build
-# rat-base for both architectures first and pass --build-arg explicitly;
-# see docs/zh-cn/build_docker_image.md.
-ARG SYSROOT_IMAGE_AMD64=rat-base:latest
-ARG SYSROOT_IMAGE_ARM64=rat-base:latest
+# They point at the images published by CI. CI overrides them with
+# digest-pinned references; for a local cross build, build rat-base for both
+# architectures first and pass --build-arg explicitly;
+# see docs/build_docker_image.md.
+ARG SYSROOT_IMAGE_AMD64=mide233/flyrat-base:latest
+ARG SYSROOT_IMAGE_ARM64=mide233/flyrat-base:latest
 
 # Base container, provides a runtime environment
 FROM ros:jazzy AS rat-base

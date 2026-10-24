@@ -1,6 +1,6 @@
 services:
   rat-dev-full:
-    image: rat-dev-full:latest
+    image: mide233/flyrat-dev-full:latest
     user: "1000:1000"
     privileged: true
     volumes:

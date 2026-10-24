@@ -1,46 +1,52 @@
 # Build Docker Image
 
-于 Repo 根目录下，在终端中分别使用：
+镜像由 GitHub Actions 构建并推送到 Docker Hub，**日常开发直接拉取，不需要本地构建**：
 
 ```bash
-docker build . --target rat-base -t rat-base:latest
+docker pull mide233/flyrat-dev-full:latest
 ```
 
+`docker-compose.yml` 与 `.devcontainer/docker-compose.yml` 的 `image:` 都指向
+`mide233/flyrat-dev-full:latest`，在 VS Code 里直接 **Reopen in Container** 即可。
+三个镜像与 Dockerfile 阶段的对应关系见下方「CI 自动构建」。
+
+## 本地构建（仅在修改 Dockerfile 时）
+
+改完 `Dockerfile` 先在本地验证再推 CI。本地镜像统一打 `:local` 后缀，避免与
+Docker Hub 上的 `:latest` 混淆。
+
 ```bash
-docker build . --target rat-dev -t rat-dev:latest
+docker build . --target rat-base -t mide233/flyrat-base:local
+docker build . --target rat-dev  -t mide233/flyrat-dev:local
 ```
 
-构建基础容器、开发容器。
-
-## 构建 `rat-dev-full:latest`
-
-`latest-full` 需要对向架构的 `rat-base` 作为 sysroot 来源。
-
-下面示例以在 `amd64` 主机上构建 `amd64 latest-full` 为例：
+`rat-dev-full` 需要对向架构的 `rat-base` 作为 sysroot 来源。下面以在 `amd64`
+主机上构建 `amd64` 的 full 镜像为例：
 
 ```bash
-docker buildx build . --platform linux/amd64 --target rat-base -t rat-base:linux-amd64 --load
-```
-
-```bash
-docker buildx build . --platform linux/arm64 --target rat-base -t rat-base:linux-arm64 --load
-```
-
-```bash
-docker buildx build . --platform linux/amd64 --target rat-dev-full -t rat-dev-full:latest \
-  --build-arg SYSROOT_IMAGE_AMD64=rat-base:linux-amd64 \
-  --build-arg SYSROOT_IMAGE_ARM64=rat-base:linux-arm64 \
+docker buildx build . --platform linux/amd64 --target rat-base \
+  -t mide233/flyrat-base:linux-amd64 --load
+docker buildx build . --platform linux/arm64 --target rat-base \
+  -t mide233/flyrat-base:linux-arm64 --load
+docker buildx build . --platform linux/amd64 --target rat-dev-full \
+  -t mide233/flyrat-dev-full:local \
+  --build-arg SYSROOT_IMAGE_AMD64=mide233/flyrat-base:linux-amd64 \
+  --build-arg SYSROOT_IMAGE_ARM64=mide233/flyrat-base:linux-arm64 \
   --load
 ```
 
-如果是在 `arm64` 主机上构建，则交换目标平台即可（`latest-full` 的 sysroot 方向相反）。
+Dockerfile 里 `SYSROOT_IMAGE_*` 的默认值就是 `mide233/flyrat-base:latest`，所以只做
+本机架构的快速验证时，直接 `docker build . --target rat-dev-full -t mide233/flyrat-dev-full:local`
+也会从 Docker Hub 拉取现成的 base，不必先本地构建。
+
+如果是在 `arm64` 主机上构建，则交换目标平台即可（sysroot 方向相反）。
 
 ## 代理构建
 
 部分国家和地区会阻断对 `github` 的连接，此时构建需要使用代理：
 
 ```bash
-docker build . --target rat-dev -t rat-dev:latest \
+docker build . --target rat-dev -t mide233/flyrat-dev:local \
   --network host \
   --build-arg HTTP_PROXY=http://127.0.0.1:7890 \
   --build-arg HTTPS_PROXY=http://127.0.0.1:7890
@@ -86,13 +92,11 @@ docker build . --target rat-dev -t rat-dev:latest \
 docker pull mide233/flyrat-dev-full:latest
 ```
 
-`docker-compose.yml` 里的服务名仍是 `image: rat-dev-full:latest`，两种用法任选：
+`docker-compose.yml` 与 `.devcontainer/docker-compose.yml` 里的 `image:` 已经是
+`mide233/flyrat-dev-full:latest`，拉取后直接启动即可，不需要再打本地标签：
 
 ```bash
-# 1) 打本地标签，沿用现有 compose/devcontainer 配置
-docker tag mide233/flyrat-dev-full:latest rat-dev-full:latest
-
-# 2) 或直接改 compose 的 image 字段为 mide233/flyrat-dev-full:latest
+docker compose up -d rat-dev-full
 ```
 
 拉下来的镜像里 `cmake` 已是 4.2.3（`/opt/cmake/bin` 在 `PATH` 前面），`gz` 仍需按项目约定用 `env -u GZ_CONFIG_PATH PATH="/usr/bin:$PATH" gz ...` 避开 ROS 的 vendor shim。
