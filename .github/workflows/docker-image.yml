@@ -1,0 +1,251 @@
+name: Build and push images
+
+# Publishes the three container stages on Docker Hub as multi-arch manifests:
+#
+#   mide233/flyrat-base:latest       rat-base
+#   mide233/flyrat-dev:latest        rat-dev
+#   mide233/flyrat-dev-full:latest   rat-dev-full
+#
+# Each architecture is built natively (amd64 on ubuntu-latest, arm64 on
+# ubuntu-24.04-arm), pushed by digest, then the per-arch digests are stitched
+# into one manifest list. rat-dev-full needs the *opposite* architecture's
+# rat-base as a sysroot, so it is built from the digest-pinned base images of
+# this very run instead of a floating tag.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/docker-image.yml
+      - .script/template/env_setup.bash
+      - .script/template/env_setup.zsh
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_BASE: mide233/flyrat-base
+  IMAGE_DEV: mide233/flyrat-dev
+  IMAGE_FULL: mide233/flyrat-dev-full
+
+jobs:
+  base:
+    name: base (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push by digest (base)
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: rat-base
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ env.IMAGE_BASE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=docker-base-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=docker-base-${{ matrix.arch }}
+
+      - name: Export digest (base)
+        run: |
+          mkdir -p "${{ runner.temp }}/digests/base"
+          printf '%s\n' "${{ steps.build.outputs.digest }}" \
+            > "${{ runner.temp }}/digests/base/${{ matrix.arch }}.digest"
+
+      - name: Upload digest (base)
+        uses: actions/upload-artifact@v6
+        with:
+          name: digests-base-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/base/*.digest
+          if-no-files-found: error
+          retention-days: 1
+
+  dev:
+    name: dev (${{ matrix.arch }})
+    needs: base
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Download digests (base)
+        uses: actions/download-artifact@v7
+        with:
+          path: ${{ runner.temp }}/digests/base
+          pattern: digests-base-*
+          merge-multiple: true
+
+      - name: Resolve base digests
+        id: resolve
+        run: |
+          set -euo pipefail
+          base_dir="${{ runner.temp }}/digests/base"
+          echo "base_digest_amd64=$(cat "${base_dir}/amd64.digest")" >> "$GITHUB_OUTPUT"
+          echo "base_digest_arm64=$(cat "${base_dir}/arm64.digest")" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push by digest (dev)
+        id: build_dev
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: rat-dev
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ env.IMAGE_DEV }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=docker-dev-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=docker-dev-${{ matrix.arch }}
+
+      - name: Export digest (dev)
+        run: |
+          mkdir -p "${{ runner.temp }}/digests/dev"
+          printf '%s\n' "${{ steps.build_dev.outputs.digest }}" \
+            > "${{ runner.temp }}/digests/dev/${{ matrix.arch }}.digest"
+
+      - name: Upload digest (dev)
+        uses: actions/upload-artifact@v6
+        with:
+          name: digests-dev-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/dev/*.digest
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Build and push by digest (dev-full)
+        id: build_full
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: rat-dev-full
+          platforms: linux/${{ matrix.arch }}
+          build-args: |
+            SYSROOT_IMAGE_AMD64=${{ env.IMAGE_BASE }}@${{ steps.resolve.outputs.base_digest_amd64 }}
+            SYSROOT_IMAGE_ARM64=${{ env.IMAGE_BASE }}@${{ steps.resolve.outputs.base_digest_arm64 }}
+          outputs: type=image,name=${{ env.IMAGE_FULL }},push-by-digest=true,name-canonical=true,push=true
+          # Same scope as the dev build: rat-dev-full is FROM rat-dev, so the
+          # layers built above are reused instead of being compiled twice.
+          cache-from: type=gha,scope=docker-dev-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=docker-dev-${{ matrix.arch }}
+
+      - name: Export digest (dev-full)
+        run: |
+          mkdir -p "${{ runner.temp }}/digests/full"
+          printf '%s\n' "${{ steps.build_full.outputs.digest }}" \
+            > "${{ runner.temp }}/digests/full/${{ matrix.arch }}.digest"
+
+      - name: Upload digest (dev-full)
+        uses: actions/upload-artifact@v6
+        with:
+          name: digests-full-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/full/*.digest
+          if-no-files-found: error
+          retention-days: 1
+
+  promote:
+    name: promote manifests
+    runs-on: ubuntu-latest
+    needs:
+      - base
+      - dev
+    steps:
+      - name: Download digests (base)
+        uses: actions/download-artifact@v7
+        with:
+          path: ${{ runner.temp }}/digests/base
+          pattern: digests-base-*
+          merge-multiple: true
+
+      - name: Download digests (dev)
+        uses: actions/download-artifact@v7
+        with:
+          path: ${{ runner.temp }}/digests/dev
+          pattern: digests-dev-*
+          merge-multiple: true
+
+      - name: Download digests (dev-full)
+        uses: actions/download-artifact@v7
+        with:
+          path: ${{ runner.temp }}/digests/full
+          pattern: digests-full-*
+          merge-multiple: true
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Create manifest lists and push
+        run: |
+          set -euo pipefail
+
+          create_manifest() {
+            local image="$1"
+            local tag="$2"
+            local digest_dir="$3"
+            local refs=()
+
+            while IFS= read -r digest_file; do
+              refs+=("${image}@$(cat "${digest_file}")")
+            done < <(find "${digest_dir}" -maxdepth 1 -type f -name '*.digest' | sort)
+
+            if [[ ${#refs[@]} -eq 0 ]]; then
+              echo "No digest files found in ${digest_dir}" >&2
+              exit 1
+            fi
+
+            docker buildx imagetools create -t "${image}:${tag}" "${refs[@]}"
+          }
+
+          create_manifest "${{ env.IMAGE_BASE }}" latest "${{ runner.temp }}/digests/base"
+          create_manifest "${{ env.IMAGE_DEV }}" latest "${{ runner.temp }}/digests/dev"
+          create_manifest "${{ env.IMAGE_FULL }}" latest "${{ runner.temp }}/digests/full"
+
+      - name: Inspect images
+        run: |
+          docker buildx imagetools inspect "${{ env.IMAGE_BASE }}:latest"
+          docker buildx imagetools inspect "${{ env.IMAGE_DEV }}:latest"
+          docker buildx imagetools inspect "${{ env.IMAGE_FULL }}:latest"

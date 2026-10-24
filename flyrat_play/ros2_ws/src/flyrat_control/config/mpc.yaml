@@ -1,0 +1,46 @@
+# MPC tuning for the on-manifold controller.
+#
+# These are the defaults inherited from the reference implementation, except
+# that the integrator runs at 100 Hz against Betaflight's rate loop instead of
+# a stiff offboard attitude controller. The horizon and the position weight
+# have to be larger/smaller respectively for this inner loop; start here and
+# change one entry at a time.
+flyrat_control:
+  ros__parameters:
+    # 0.4 s lookahead (40 x 10 ms). The 0.2 s of the reference assumes an
+    # instant attitude response; the Betaflight rate loop needs about 40 ms.
+    mpc_horizon: 40
+    mpc_step: 0.01
+
+    # Position vs. velocity authority.
+    mpc_q_position_xy: 60.0
+    mpc_q_position_z: 120.0
+    mpc_q_velocity: 2.0
+
+    # Attitude tracking. Too high and the controller fights the inner loop.
+    mpc_q_attitude_roll_pitch: 40.0
+    mpc_q_attitude_yaw: 40.0
+
+    # Control effort.
+    mpc_r_thrust: 0.5
+    mpc_r_body_rate_xy: 1.2
+    mpc_r_body_rate_z: 0.6
+    mpc_weight_decay: 0.5
+
+    # Actuator envelope, matching the linear 400 deg/s rate curve.
+    mpc_max_body_rate_xy: 1.5
+    mpc_max_body_rate_z: 2.0
+
+    # rad/s^2. Zero disables the filter; 20 keeps a 100 Hz step at 0.2 rad/s,
+    # which is inside the bandwidth of the Betaflight rate loop.
+    mpc_max_rate_slew: 8.0
+    mpc_yaw_offset: 0.0
+
+    # Give the vehicle time to leave the ground before the position loop
+    # starts chasing GPS drift.
+    takeoff_seconds: 4.0
+
+    # Circle trajectory: enabled while the controller is in the hold phase.
+    trajectory: figure8
+    trajectory_radius: 1.5
+    trajectory_period: 10.0

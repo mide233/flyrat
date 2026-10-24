@@ -1,0 +1,184 @@
+// SPDX-License-Identifier: MIT
+//
+// Minimal MSP v1 client for Betaflight.
+//
+// The same framing is used over two transports:
+//   * TCP    - the SITL exposes UART1 as a TCP socket (default 127.0.0.1:5761);
+//   * serial - a real flight controller, e.g. /dev/ttyACM0 at 115200 baud.
+//   request  $M< size cmd payload... xor
+//   response $M> size cmd payload... xor
+//   error    $M! ...
+// where size counts the payload bytes only and xor covers size..payload.
+#pragma once
+
+#include <array>
+#include <cstdint>
+#include <mutex>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace flyrat {
+
+enum MspCommand : uint8_t {
+    kApiVersion = 1,
+    kStatus = 101,
+    kRawImu = 102,
+    kMotor = 104,
+    kRc = 105,
+    kRawGps = 106,
+    kAttitude = 108,
+    kAltitude = 109,
+    kAnalog = 110,
+    kStatusEx = 150,
+    kAttitudeQuaternion = 167,
+    kSetRawRc = 200,
+    kDebug = 254,
+};
+
+enum BoxId : uint16_t {
+    kBoxArm = 0,
+    kBoxMspOverride = 50,
+};
+
+struct ApiVersion {
+    uint8_t protocol = 0;
+    uint8_t api_major = 0;
+    uint8_t api_minor = 0;
+};
+
+struct Attitude {
+    double roll_deg = 0.0;
+    double pitch_deg = 0.0;
+    double yaw_deg = 0.0;
+};
+
+struct RcFrame {
+    // Raw receiver order: roll, pitch, throttle, yaw, aux1...
+    std::vector<uint16_t> channels;
+};
+
+struct MotorFrame {
+    std::vector<uint16_t> motors;
+};
+
+struct ImuSample {
+    std::array<int16_t, 3> acc{{0, 0, 0}};
+    std::array<int16_t, 3> gyro{{0, 0, 0}};
+    std::array<int16_t, 3> mag{{0, 0, 0}};
+};
+
+struct StatusFrame {
+    uint16_t cycletime = 0;
+    uint16_t i2c_errors = 0;
+    uint16_t sensors = 0;
+    uint32_t flight_mode_flags = 0; // boxes 0..31 only
+    bool armed = false;
+    bool msp_override = false;
+    // Only filled by status(true) (MSP_STATUS_EX). Bit 0 set means "no reason
+    // to block arming"; the other bits are Betaflight's ARMING_DISABLED_*.
+    uint32_t arming_disable_flags = 0;
+};
+
+struct AnalogFrame {
+    double voltage_v = 0.0;
+    double amperage_a = 0.0;
+    uint16_t mah = 0;
+    uint16_t rssi = 0;
+};
+
+struct AltitudeFrame {
+    double altitude_m = 0.0;
+    double vario_m_s = 0.0;
+    bool valid = false;
+};
+
+// MSP_DEBUG. Eight 16-bit slots whose meaning depends on the firmware's
+// `debug_mode` setting; used to inspect the flight controller's estimator.
+struct DebugFrame {
+    std::array<int16_t, 8> value{{0, 0, 0, 0, 0, 0, 0, 0}};
+};
+
+// MSP_RAW_GPS. The flight controller's GPS solution (in the SITL this comes
+// from the simulated GPS, which the Gazebo plugin feeds with the vehicle pose).
+// Note the deliberately low resolution of the altitude field: MSP kept one
+// metre per LSB for backwards compatibility, so use MSP_ALTITUDE for height.
+struct GpsFrame {
+    bool fix = false;
+    uint8_t satellites = 0;
+    double lat_deg = 0.0;
+    double lon_deg = 0.0;
+    double altitude_m = 0.0;
+    double ground_speed_mps = 0.0;
+    // Degrees clockwise from north, only meaningful while moving.
+    double ground_course_deg = 0.0;
+    double pdop = 0.0;
+    double hdop = 0.0;
+    double vdop = 0.0;
+};
+
+// Thrown when the link is gone or a response never arrives.
+class MspError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+class MspClient {
+public:
+    MspClient() = default;
+    ~MspClient();
+
+    MspClient(const MspClient&) = delete;
+    MspClient& operator=(const MspClient&) = delete;
+
+    void connect(const std::string& host, int port, double timeout_s = 0.1);
+    // Open a real flight controller over a serial port (8N1, raw). Throws
+    // MspError when the device cannot be opened or the baud rate is unsupported.
+    void connect_serial(const std::string& device, int baud, double timeout_s = 0.1);
+    void close();
+    bool connected() const { return fd_ >= 0; }
+    void set_timeout(double seconds) { timeout_ = seconds; }
+
+    ApiVersion api_version();
+    Attitude attitude();
+    RcFrame rc();
+    MotorFrame motor();
+    ImuSample raw_imu();
+    StatusFrame status(bool extended = false);
+    AnalogFrame analog();
+    AltitudeFrame altitude();
+    DebugFrame debug();
+    GpsFrame raw_gps();
+
+    bool is_armed();
+    bool is_msp_override_active();
+    bool is_box_active(uint16_t box);
+
+    // Send MSP_SET_RAW_RC. `channels` is in raw receiver order. The flight
+    // controller acknowledges every frame; those acks are flushed by the next
+    // request(), so there is no need to wait for them here (waiting would stall
+    // the RC stream). A positive `drain_timeout` (seconds) enables draining when
+    // a caller explicitly wants it.
+    void set_raw_rc(const std::vector<uint16_t>& channels, double drain_timeout = 0.0);
+
+private:
+    std::vector<uint8_t>
+        request(uint8_t cmd, const std::vector<uint8_t>& payload, int expect, int attempts);
+    void send_frame(uint8_t cmd, const std::vector<uint8_t>& payload);
+    void flush();
+    bool fill(double timeout_s);
+    std::optional<std::pair<uint8_t, std::vector<uint8_t>>> recv_frame(double timeout_s);
+
+    int fd_ = -1;
+    // send()/MSG_NOSIGNAL is socket-only; serial uses write().
+    bool is_socket_ = false;
+    double timeout_ = 0.1;
+    std::vector<uint8_t> buf_;
+    // Serializes writes so a sender (RC stream) and a reader (telemetry) can
+    // share one socket without interleaving frames.
+    std::mutex send_mutex_;
+};
+
+} // namespace flyrat

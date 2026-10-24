@@ -1,0 +1,16 @@
+# The image only copies .script/template/env_setup.{bash,zsh} out of the build
+# context; everything else is bind-mounted at run time. Keeping the context
+# small makes CI builds and --load local builds much faster.
+.git
+.gitmodules
+.github
+.vscode
+.devcontainer
+docs
+playground
+**/build
+**/install
+**/log
+**/__pycache__
+**/.pytest_cache
+flyrat_play/gazebo/third_party

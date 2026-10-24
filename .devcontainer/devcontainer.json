@@ -21,7 +21,8 @@
                 "ms-python.debugpy",
                 "KylinIdeTeam.cmake-intellisence",
                 "streetsidesoftware.code-spell-checker",
-                "mhutchie.git-graph"
+                "mhutchie.git-graph", 
+                "vivaxy.vscode-conventional-commits"
             ]
         }
     }

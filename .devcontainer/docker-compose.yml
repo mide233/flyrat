@@ -3,6 +3,7 @@ services:
     image: rat-dev-full:latest
     privileged: true
     network_mode: host
+    gpus: all
     init: true
     command: /bin/sh -c "while sleep 1000; do :; done"
     working_dir: /home/ubuntu
