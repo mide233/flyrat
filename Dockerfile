@@ -41,7 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libceres-dev \
     ros-$ROS_DISTRO-rviz2 ros-$ROS_DISTRO-foxglove-bridge \
     ros-$ROS_DISTRO-pcl-ros ros-$ROS_DISTRO-pcl-conversions ros-$ROS_DISTRO-pcl-msgs \
-    ros-$ROS_DISTRO-navigation2 ros-$ROS_DISTRO-nav2-msgs ros-$ROS_DISTRO-mavlink \
+    ros-$ROS_DISTRO-mavlink \
     ros-$ROS_DISTRO-ros-gz-bridge \
     ros-$ROS_DISTRO-osqp-vendor \
     lua5.4 liblua5.4-0 liblua5.4-dev && \
@@ -65,7 +65,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake make ninja-build \
     openssh-client \
     lsb-release software-properties-common gnupg sudo \
-    python3-colorama python3-dpkt \
+    python3-colorama python3-dpkt python3-websockets \
     python3-pip websockify && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 50 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 50 && \
@@ -123,6 +123,8 @@ RUN case "${TARGETARCH}" in \
     wget https://github.com/kitware/cmake/releases/download/v4.2.3/cmake-4.2.3-linux-${cmake_arch}.sh -O install.sh && \
     mkdir -p /opt/cmake/ && bash install.sh --skip-license --prefix=/opt/cmake/ --exclude-subdir && \
     rm install.sh
+# Put the freshly installed cmake ahead of the distribution package (3.28).
+ENV PATH="/opt/cmake/bin:${PATH}"
 
 # Change user
 RUN chsh -s /bin/zsh ubuntu && \
