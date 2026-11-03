@@ -70,7 +70,21 @@ target_include_directories(flyrat_hardware PUBLIC
 target_link_libraries(flyrat_hardware PUBLIC Threads::Threads)
 target_compile_options(flyrat_hardware PRIVATE -Wall -Wextra)
 
-install(TARGETS flyrat flyrat_hardware
+# MSP protocol and scheduling. It only depends on the header-only Transport
+# interface, so it can be tested with a fake transport and stays free of
+# Eigen/OSQP.
+add_library(flyrat_msp_interact
+  src/msp_frame.cpp
+  src/msp_parse.cpp
+  src/msp_interact.cpp)
+add_library(flyrat::flyrat_msp_interact ALIAS flyrat_msp_interact)
+target_include_directories(flyrat_msp_interact PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_link_libraries(flyrat_msp_interact PUBLIC Threads::Threads)
+target_compile_options(flyrat_msp_interact PRIVATE -Wall -Wextra)
+
+install(TARGETS flyrat flyrat_hardware flyrat_msp_interact
   EXPORT flyrat_targets
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib)
@@ -86,6 +100,17 @@ if(FLYRAT_STANDALONE)
   set(FLYRAT_BUILD_TESTS ON)
 endif()
 option(FLYRAT_BUILD_TESTS "Build libflyrat unit tests" OFF)
+if(FLYRAT_STANDALONE)
+  option(FLYRAT_BUILD_TOOLS "Build libflyrat command line tools" ON)
+else()
+  option(FLYRAT_BUILD_TOOLS "Build libflyrat command line tools" OFF)
+endif()
+
+if(FLYRAT_BUILD_TOOLS)
+  add_executable(msp_interact_bench tools/msp_interact_bench.cpp)
+  target_link_libraries(msp_interact_bench PRIVATE flyrat_msp_interact flyrat_hardware)
+  target_compile_options(msp_interact_bench PRIVATE -Wall -Wextra)
+endif()
 
 if(FLYRAT_BUILD_TESTS)
   enable_testing()
@@ -113,4 +138,14 @@ if(FLYRAT_BUILD_TESTS)
     target_link_libraries(test_transport PRIVATE ${FLYRAT_UTIL_LIBRARY})
   endif()
   add_test(NAME test_transport COMMAND test_transport)
+
+  add_executable(test_msp_framing tests/test_msp_framing.cpp)
+  target_link_libraries(test_msp_framing PRIVATE flyrat_msp_interact)
+  target_compile_options(test_msp_framing PRIVATE -Wall -Wextra)
+  add_test(NAME test_msp_framing COMMAND test_msp_framing)
+
+  add_executable(test_msp_interact tests/test_msp_interact.cpp)
+  target_link_libraries(test_msp_interact PRIVATE flyrat_msp_interact)
+  target_compile_options(test_msp_interact PRIVATE -Wall -Wextra)
+  add_test(NAME test_msp_interact COMMAND test_msp_interact)
 endif()
