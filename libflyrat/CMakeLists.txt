@@ -58,7 +58,19 @@ else()
 endif()
 target_compile_options(flyrat PRIVATE -Wall -Wextra)
 
-install(TARGETS flyrat
+# Hardware access lives in its own target so the protocol layer can depend on
+# the header-only Transport interface without pulling in a particular backend.
+add_library(flyrat_hardware
+  src/hardware/serial_transport.cpp
+  src/hardware/tcp_transport.cpp)
+add_library(flyrat::flyrat_hardware ALIAS flyrat_hardware)
+target_include_directories(flyrat_hardware PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_link_libraries(flyrat_hardware PUBLIC Threads::Threads)
+target_compile_options(flyrat_hardware PRIVATE -Wall -Wextra)
+
+install(TARGETS flyrat flyrat_hardware
   EXPORT flyrat_targets
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib)
@@ -91,4 +103,14 @@ if(FLYRAT_BUILD_TESTS)
   target_link_libraries(test_local_estimator PRIVATE flyrat)
   target_compile_options(test_local_estimator PRIVATE -Wall -Wextra)
   add_test(NAME test_local_estimator COMMAND test_local_estimator)
+
+  add_executable(test_transport tests/test_transport.cpp)
+  target_link_libraries(test_transport PRIVATE flyrat_hardware)
+  target_compile_options(test_transport PRIVATE -Wall -Wextra)
+  # openpty() lives in libutil on glibc < 2.34.
+  find_library(FLYRAT_UTIL_LIBRARY util)
+  if(FLYRAT_UTIL_LIBRARY)
+    target_link_libraries(test_transport PRIVATE ${FLYRAT_UTIL_LIBRARY})
+  endif()
+  add_test(NAME test_transport COMMAND test_transport)
 endif()
