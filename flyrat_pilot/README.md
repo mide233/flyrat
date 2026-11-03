@@ -15,7 +15,12 @@ cmake --build flyrat_pilot/build -j
 
 ## 预留的接入点
 
-- `flyrat::MspClient`：TCP（SITL）或串口（实机）MSP 通信。
+- `flyrat::MspInteract`：异步 MSP v1 客户端，支持 TCP（SITL）与串口（实机）；
+  内部 I/O 线程按配置轮询姿态 / IMU / 状态 / 高度 / GPS，专用分发线程执行回调，
+  同时提供每类数据的最新快照。断线自动重连，运行期错误通过 `LinkStats` 与
+  link 回调返回；`send_rc()` 只写单槽邮箱，不等待 ACK。
+- `flyrat::hardware::Transport` / `make_serial_transport()` / `make_tcp_transport()`：
+  MSP 使用的字节流后端，msp_interact 通过抽象接口访问，单测可注入假传输。
 - `flyrat::RcReceiver`：UDP 9004 虚拟接收机（仅仿真用）。
 - `flyrat::Autopilot` / `flyrat::AttitudeHold`：姿态保持实现。
 - `flyrat::Ommpc`：on-manifold MPC（9 维误差状态 + 4 维输入，LTV + OSQP，默认
@@ -25,4 +30,5 @@ cmake --build flyrat_pilot/build -j
 - 建议的线程模型：固定频率的指令发送线程 + 独立的遥测/算法线程，二者不共享 MSP socket 的阻塞路径
   （仿真侧 `msp_node` 就是这么做的，可直接参考）。
 
-`flyrat_pilot/CMakeLists.txt` 已经链接 `flyrat::flyrat`，添加源文件即可开始实现。
+`flyrat_pilot/CMakeLists.txt` 已经链接 `flyrat::flyrat`、`flyrat::flyrat_msp_interact`
+和 `flyrat::flyrat_hardware`，添加源文件即可开始实现。

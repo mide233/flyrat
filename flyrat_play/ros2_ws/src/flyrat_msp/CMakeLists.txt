@@ -21,8 +21,8 @@ find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 
-# libflyrat owns the ROS-free transport (MSP client + UDP RC receiver); this
-# package is only the ROS 2 adapter around it.
+# libflyrat owns the ROS-free MSP client and UDP RC receiver; this package is
+# only the ROS 2 adapter around it.
 add_subdirectory(
   "${CMAKE_CURRENT_SOURCE_DIR}/../../../../libflyrat"
   "${CMAKE_CURRENT_BINARY_DIR}/flyrat")
@@ -30,6 +30,8 @@ add_subdirectory(
 add_executable(msp_node src/msp_node.cpp)
 target_link_libraries(msp_node PRIVATE
   flyrat::flyrat
+  flyrat::flyrat_msp_interact
+  flyrat::flyrat_hardware
   rclcpp::rclcpp
   ${geometry_msgs_TARGETS}
   ${nav_msgs_TARGETS}

@@ -11,7 +11,7 @@
 ┌──────────────── libflyrat/（纯 C++17，无 ROS 依赖）────────────────┐
 │  算法：State / Setpoint / Command / AttitudeHold / Ommpc / SO(3)   │
 │  模型：ThrustModel（油门→加速度）、RcMapping（角速度→摇杆）        │
-│  传输：MspClient（TCP 或串口 MSP）+ RcReceiver（UDP 9004）          │
+│  传输：MspInteract（TCP 或串口 MSP）+ RcReceiver（UDP 9004）        │
 └───────────────┬───────────────────────────────────┬───────────────┘
                 │                                   │
    ┌────────────▼──────────────┐      ┌─────────────▼──────────────┐
@@ -466,10 +466,11 @@ mpc: cmd=(...) att_err=.. vel=(.. .. ..) att_thr=.. thr2acc=.. thr=.. err=(.. ..
 - `flyrat::Command`：归一化指令 `roll/pitch/yaw ∈ [-1,1]`、`throttle ∈ [0,1]`。
 - `flyrat::Autopilot`：`reset()` + `update(state, setpoint, dt) -> Command`。
 - `flyrat::AttitudeHold`：示例实现（P 姿态控制 + 偏航角速度阻尼 + 输出限幅）。
-- `flyrat::MspClient`：MSP v1 客户端，支持 TCP（SITL）与串口（实机）；
-  `raw_gps()` / `altitude()` / `debug()` 分别读 GPS、EKF 高度和调试通道。
-  实现分两层：`msp_client.cpp` 只做连接与收发，`msp_telemetry.cpp` 放各条
-  遥测的解析，共享的线格式辅助在内网头 `msp_codec.hpp` 里。
+- `flyrat::MspInteract`：异步 MSP v1 客户端，支持 TCP（SITL）与串口（实机）。
+  内部 I/O 线程按配置轮询姿态 / IMU / 状态 / 高度 / GPS，分发线程执行分类回调，
+  同时保存每类数据的最新快照；断线自动重连。传输层抽象在
+  `flyrat/hardware/transport.hpp`，串口/TCP 实现在 `src/hardware/`。
+  `send_rc()` 只写单槽邮箱、不等待 ACK，`stats()` 提供超时 / 重连 / RC ACK 统计。
 - `flyrat::LocalEstimator`：把 `MSP_RAW_GPS` + `MSP_ALTITUDE` 转成本地 ENU
   位置/速度（原点锁定、0.25 m/s 速度死区、无 GPS 时保留原点）。实机换 VSLAM 时
   直接替换这一层的输入。
@@ -499,7 +500,7 @@ mpc: cmd=(...) att_err=.. vel=(.. .. ..) att_thr=.. thr2acc=.. thr=.. err=(.. ..
 ./flyrat_pilot/build/flyrat_pilot
 ```
 
-预留的接入点：`flyrat::MspClient`（TCP / 串口）、`flyrat::RcReceiver`（UDP 9004）、
+预留的接入点：`flyrat::MspInteract`（TCP / 串口）、`flyrat::RcReceiver`（UDP 9004）、
 `flyrat::Autopilot`（算法）。建议采用“固定频率发送线程 + 独立遥测/算法线程”的结构。
 详见 `flyrat_pilot/README.md`。
 

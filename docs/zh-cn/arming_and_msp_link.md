@@ -161,7 +161,7 @@ arm_latch2.sh 等）。MSP 是 **TCP 5761**（不是 UDP）。
    ```
 
 4. **静默链路自愈**：连续 3 个遥测周期失败就主动断开，下一周期重连并重新校验。
-5. `MspClient::close()` 在 `send_mutex_` 保护下关闭 fd，避免 RC 线程写进被复用的描述符。
+5. `MspInteract` 内部 I/O 线程独占传输 fd，RC 发送只写邮箱，避免多线程同时写同一描述符。
 6. `control_node` 的 `state telemetry stale` 提示改为指向 MSP 链路日志，而不是只说
    「commanding idle」。
 

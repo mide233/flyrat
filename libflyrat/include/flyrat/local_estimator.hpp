@@ -14,7 +14,7 @@
 // in one battery.
 #pragma once
 
-#include "flyrat/msp_client.hpp"
+#include "flyrat/gps.hpp"
 
 namespace flyrat {
 

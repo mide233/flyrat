@@ -19,5 +19,8 @@ add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../libflyrat"
                  "${CMAKE_CURRENT_BINARY_DIR}/libflyrat")
 
 add_executable(flyrat_pilot src/main.cpp)
-target_link_libraries(flyrat_pilot PRIVATE flyrat::flyrat)
+target_link_libraries(flyrat_pilot PRIVATE
+  flyrat::flyrat
+  flyrat::flyrat_msp_interact
+  flyrat::flyrat_hardware)
 target_compile_options(flyrat_pilot PRIVATE -Wall -Wextra)

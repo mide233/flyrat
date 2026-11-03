@@ -391,7 +391,8 @@ void test_timeout_and_reconnect()
 
     msp.start();
     check(msp.connected(), "reconnect test connected");
-    check(wait_for([&]() { return !msp.connected(); }, 2000), "timeout disconnects");
+    check(wait_for([&]() { return msp.stats().reconnects >= 1; }, 3000),
+        "timeout triggers reconnect");
     check(msp.stats().timeouts >= 3, "timeouts counted");
 
     fc.skip_imu = false;

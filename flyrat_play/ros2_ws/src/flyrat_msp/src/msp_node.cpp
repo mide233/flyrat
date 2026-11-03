@@ -35,8 +35,10 @@
 #include <std_msgs/msg/u_int16_multi_array.hpp>
 #include <std_srvs/srv/set_bool.hpp>
 
+#include "flyrat/hardware/serial_transport.hpp"
+#include "flyrat/hardware/tcp_transport.hpp"
 #include "flyrat/local_estimator.hpp"
-#include "flyrat/msp_client.hpp"
+#include "flyrat/msp_interact.hpp"
 #include "flyrat/rc_receiver.hpp"
 
 namespace flyrat_msp {
@@ -49,7 +51,7 @@ using flyrat::ImuSample;
 using flyrat::LocalEstimator;
 using flyrat::LocalPosition;
 using flyrat::MotorFrame;
-using flyrat::MspClient;
+using flyrat::MspInteract;
 using flyrat::RcFrame;
 using flyrat::RcReceiver;
 using flyrat::StatusFrame;
@@ -93,17 +95,6 @@ constexpr double kPi = 3.14159265358979323846;
 
 double to_radians(double degrees) { return degrees * kPi / 180.0; }
 
-// How long a single MSP request may wait for its reply while the link is being
-// established or validated.
-constexpr double kHandshakeTimeout = 0.3;
-// Reply window for normal telemetry: the SITL can be slow while the vehicle is
-// flying (the physics thread hogs the CPU), so keep the generous timeout the
-// link was tuned with instead of the short handshake one.
-constexpr double kTelemetryTimeout = 0.5;
-// Consecutive silent telemetry cycles tolerated before the link is dropped and
-// re-established (the scheduler runs at telemetry_rate, so ~0.3 s at 10 Hz).
-constexpr int kMaxTelemetryFailures = 3;
-
 } // namespace
 
 class MspNode : public rclcpp::Node {
@@ -124,12 +115,24 @@ public:
         // /flyrat/velocity are republished from the ground-truth odometry at
         // 60 Hz instead of the 10 Hz GPS path.
         use_ground_truth_ = declare_parameter<bool>("use_ground_truth", false);
+        // "tcp" for SITL, "serial" for the real vehicle (UART to the FC).
+        transport_ = declare_parameter<std::string>("transport", "tcp");
+        msp_device_ = declare_parameter<std::string>("msp_device", "/dev/ttyS3");
+        msp_baud_ = declare_parameter<int>("msp_baud", 921600);
+        imu_rate_ = declare_parameter<double>("imu_rate", telemetry_rate_);
+        gps_rate_ = declare_parameter<double>("gps_rate", telemetry_rate_);
+        rc_rate_ = declare_parameter<double>("rc_rate", 2.0);
+        extras_rate_ = declare_parameter<double>("extras_rate", 2.0);
 
         if (rate_ <= 0.0)
             throw std::runtime_error("rate must be > 0");
         if (telemetry_rate_ <= 0.0) {
             throw std::runtime_error("telemetry_rate must be > 0");
         }
+        if (imu_rate_ <= 0.0 || gps_rate_ <= 0.0 || rc_rate_ <= 0.0 || extras_rate_ <= 0.0)
+            throw std::runtime_error("imu_rate, gps_rate, rc_rate and extras_rate must be > 0");
+        if (transport_ != "tcp" && transport_ != "serial")
+            throw std::runtime_error("transport must be 'tcp' or 'serial'");
 
         auto qos = rclcpp::QoS(10);
         attitude_pub_ =
@@ -254,7 +257,8 @@ public:
         if (sender_thread_.joinable())
             sender_thread_.join();
         receiver_.close();
-        client_.close();
+        if (msp_)
+            msp_->stop();
     }
 
     // The UDP receiver is independent of MSP: open it once at startup and retry
@@ -309,45 +313,59 @@ private:
 
     void connect_links() {
         std::lock_guard<std::mutex> lock(link_mutex_);
-        if (client_.connected()) {
+        // MspInteract owns reconnection after the first successful start.
+        if (msp_) {
             return;
         }
 
-        // Both threads call this on every tick, so back off after a failed
-        // handshake instead of hammering a wedged flight controller.
         const auto now = std::chrono::steady_clock::now();
         if (now < next_connect_attempt_) {
             return;
         }
 
-        client_.connect(host_, msp_port_);
-        client_.set_timeout(kHandshakeTimeout);
+        std::unique_ptr<flyrat::hardware::Transport> transport;
+        std::string endpoint;
+        if (transport_ == "serial") {
+            transport = flyrat::hardware::make_serial_transport(msp_device_, msp_baud_);
+            endpoint = msp_device_ + " @" + std::to_string(msp_baud_);
+        } else {
+            transport = flyrat::hardware::make_tcp_transport(host_, msp_port_);
+            endpoint = host_ + ":" + std::to_string(msp_port_);
+        }
 
-        // A TCP connection proves nothing: the SITL accepts the socket from its
-        // own thread even while the flight controller never processes MSP (a
-        // previous client can leave the port wedged, and a stale SITL or any
-        // other program can own the port). Require one real reply before
-        // declaring the link usable, otherwise the node sits on a silent socket
-        // forever and arming silently never happens.
+        flyrat::MspConfig config;
+        config.poll.attitude_hz = static_cast<int>(std::lround(telemetry_rate_));
+        config.poll.imu_hz = static_cast<int>(std::lround(imu_rate_));
+        config.poll.status_hz = static_cast<int>(std::lround(telemetry_rate_));
+        config.poll.altitude_hz = static_cast<int>(std::lround(telemetry_rate_));
+        config.poll.rc_hz = static_cast<int>(std::lround(rc_rate_));
+        config.poll.analog_hz = static_cast<int>(std::lround(extras_rate_));
+        config.poll.motor_hz = static_cast<int>(std::lround(extras_rate_));
+        config.poll.gps_hz = static_cast<int>(std::lround(gps_rate_));
+        config.poll.debug_hz = 0;
+        config.poll_timeout_ms = 20;
+        config.request_timeout_ms = 500;
+        config.reconnect_backoff_ms = 1000;
+        config.status_extended = true;
+
+        auto candidate = std::make_unique<MspInteract>(config, std::move(transport));
+        install_callbacks(*candidate);
         try {
-            client_.api_version();
+            candidate->start();
         } catch (const std::exception& exc) {
-            client_.close();
             next_connect_attempt_ = now + std::chrono::seconds(1);
             RCLCPP_ERROR_THROTTLE(
                 get_logger(), *get_clock(), 2000,
-                "SITL at %s:%d accepted the TCP connection but never answered "
-                "MSP_API_VERSION (%s). The flight controller is not processing MSP: "
-                "restart the simulation stack (a stale SITL or another program may "
-                "own port %d).",
-                host_.c_str(), msp_port_, exc.what(), msp_port_);
+                "MSP link to %s failed: %s. Check that the flight controller is "
+                "processing MSP and that the UART/baud are correct.",
+                endpoint.c_str(), exc.what());
             return;
         }
 
-        client_.set_timeout(kTelemetryTimeout);
-        telemetry_failures_ = 0;
+        msp_ptr_.store(candidate.get(), std::memory_order_release);
+        msp_ = std::move(candidate);
         RCLCPP_INFO(
-            get_logger(), "connected to SITL MSP at %s:%d, RC -> %s:%d", host_.c_str(), msp_port_,
+            get_logger(), "connected to MSP at %s, RC -> %s:%d", endpoint.c_str(),
             host_.c_str(), rc_port_);
     }
 
@@ -365,16 +383,13 @@ private:
                                       std::chrono::steady_clock::now().time_since_epoch())
                                       .count();
                 receiver_.send(channels, ts);
-                if (client_.connected()) {
-                    client_.set_raw_rc(channels);
+                MspInteract* msp = msp_ptr_.load(std::memory_order_acquire);
+                if (msp && msp->connected()) {
+                    msp->send_rc(channels);
                 }
             } catch (const std::exception& exc) {
                 RCLCPP_WARN_THROTTLE(
-                    get_logger(), *get_clock(), 5000, "SITL link error: %s", exc.what());
-                {
-                    std::lock_guard<std::mutex> lock(link_mutex_);
-                    client_.close();
-                }
+                    get_logger(), *get_clock(), 5000, "RC link error: %s", exc.what());
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
             }
             next += std::chrono::duration_cast<std::chrono::steady_clock::duration>(period);
@@ -385,139 +400,62 @@ private:
         }
     }
 
-    // Telemetry reader. It may block for a while when the flight controller is
-    // busy (expected in SITL while the vehicle is flying). That must not disturb
-    // the RC stream, which lives in sender_loop().
-    void loop() {
-        const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-            std::chrono::duration<double>(1.0 / telemetry_rate_));
-        // Deadline based, not "sleep after work": every tick costs several MSP
-        // round trips (attitude, status, altitude, GPS), and a plain sleep would
-        // make the effective rate depend on the link latency.
-        auto next = std::chrono::steady_clock::now();
-        int telemetry_ticks = 0;
-        while (running_ && rclcpp::ok()) {
-            try {
-                ensure_receiver();
-                connect_links();
-                publish_telemetry((telemetry_ticks % 25) == 0);
-                telemetry_failures_ = 0;
-                ++telemetry_ticks;
-            } catch (const std::exception& exc) {
-                // A read timeout does not close the socket, and set_raw_rc() keeps
-                // succeeding on it, so nothing else would ever notice that the
-                // flight controller stopped answering. Drop the link after a few
-                // silent cycles: connect_links() then reconnects and re-validates
-                // it instead of letting the node sit on a dead socket forever.
-                bool dropped = false;
-                {
-                    std::lock_guard<std::mutex> lock(link_mutex_);
-                    if (++telemetry_failures_ >= kMaxTelemetryFailures) {
-                        telemetry_failures_ = 0;
-                        if (client_.connected()) {
-                            client_.close();
-                            dropped = true;
-                        }
-                    }
-                }
-                if (dropped) {
-                    RCLCPP_ERROR(
-                        get_logger(),
-                        "MSP link went silent (%s); dropped it so the next tick "
-                        "reconnects and re-validates the link",
-                        exc.what());
-                }
-                RCLCPP_WARN_THROTTLE(
-                    get_logger(), *get_clock(), 5000, "telemetry read failed: %s", exc.what());
+    void install_callbacks(MspInteract& msp) {
+        msp.set_attitude_callback([this](const flyrat::Sample<Attitude>& sample) {
+            publish_attitude(sample.value);
+        });
+        msp.set_imu_callback([this](const flyrat::Sample<ImuSample>& sample) {
+            publish_imu(sample.value);
+        });
+        msp.set_status_callback([this](const flyrat::Sample<StatusFrame>& sample) {
+            publish_status(sample.value);
+        });
+        msp.set_altitude_callback([this](const flyrat::Sample<AltitudeFrame>& sample) {
+            publish_altitude(sample.value);
+        });
+        msp.set_rc_callback([this](const flyrat::Sample<RcFrame>& sample) {
+            publish_rc(sample.value);
+        });
+        msp.set_motor_callback([this](const flyrat::Sample<MotorFrame>& sample) {
+            publish_motor(sample.value);
+        });
+        msp.set_analog_callback([this](const flyrat::Sample<AnalogFrame>& sample) {
+            publish_analog(sample.value);
+        });
+        msp.set_gps_callback([this](const flyrat::Sample<GpsFrame>& sample) {
+            AltitudeFrame altitude;
+            {
+                std::lock_guard<std::mutex> lock(altitude_mutex_);
+                if (!has_altitude_)
+                    return;
+                altitude = latest_altitude_;
             }
-            next += period;
-            std::this_thread::sleep_until(next);
-            if (std::chrono::steady_clock::now() > next + period * 5) {
-                next = std::chrono::steady_clock::now(); // fell behind, resync
+            publish_position(sample.value, altitude);
+        });
+        msp.set_link_callback([this](bool up, const std::string& why) {
+            if (up) {
+                RCLCPP_INFO(get_logger(), "MSP link up");
+            } else {
+                RCLCPP_WARN(get_logger(), "MSP link down: %s", why.c_str());
             }
-        }
+        });
     }
 
-    void publish_telemetry(bool extras) {
-        const auto stamp = now();
-        const Attitude attitude = client_.attitude();
+    // All publish_* helpers run on MspInteract's dispatch thread. They only
+    // copy the decoded structs into ROS messages; no blocking calls here.
+    void publish_attitude(const Attitude& attitude) {
         geometry_msgs::msg::Vector3Stamped a;
-        a.header.stamp = stamp;
+        a.header.stamp = now();
         a.header.frame_id = "base_link";
         a.vector.x = to_radians(attitude.roll_deg);
         a.vector.y = to_radians(attitude.pitch_deg);
         a.vector.z = to_radians(attitude.yaw_deg);
         attitude_pub_->publish(a);
-
-        const StatusFrame status = client_.status(true);
-        fc_armed_ = status.armed;
-        const bool armed = status.armed;
-        const bool msp_override = status.msp_override;
-        std_msgs::msg::Int32MultiArray status_msg;
-        status_msg.data = {
-            armed ? 1 : 0, msp_override ? 1 : 0, static_cast<int32_t>(status.cycletime),
-            static_cast<int32_t>(status.sensors)};
-        status_pub_->publish(status_msg);
-        if (!status.armed) {
-            RCLCPP_INFO_THROTTLE(
-                get_logger(), *get_clock(), 2000, "arming blocked: flags=0x%08x", status.arming_disable_flags);
-        }
-
-        std_msgs::msg::Bool armed_msg;
-        armed_msg.data = armed;
-        armed_pub_->publish(armed_msg);
-
-        // Altitude and GPS are needed for the position estimate, so they are
-        // read on every tick instead of riding along with the slow extras.
-        const AltitudeFrame altitude = client_.altitude();
-        std_msgs::msg::Float32 altitude_msg;
-        altitude_msg.data = altitude.valid ? static_cast<float>(altitude.altitude_m)
-                                           : std::numeric_limits<float>::quiet_NaN();
-        altitude_pub_->publish(altitude_msg);
-
-        publish_position(stamp, altitude);
-
-        // The gyro and accelerometer are part of the state feedback (body rates
-        // for the MPC, specific force for the thrust model), so they ride on the
-        // fast path rather than with the slow extras.
-        publish_imu(stamp);
-
-        if (!extras)
-            return;
-
-        // MSP_RC returns internal order (roll, pitch, yaw, throttle, aux...);
-        // republish in raw receiver order for consistency with the wire format.
-        const RcFrame rc = client_.rc();
-        std_msgs::msg::UInt16MultiArray rc_msg;
-        rc_msg.layout.data_offset = 0;
-        if (rc.channels.size() >= 4) {
-            rc_msg.data = {rc.channels[0], rc.channels[1], rc.channels[3], rc.channels[2]};
-            for (size_t i = 4; i < rc.channels.size(); ++i) {
-                rc_msg.data.push_back(rc.channels[i]);
-            }
-        } else {
-            rc_msg.data = rc.channels;
-        }
-        rc_pub_->publish(rc_msg);
-
-        const MotorFrame motors = client_.motor();
-        std_msgs::msg::UInt16MultiArray motor_msg;
-        motor_msg.data = motors.motors;
-        motor_pub_->publish(motor_msg);
-
-
-        const AnalogFrame analog = client_.analog();
-        std_msgs::msg::Float32 battery_msg;
-        battery_msg.data = static_cast<float>(analog.voltage_v);
-        battery_pub_->publish(battery_msg);
     }
 
-    // GPS -> local ENU. A failed MSP_RAW_GPS read must not take down the rest
-    // of the telemetry stream, so it only disables the position output.
-    void publish_imu(const rclcpp::Time& stamp) {
-        const ImuSample imu = client_.raw_imu();
+    void publish_imu(const ImuSample& imu) {
         sensor_msgs::msg::Imu imu_msg;
-        imu_msg.header.stamp = stamp;
+        imu_msg.header.stamp = now();
         imu_msg.header.frame_id = "base_link";
         imu_msg.orientation_covariance[0] = -1.0; // no orientation estimate
         for (int i = 0; i < 3; ++i) {
@@ -533,20 +471,73 @@ private:
         imu_pub_->publish(imu_msg);
     }
 
-    void publish_position(const rclcpp::Time& stamp, const AltitudeFrame& altitude) {
-        // Ground truth is republished by its own 60 Hz timer, which is faster
-        // than the MSP telemetry loop.
+    void publish_status(const StatusFrame& status) {
+        fc_armed_ = status.armed;
+        const bool armed = status.armed;
+        const bool msp_override = status.msp_override;
+        std_msgs::msg::Int32MultiArray status_msg;
+        status_msg.data = {
+            armed ? 1 : 0, msp_override ? 1 : 0, static_cast<int32_t>(status.cycletime),
+            static_cast<int32_t>(status.sensors)};
+        status_pub_->publish(status_msg);
+
+        std_msgs::msg::Bool armed_msg;
+        armed_msg.data = armed;
+        armed_pub_->publish(armed_msg);
+
+        if (!status.armed) {
+            RCLCPP_INFO_THROTTLE(
+                get_logger(), *get_clock(), 2000, "arming blocked: flags=0x%08x",
+                status.arming_disable_flags);
+        }
+    }
+
+    void publish_altitude(const AltitudeFrame& altitude) {
+        {
+            std::lock_guard<std::mutex> lock(altitude_mutex_);
+            latest_altitude_ = altitude;
+            has_altitude_ = true;
+        }
+        std_msgs::msg::Float32 altitude_msg;
+        altitude_msg.data = altitude.valid ? static_cast<float>(altitude.altitude_m)
+                                           : std::numeric_limits<float>::quiet_NaN();
+        altitude_pub_->publish(altitude_msg);
+    }
+
+    void publish_rc(const RcFrame& rc) {
+        // MSP_RC returns internal order (roll, pitch, yaw, throttle, aux...);
+        // republish in raw receiver order for consistency with the wire format.
+        std_msgs::msg::UInt16MultiArray rc_msg;
+        rc_msg.layout.data_offset = 0;
+        if (rc.channels.size() >= 4) {
+            rc_msg.data = {rc.channels[0], rc.channels[1], rc.channels[3], rc.channels[2]};
+            for (size_t i = 4; i < rc.channels.size(); ++i) {
+                rc_msg.data.push_back(rc.channels[i]);
+            }
+        } else {
+            rc_msg.data = rc.channels;
+        }
+        rc_pub_->publish(rc_msg);
+    }
+
+    void publish_motor(const MotorFrame& motors) {
+        std_msgs::msg::UInt16MultiArray motor_msg;
+        motor_msg.data = motors.motors;
+        motor_pub_->publish(motor_msg);
+    }
+
+    void publish_analog(const AnalogFrame& analog) {
+        std_msgs::msg::Float32 battery_msg;
+        battery_msg.data = static_cast<float>(analog.voltage_v);
+        battery_pub_->publish(battery_msg);
+    }
+
+    // GPS -> local ENU. Malformed frames are dropped by MspInteract, so this
+    // only runs for a valid sample; a missing altitude sample just skips the
+    // position update.
+    void publish_position(const GpsFrame& gps, const AltitudeFrame& altitude) {
         if (use_ground_truth_)
             return;
-
-        GpsFrame gps;
-        try {
-            gps = client_.raw_gps();
-        } catch (const std::exception& exc) {
-            RCLCPP_WARN_THROTTLE(
-                get_logger(), *get_clock(), 5000, "GPS read failed: %s", exc.what());
-            return;
-        }
 
         if (gps.fix != last_fix_) {
             last_fix_ = gps.fix;
@@ -566,7 +557,7 @@ private:
 
         const LocalPosition& p = estimator_.position();
         geometry_msgs::msg::Vector3Stamped pos;
-        pos.header.stamp = stamp;
+        pos.header.stamp = now();
         pos.header.frame_id = "map";
         pos.vector.x = p.east_m;
         pos.vector.y = p.north_m;
@@ -574,7 +565,7 @@ private:
         position_pub_->publish(pos);
 
         geometry_msgs::msg::Vector3Stamped vel;
-        vel.header.stamp = stamp;
+        vel.header.stamp = pos.header.stamp;
         vel.header.frame_id = "map";
         vel.vector.x = p.vel_east_mps;
         vel.vector.y = p.vel_north_mps;
@@ -582,19 +573,66 @@ private:
         velocity_pub_->publish(vel);
     }
 
+    // Supervises the UDP receiver and the initial MSP connection. Once
+    // MspInteract has started it reconnects on its own; this loop only creates
+    // the object when the first handshake failed.
+    void loop() {
+        const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<double>(1.0 / telemetry_rate_));
+        auto next = std::chrono::steady_clock::now();
+        auto next_stats = next + std::chrono::seconds(5);
+        while (running_ && rclcpp::ok()) {
+            ensure_receiver();
+            connect_links();
+
+            const auto now_steady = std::chrono::steady_clock::now();
+            if (now_steady >= next_stats) {
+                MspInteract* msp = msp_ptr_.load(std::memory_order_acquire);
+                if (msp) {
+                    const auto stats = msp->stats();
+                    RCLCPP_INFO(
+                        get_logger(),
+                        "MSP %s: tx=%llu rx=%llu timeouts=%llu rc_ack=%llu/%llu "
+                        "checksum=%llu reconnects=%llu",
+                        stats.connected ? "up" : "down",
+                        static_cast<unsigned long long>(stats.tx_frames),
+                        static_cast<unsigned long long>(stats.rx_frames),
+                        static_cast<unsigned long long>(stats.timeouts),
+                        static_cast<unsigned long long>(stats.rc_ack),
+                        static_cast<unsigned long long>(stats.rc_sent),
+                        static_cast<unsigned long long>(stats.checksum_errors),
+                        static_cast<unsigned long long>(stats.reconnects));
+                }
+                next_stats = now_steady + std::chrono::seconds(5);
+            }
+
+            next += period;
+            std::this_thread::sleep_until(next);
+            if (std::chrono::steady_clock::now() > next + period * 5) {
+                next = std::chrono::steady_clock::now(); // fell behind, resync
+            }
+        }
+    }
+
     std::string host_;
     int msp_port_ = 5761;
     int rc_port_ = 9004;
     double rate_ = 50.0;
     double telemetry_rate_ = 10.0;
+    double imu_rate_ = 50.0;
+    double gps_rate_ = 10.0;
+    double rc_rate_ = 2.0;
+    double extras_rate_ = 2.0;
     double rc_timeout_ = 0.25;
+    std::string transport_ = "tcp";
+    std::string msp_device_ = "/dev/ttyS3";
+    int msp_baud_ = 921600;
 
     std::mutex mutex_;
     std::mutex link_mutex_;
-    // Link supervision: when the next reconnect may be attempted and how many
-    // telemetry cycles in a row have timed out.
+    std::mutex altitude_mutex_;
+    // Link supervision: when the next initial connection may be attempted.
     std::chrono::steady_clock::time_point next_connect_attempt_{};
-    int telemetry_failures_ = 0;
     // ARM switch gating: AUX1 stays low until arm_release_ (the pulse), and
     std::chrono::steady_clock::time_point arm_release_{};
     std::chrono::steady_clock::time_point last_arm_pulse_{};
@@ -611,8 +649,12 @@ private:
     std::thread thread_;
     std::thread sender_thread_;
 
-    MspClient client_;
+    std::unique_ptr<MspInteract> msp_;
+    std::atomic<MspInteract*> msp_ptr_{nullptr};
     RcReceiver receiver_;
+
+    AltitudeFrame latest_altitude_;
+    bool has_altitude_ = false;
 
     rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr attitude_pub_;
     rclcpp::Publisher<std_msgs::msg::UInt16MultiArray>::SharedPtr rc_pub_;
