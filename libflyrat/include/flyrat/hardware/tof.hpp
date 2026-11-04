@@ -24,6 +24,12 @@ namespace flyrat::hardware {
 
 inline constexpr int kTofMaxSensors = 4;
 inline constexpr int kTofMaxZones = 64;
+// The four sensors are always assigned these 8-bit addresses, in LPn order.
+inline constexpr std::array<std::uint16_t, kTofMaxSensors> kTofAddresses {
+    0x60, 0x62, 0x64, 0x66
+};
+// Factory/default address used by every VL53L5CX at power-up.
+inline constexpr std::uint16_t kTofDefaultAddress = 0x52;
 
 struct TofZone {
     std::int16_t distance_mm = 0;
@@ -50,18 +56,6 @@ struct TofConfig {
     std::array<int, kTofMaxSensors> lpn_gpio { 108, 114, 101, 98 };
     // Optional interrupt lines. Set use_interrupts=false (default) to poll.
     std::array<int, kTofMaxSensors> int_gpio { 107, 104, 100, 97 };
-    // 8-bit I2C addresses, one per sensor. All sensors boot at 0x52.
-    // The first sensor must also be moved away from 0x52 before the next LPn is
-    // released, otherwise the new sensor collides with it.
-    std::array<std::uint16_t, kTofMaxSensors> addresses { 0x60, 0x62, 0x64, 0x66 };
-    // Address each sensor is expected to answer at before assignment. Normally
-    // all 0x52; this is overridable to recover a sensor left at another address.
-    std::array<std::uint16_t, kTofMaxSensors> initial_addresses { 0x52, 0x52, 0x52, 0x52 };
-    // If the initial address does not answer, probe the configured addresses
-    // and then the 7-bit I2C address range for the address the sensor retained
-    // from a previous run. Addresses are volatile and only a power cycle sends
-    // them back to 0x52, so this makes a warm restart self-healing.
-    bool recover_existing_address = true;
     int resolution = 4; // 4 or 8
     int ranging_hz = 60; // 4x4 supports 60 Hz; 8x8 is capped at 15 Hz
     int poll_interval_ms = 2;

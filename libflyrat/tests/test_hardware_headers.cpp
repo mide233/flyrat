@@ -42,7 +42,10 @@ int main()
 
     flyrat::hardware::TofConfig config;
     check(config.sensor_count == 4, "four sensors by default");
-    check(config.addresses[0] == 0x60 && config.addresses[3] == 0x66, "address defaults");
+    check(flyrat::hardware::kTofAddresses[0] == 0x60 &&
+              flyrat::hardware::kTofAddresses[3] == 0x66,
+        "hardcoded ToF addresses");
+    check(flyrat::hardware::kTofDefaultAddress == 0x52, "ToF default address");
 
     flyrat::hardware::StereoConfig stereo;
     check(stereo.width == 1280 && stereo.height == 480, "stereo defaults");

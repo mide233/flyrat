@@ -31,17 +31,13 @@ struct Options {
     bool interrupts = false;
     std::array<int, flyrat::hardware::kTofMaxSensors> lpn { 108, 114, 101, 98 };
     std::array<int, flyrat::hardware::kTofMaxSensors> ints { 107, 104, 100, 97 };
-    std::array<std::uint16_t, flyrat::hardware::kTofMaxSensors> addresses { 0x60, 0x62, 0x64, 0x66 };
-    std::array<std::uint16_t, flyrat::hardware::kTofMaxSensors> initial { 0x52, 0x52, 0x52, 0x52 };
 };
 
 void usage()
 {
     std::printf("usage: tof_bench [--device /dev/i2c-2] [--seconds 10] "
                 "[--resolution 4|8] [--hz 60] [--sensors 4] [--poll-ms 2] [--interrupts] "
-                "[--lpn 98,97,103,114] [--int 99,100,101,102] "
-                "[--addresses 0x60,0x62,0x64,0x66] "
-                "[--initial 0x52,0x52,0x52,0x52]\n");
+                "[--lpn 98,97,103,114] [--int 99,100,101,102]\n");
 }
 
 bool parse_int_list(const std::string& text, int* values, int count)
@@ -64,21 +60,6 @@ bool parse_int_list(const std::string& text, int* values, int count)
         start = comma + 1;
     }
     return false;
-}
-
-bool parse_address_list(const std::string& text, std::uint16_t* values, int count)
-{
-    int parsed[flyrat::hardware::kTofMaxSensors] {};
-    if (!parse_int_list(text, parsed, count)) {
-        return false;
-    }
-    for (int i = 0; i < count; ++i) {
-        if (parsed[i] < 0x08 || parsed[i] > 0xEE) {
-            return false;
-        }
-        values[i] = static_cast<std::uint16_t>(parsed[i]);
-    }
-    return true;
 }
 
 } // namespace
@@ -121,18 +102,6 @@ int main(int argc, char** argv)
                 std::fprintf(stderr, "invalid --int list\n");
                 return 2;
             }
-        } else if (arg == "--addresses") {
-            if (!parse_address_list(next("--addresses"), options.addresses.data(),
-                    flyrat::hardware::kTofMaxSensors)) {
-                std::fprintf(stderr, "invalid --addresses list\n");
-                return 2;
-            }
-        } else if (arg == "--initial") {
-            if (!parse_address_list(next("--initial"), options.initial.data(),
-                    flyrat::hardware::kTofMaxSensors)) {
-                std::fprintf(stderr, "invalid --initial list\n");
-                return 2;
-            }
         } else if (arg == "--help" || arg == "-h") {
             usage();
             return 0;
@@ -157,8 +126,6 @@ int main(int argc, char** argv)
     config.use_interrupts = options.interrupts;
     config.lpn_gpio = options.lpn;
     config.int_gpio = options.ints;
-    config.addresses = options.addresses;
-    config.initial_addresses = options.initial;
 
     std::setvbuf(stdout, nullptr, _IOLBF, 0);
 

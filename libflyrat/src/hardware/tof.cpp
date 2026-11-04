@@ -77,38 +77,32 @@ void add_address(std::vector<std::uint16_t>& addresses, std::uint16_t address)
 }
 
 std::uint16_t probe_existing_address(VL53L5CX_Configuration& driver,
-    const TofConfig& config, int sensor, int configured_count,
-    std::uint8_t& last_status)
+    std::uint8_t& last_status, int configured_count)
 {
     std::vector<std::uint16_t> candidates;
-    add_address(candidates, config.initial_addresses[sensor]);
-    add_address(candidates, 0x52);
-    for (int i = 0; i < config.sensor_count; ++i) {
-        add_address(candidates, config.addresses[i]);
+    add_address(candidates, kTofDefaultAddress);
+    for (int i = configured_count; i < kTofMaxSensors; ++i) {
+        add_address(candidates, kTofAddresses[i]);
     }
 
-    // A sensor keeps its last address until it is really powered down. If it
-    // was moved by an older configuration, search the whole 7-bit range after
-    // the cheap, known candidates. Only this sensor's LPn is high here, so no
-    // other VL53L5CX is visible on the bus.
-    if (config.recover_existing_address) {
-        for (std::uint16_t address = 0x08; address <= 0xEE; address += 2) {
+    // A sensor keeps its last address until it is really powered down. Only
+    // this sensor's LPn is high here, but the previous sensor can still answer
+    // for a short time, so never accept an address that already belongs to one
+    // of the configured sensors.
+    for (std::uint16_t address = 0x08; address <= 0xEE; address += 2) {
+        bool already_configured = false;
+        for (int i = 0; i < configured_count; ++i) {
+            if (address == kTofAddresses[i]) {
+                already_configured = true;
+                break;
+            }
+        }
+        if (!already_configured) {
             add_address(candidates, address);
         }
     }
 
     for (const std::uint16_t address : candidates) {
-        bool already_owned = false;
-        for (int i = 0; i < configured_count; ++i) {
-            if (config.addresses[i] == address) {
-                already_owned = true;
-                break;
-            }
-        }
-        if (already_owned) {
-            continue;
-        }
-
         driver.platform.address = address;
         std::uint8_t alive = 0;
         last_status = vl53l5cx_is_alive(&driver, &alive);
@@ -282,14 +276,6 @@ struct TofArray::Impl {
         if (config.ranging_hz <= 0 || config.ranging_hz > max_hz) {
             throw TofError("ranging_hz must be 1.." + std::to_string(max_hz));
         }
-        for (int i = 0; i < config.sensor_count; ++i) {
-            for (int j = i + 1; j < config.sensor_count; ++j) {
-                if (config.addresses[i] == config.addresses[j]) {
-                    throw TofError("ToF addresses must be unique");
-                }
-            }
-        }
-
         std::string error;
         for (int i = 0; i < config.sensor_count; ++i) {
             if (!lpn[i].init(error)) {
@@ -323,11 +309,11 @@ struct TofArray::Impl {
 
             std::uint8_t last_status = 255;
             const std::uint16_t current_address =
-                probe_existing_address(device.driver, config, i, i, last_status);
+                probe_existing_address(device.driver, last_status, i);
             if (current_address == 0) {
                 fail(i, "is_alive", last_status);
             }
-            if (current_address != config.initial_addresses[i]) {
+            if (current_address != kTofDefaultAddress) {
                 std::fprintf(stderr, "ToF sensor %d found at 0x%02X\n",
                     i, current_address);
             }
@@ -337,8 +323,8 @@ struct TofArray::Impl {
                 fail(i, "init", status);
             }
 
-            if (config.addresses[i] != current_address) {
-                status = vl53l5cx_set_i2c_address(&device.driver, config.addresses[i]);
+            if (kTofAddresses[i] != current_address) {
+                status = vl53l5cx_set_i2c_address(&device.driver, kTofAddresses[i]);
                 if (status != 0) {
                     fail(i, "set_i2c_address", status);
                 }
