@@ -4,6 +4,8 @@
 
 - 不依赖 ROS，链接与仿真共用的 `libflyrat`。
 - 目前只有一个可编译、可运行的 `main()`，运行时逻辑（MSP 链路、50 Hz 指令下发、遥测与失效保护、算法接入）尚未实现。
+- `flyrat_sensor_forwarder` 已实现实机传感器转发，接入方法见
+  [`docs/zh-cn/sensor_forwarding.md`](../docs/zh-cn/sensor_forwarding.md)。
 
 ## 构建
 

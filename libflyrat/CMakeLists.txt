@@ -82,6 +82,7 @@ add_library(flyrat_hardware
   src/hardware/mjpeg_decoder.cpp
   src/hardware/serial_transport.cpp
   src/hardware/stereo_camera.cpp
+  src/hardware/stereo_jpeg_source.cpp
   src/hardware/tcp_transport.cpp
   src/hardware/tof.cpp)
 add_library(flyrat::flyrat_hardware ALIAS flyrat_hardware)
@@ -188,4 +189,9 @@ if(FLYRAT_BUILD_TESTS)
   target_link_libraries(test_hardware_headers PRIVATE flyrat_hardware)
   target_compile_options(test_hardware_headers PRIVATE -Wall -Wextra)
   add_test(NAME test_hardware_headers COMMAND test_hardware_headers)
+
+  add_executable(test_sensor_protocol tests/test_sensor_protocol.cpp)
+  target_include_directories(test_sensor_protocol PRIVATE include)
+  target_compile_options(test_sensor_protocol PRIVATE -Wall -Wextra)
+  add_test(NAME test_sensor_protocol COMMAND test_sensor_protocol)
 endif()

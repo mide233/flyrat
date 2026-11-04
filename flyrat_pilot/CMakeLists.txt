@@ -24,3 +24,12 @@ target_link_libraries(flyrat_pilot PRIVATE
   flyrat::flyrat_msp_interact
   flyrat::flyrat_hardware)
 target_compile_options(flyrat_pilot PRIVATE -Wall -Wextra)
+
+add_executable(flyrat_sensor_forwarder
+  src/sensors/sensor_forwarder.cpp
+  src/sensors/sensor_forwarder_main.cpp)
+target_link_libraries(flyrat_sensor_forwarder PRIVATE
+  flyrat::flyrat
+  flyrat::flyrat_msp_interact
+  flyrat::flyrat_hardware)
+target_compile_options(flyrat_sensor_forwarder PRIVATE -Wall -Wextra)
