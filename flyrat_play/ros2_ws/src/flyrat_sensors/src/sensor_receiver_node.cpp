@@ -105,7 +105,7 @@ public:
         acc_lsb_per_g_ = declare_parameter<double>("acc_lsb_per_g", 2048.0);
         gyro_lsb_per_dps_ = declare_parameter<double>("gyro_lsb_per_dps", 16.4);
         imu_accel_axis_ = declare_parameter<std::string>("imu_accel_axis", "none");
-        imu_gyro_axis_ = declare_parameter<std::string>("imu_gyro_axis", "bf_to_flu");
+        imu_gyro_axis_ = declare_parameter<std::string>("imu_gyro_axis", "none");
         stereo_color_ = declare_parameter<bool>("stereo_color", false);
         const int tof_count = declare_parameter<int>("tof_count", 4);
 
@@ -115,10 +115,8 @@ public:
         if (imu_accel_axis_ != "frd_to_flu" && imu_accel_axis_ != "none") {
             throw std::runtime_error("imu_accel_axis must be 'frd_to_flu' or 'none'");
         }
-        if (imu_gyro_axis_ != "frd_to_flu" && imu_gyro_axis_ != "bf_to_flu" &&
-            imu_gyro_axis_ != "none") {
-            throw std::runtime_error(
-                "imu_gyro_axis must be 'bf_to_flu', 'frd_to_flu' or 'none'");
+        if (imu_gyro_axis_ != "frd_to_flu" && imu_gyro_axis_ != "none") {
+            throw std::runtime_error("imu_gyro_axis must be 'frd_to_flu' or 'none'");
         }
         RCLCPP_INFO(get_logger(), "IMU axis conventions: accel=%s gyro=%s",
             imu_accel_axis_.c_str(), imu_gyro_axis_.c_str());
@@ -307,20 +305,17 @@ private:
         msg.header.stamp = stamp_for(header.device_time_ns);
         msg.header.frame_id = imu_frame_id_;
 
-        // Betaflight's MSP_RAW_IMU mixes two sign conventions. The
-        // accelerometer is NWU (x forward, y left, z up), which already
-        // matches ROS FLU. Betaflight's body axes are also x forward, y left,
-        // z up, but its yaw angle is positive clockwise seen from above
-        // (left-hand rule), so only the gyro z sign must be negated. Pitch
-        // positive is nose-down, which is +y in FLU, so y stays unchanged.
-        // A true FRD gyro source also needs y negated; select frd_to_flu for
-        // that case. Convert the two streams separately.
+        // Betaflight's MSP_RAW_IMU on this vehicle already uses ROS FLU axes
+        // for both streams: x forward, y left, z up, with yaw positive
+        // counter-clockwise seen from above. Keep them unchanged by default.
+        // A board whose raw streams are FRD needs y and z negated; select
+        // frd_to_flu for that case. Convert the two streams separately so
+        // accelerometer and gyro conventions can differ.
         const double accel_y_sign = imu_accel_axis_ == "frd_to_flu" ? -1.0 : 1.0;
         const double accel_z_sign = imu_accel_axis_ == "frd_to_flu" ? -1.0 : 1.0;
         const bool gyro_frd = imu_gyro_axis_ == "frd_to_flu";
-        const bool gyro_bf = imu_gyro_axis_ == "bf_to_flu";
         const double gyro_y_sign = gyro_frd ? -1.0 : 1.0;
-        const double gyro_z_sign = (gyro_frd || gyro_bf) ? -1.0 : 1.0;
+        const double gyro_z_sign = gyro_frd ? -1.0 : 1.0;
 
         msg.linear_acceleration.x =
             static_cast<double>(raw.acc[0]) / acc_lsb_per_g_ * kGravity;
@@ -419,7 +414,7 @@ private:
     double acc_lsb_per_g_ = 2048.0;
     double gyro_lsb_per_dps_ = 16.4;
     std::string imu_accel_axis_ = "none";
-    std::string imu_gyro_axis_ = "bf_to_flu";
+    std::string imu_gyro_axis_ = "none";
     bool stereo_color_ = false;
 
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;

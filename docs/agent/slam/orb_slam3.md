@@ -155,8 +155,8 @@ IMU 缓存默认 1 s。图像回调只保留最新待处理帧，跟踪线程忙
 非空时在节点退出时保存 TUM 轨迹。
 
 节点要求 IMU 已按 ROS FLU 发布。当前实机 `sensor_receiver_node` 默认
-`imu_accel_axis=none`、`imu_gyro_axis=bf_to_flu`：加速度计原始数据已经是 FLU，
-陀螺仪按 Betaflight 约定只需翻转 z。若两路原始约定不同，按
+`imu_accel_axis=none`、`imu_gyro_axis=none`：两路原始数据都已经是 FLU。
+若两路原始约定不同，按
 [`sensor_forwarding.md`](../hardware/sensor_forwarding.md) 调整，否则
 `IMU.T_b_c1`、重力方向和 IMU 预积分都会不一致。
 

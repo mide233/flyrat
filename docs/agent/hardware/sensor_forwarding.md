@@ -98,7 +98,7 @@ stereo_color=false
 acc_lsb_per_g=2048.0
 gyro_lsb_per_dps=16.4
 imu_accel_axis=none
-imu_gyro_axis=bf_to_flu
+imu_gyro_axis=none
 ```
 
 节点还支持 `reconnect_ms`、`tof_count`、`imu_frame_id`、`tof_frame_id`、
@@ -112,12 +112,11 @@ imu_gyro_axis=bf_to_flu
 - 加速度计：Betaflight 输出 NWU（x 前、y 左、z 上），已经和 ROS FLU
   一致，默认 `imu_accel_axis=none`。只有原始数据确实是 FRD 时才需要
   `frd_to_flu`（把 y、z 取反）。
-- 陀螺仪：Betaflight 的机体轴同样是 x 前、y 左、z 上，但偏航角按左手定则
-  为正（俯视顺时针），所以转到 ROS FLU 只需要把 z 取反，默认
-  `imu_gyro_axis=bf_to_flu`。Betaflight 的俯仰正方向是低头，在 FLU 中
-  对应 +y，因此 y 不需要翻转。
-- `imu_gyro_axis=frd_to_flu` 会同时把 y、z 取反，适用于真正的 FRD
-  陀螺仪数据源；`none` 表示原始数据已经是 FLU。
+- 陀螺仪：当前实机原始数据也已经是 ROS FLU：绕竖直轴向左（俯视逆时针）
+  转时 `angular_velocity.z` 为正，抬头时 y 为负，向右滚转时 x 为正。
+  因此默认 `imu_gyro_axis=none`。
+- 如果换成真正的 FRD 陀螺仪数据源，把 `imu_gyro_axis` 设为
+  `frd_to_flu`，它会同时翻转 y、z。
 - 当前实机静止时 `linear_acceleration.z ≈ +9.8 m/s²`。可以用下面的动作
   快速检查陀螺仪：机体水平绕竖直轴向左（俯视逆时针）转，
   `angular_velocity.z` 应为正；抬头时 `angular_velocity.y` 应为负；

@@ -305,8 +305,8 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 
 `sensors.launch.py` 参数：`host`（默认 127.0.0.1）、`port`（默认 5000）、
 `stereo_color`、`acc_lsb_per_g`、`gyro_lsb_per_dps`、`imu_accel_axis`（默认
-`none`）、`imu_gyro_axis`（默认 `bf_to_flu`）。Betaflight 加速度计为 NWU/FLU，
-陀螺仪需要只翻转 z；设备原始约定不同时再调整这两个参数。
+`none`）、`imu_gyro_axis`（默认 `none`）。当前实机两路原始数据都已经是
+ROS FLU；只有 FRD 数据源才需要 `frd_to_flu`。
 
 ## 6. Gazebo + Betaflight SITL
 

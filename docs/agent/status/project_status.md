@@ -54,8 +54,8 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 
 - `flyrat_sensors_interfaces`：`TofZone` / `TofFrame` 自定义消息。
 - `flyrat_sensors`：`sensor_receiver_node`，负责 TCP 接收、协议解析、图像解码和发布。
-  IMU 默认 `imu_accel_axis=none`、`imu_gyro_axis=bf_to_flu`：加速度计已经是
-  FLU，陀螺仪按 Betaflight 约定只需翻转 z。
+  IMU 默认 `imu_accel_axis=none`、`imu_gyro_axis=none`：两路原始数据都已经是
+  ROS FLU。
 - 默认话题：
   - `/flyrat/sensors/imu`
   - `/flyrat/sensors/tof_0` … `/flyrat/sensors/tof_3`
