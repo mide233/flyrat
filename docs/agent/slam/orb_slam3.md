@@ -155,8 +155,10 @@ IMU 缓存默认 1 s。图像回调只保留最新待处理帧，跟踪线程忙
 非空时在节点退出时保存 TUM 轨迹。
 
 节点要求 IMU 已按 ROS FLU 发布。当前实机 `sensor_receiver_node` 默认
-`imu_axis=none`，静止时 z 约 `+9.8 m/s²`；如果换成原始 z 为负的飞控板，
-需要改为 `frd_to_flu`，否则 `IMU.T_b_c1` 和重力方向都会不一致。
+`imu_accel_axis=none`、`imu_gyro_axis=bf_to_flu`：加速度计原始数据已经是 FLU，
+陀螺仪按 Betaflight 约定只需翻转 z。若两路原始约定不同，按
+[`sensor_forwarding.md`](../hardware/sensor_forwarding.md) 调整，否则
+`IMU.T_b_c1`、重力方向和 IMU 预积分都会不一致。
 
 构建和启动命令见 [`build_and_run.md`](../build_and_run.md) 的“ROS 2 SLAM 节点”
 一节。Foxglove 只作为可视化工具，不提交布局文件。
