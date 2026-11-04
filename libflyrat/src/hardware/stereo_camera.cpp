@@ -170,14 +170,12 @@ struct StereoCamera::Impl {
 
     void open_mjpeg()
     {
-        if (!config.grayscale) {
-            throw StereoError("MJPEG decoding currently produces GRAY8 only; set grayscale=true");
-        }
         detail::MjpegConfig decoder_config;
         decoder_config.device = config.device;
         decoder_config.width = config.width;
         decoder_config.height = config.height;
         decoder_config.fps = config.fps;
+        decoder_config.color = !config.grayscale;
         mjpeg = std::make_unique<detail::MjpegDecoder>(std::move(decoder_config));
         mjpeg->start();
         actual_width = config.width;
@@ -234,7 +232,8 @@ struct StereoCamera::Impl {
         StereoFrame frame;
         frame.width = eye_width;
         frame.height = actual_height;
-        frame.grayscale = config.grayscale;
+        frame.format = config.grayscale ? StereoPixelFormat::kGray8
+                                        : StereoPixelFormat::kYuyv;
         frame.stride = config.grayscale ? eye_width : eye_yuyv_bytes;
 
         if (config.grayscale) {
@@ -270,24 +269,63 @@ struct StereoCamera::Impl {
     StereoFrame make_mjpeg_frame(const detail::MjpegFrame& source) const
     {
         const int eye_width = source.width / 2;
-        if (source.width <= 0 || source.height <= 0 ||
-            source.luma.size() != static_cast<std::size_t>(source.width) * source.height) {
-            throw StereoError("invalid MJPEG luma frame");
+        if (source.width <= 0 || source.height <= 0 || source.aligned_height < source.height ||
+            (source.aligned_height % 2) != 0) {
+            throw StereoError("invalid MJPEG frame dimensions");
+        }
+        const std::size_t y_plane = static_cast<std::size_t>(source.width) *
+            static_cast<std::size_t>(source.aligned_height);
+        const std::size_t expected = source.color
+            ? y_plane + y_plane / 2U
+            : static_cast<std::size_t>(source.width) * static_cast<std::size_t>(source.height);
+        if (source.data.size() != expected) {
+            throw StereoError("invalid MJPEG frame buffer size");
         }
 
         StereoFrame frame;
         frame.width = eye_width;
         frame.height = source.height;
-        frame.grayscale = true;
+        frame.format = source.color ? StereoPixelFormat::kNv12
+                                    : StereoPixelFormat::kGray8;
         frame.stride = eye_width;
-        frame.left.resize(static_cast<std::size_t>(eye_width) * source.height);
-        frame.right.resize(static_cast<std::size_t>(eye_width) * source.height);
+
+        if (!source.color) {
+            frame.left.resize(static_cast<std::size_t>(eye_width) * source.height);
+            frame.right.resize(static_cast<std::size_t>(eye_width) * source.height);
+            for (int y = 0; y < source.height; ++y) {
+                const std::uint8_t* row = source.data.data() +
+                    static_cast<std::size_t>(y) * source.width;
+                std::memcpy(frame.left.data() + static_cast<std::size_t>(y) * eye_width,
+                    row, static_cast<std::size_t>(eye_width));
+                std::memcpy(frame.right.data() + static_cast<std::size_t>(y) * eye_width,
+                    row + eye_width, static_cast<std::size_t>(eye_width));
+            }
+            return frame;
+        }
+
+        const std::size_t eye_y_plane = static_cast<std::size_t>(eye_width) * source.height;
+        const std::size_t eye_size = eye_y_plane + eye_y_plane / 2U;
+        frame.left.resize(eye_size);
+        frame.right.resize(eye_size);
         for (int y = 0; y < source.height; ++y) {
-            const std::uint8_t* row = source.luma.data() +
+            const std::uint8_t* row = source.data.data() +
                 static_cast<std::size_t>(y) * source.width;
             std::memcpy(frame.left.data() + static_cast<std::size_t>(y) * eye_width,
                 row, static_cast<std::size_t>(eye_width));
             std::memcpy(frame.right.data() + static_cast<std::size_t>(y) * eye_width,
+                row + eye_width, static_cast<std::size_t>(eye_width));
+        }
+
+        // NV12 UV rows are interleaved and cover two source luma rows. A
+        // full-width UV row splits into one UV row for each eye.
+        const std::uint8_t* uv = source.data.data() + y_plane;
+        for (int y = 0; y < source.height / 2; ++y) {
+            const std::uint8_t* row = uv + static_cast<std::size_t>(y) * source.width;
+            std::memcpy(frame.left.data() + eye_y_plane +
+                    static_cast<std::size_t>(y) * eye_width,
+                row, static_cast<std::size_t>(eye_width));
+            std::memcpy(frame.right.data() + eye_y_plane +
+                    static_cast<std::size_t>(y) * eye_width,
                 row + eye_width, static_cast<std::size_t>(eye_width));
         }
         return frame;

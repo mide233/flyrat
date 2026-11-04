@@ -51,9 +51,12 @@ int main()
     flyrat::hardware::StereoFrame stereo_frame;
     stereo_frame.width = 640;
     stereo_frame.height = 480;
-    stereo_frame.left.resize(640 * 480);
-    stereo_frame.right.resize(640 * 480);
+    stereo_frame.format = flyrat::hardware::StereoPixelFormat::kNv12;
+    stereo_frame.left.resize(640 * 480 * 3 / 2);
+    stereo_frame.right.resize(640 * 480 * 3 / 2);
     check(stereo_frame.left.size() == stereo_frame.right.size(), "stereo eye buffers");
+    check(stereo_frame.format == flyrat::hardware::StereoPixelFormat::kNv12,
+        "stereo NV12 frame format");
 
     if (g_failures != 0) {
         std::printf("%d hardware header check(s) failed\n", g_failures);

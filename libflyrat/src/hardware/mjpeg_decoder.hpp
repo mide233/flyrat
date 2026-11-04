@@ -26,12 +26,19 @@ struct MjpegConfig {
     int height = 480;
     int fps = 60;
     int max_buffers = 2;
+    // false: extract only the Y plane (GRAY8).
+    // true: keep the complete NV12 buffer (Y + UV).
+    bool color = false;
 };
 
 struct MjpegFrame {
     int width = 0;
     int height = 0;
-    std::vector<std::uint8_t> luma;
+    // Height of the decoded buffer. It can be larger than height because the
+    // decoder aligns the NV12 surface, e.g. 1080 -> 1088.
+    int aligned_height = 0;
+    bool color = false;
+    std::vector<std::uint8_t> data;
     std::uint64_t sequence = 0;
     std::chrono::steady_clock::time_point stamp;
 };

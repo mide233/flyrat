@@ -28,6 +28,12 @@ enum class StereoFormat {
     kMjpeg, // V4L2 MJPG capture, Rockchip MPP hardware decode
 };
 
+enum class StereoPixelFormat {
+    kYuyv, // packed YUYV 4:2:2
+    kGray8, // one byte per pixel
+    kNv12, // YUV 4:2:0 semi-planar, Y plane followed by interleaved UV
+};
+
 struct StereoConfig {
     std::string device = "/dev/video10";
     StereoFormat format = StereoFormat::kYuyv;
@@ -37,17 +43,18 @@ struct StereoConfig {
     int height = 480;
     int fps = 15;
     int buffer_count = 4;
-    // Convert the YUYV luma samples to one byte per pixel. Colour consumers
-    // should leave this false and read the YUYV planes directly. MJPEG always
-    // produces GRAY8, so this must be true for StereoFormat::kMjpeg.
+    // For YUYV this extracts luma into GRAY8. For MJPEG this selects GRAY8
+    // (true) or full NV12 colour (false).
     bool grayscale = false;
 };
 
 struct StereoFrame {
     int width = 0; // per eye
     int height = 0;
-    int stride = 0; // bytes per row in left/right
-    bool grayscale = false;
+    // Bytes per row. For NV12 this is the stride of the Y plane and also of
+    // each UV row; the UV plane starts at stride * height.
+    int stride = 0;
+    StereoPixelFormat format = StereoPixelFormat::kGray8;
     std::vector<std::uint8_t> left;
     std::vector<std::uint8_t> right;
     std::uint64_t sequence = 0;

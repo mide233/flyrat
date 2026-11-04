@@ -231,18 +231,35 @@ struct MjpegDecoder::Impl {
 
         const std::size_t luma_size = static_cast<std::size_t>(width) *
             static_cast<std::size_t>(height);
-        if (buffer_get_size(buffer) < luma_size) {
+        const std::size_t buffer_size = buffer_get_size(buffer);
+        std::size_t bytes = luma_size;
+        int aligned_height = height;
+        if (config.color) {
+            const std::size_t nv12_frame = static_cast<std::size_t>(width) * 3U / 2U;
+            if (nv12_frame == 0 || (buffer_size % nv12_frame) != 0) {
+                sample_unref(sample);
+                return MjpegReadStatus::kError;
+            }
+            bytes = buffer_size;
+            aligned_height = static_cast<int>(buffer_size / nv12_frame);
+            if (aligned_height < height || (aligned_height % 2) != 0) {
+                sample_unref(sample);
+                return MjpegReadStatus::kError;
+            }
+        } else if (buffer_size < luma_size) {
             sample_unref(sample);
             return MjpegReadStatus::kError;
         }
 
         frame.width = width;
         frame.height = height;
-        frame.luma.resize(luma_size);
+        frame.aligned_height = aligned_height;
+        frame.color = config.color;
+        frame.data.resize(bytes);
         const std::size_t copied = buffer_extract(
-            buffer, 0, frame.luma.data(), luma_size);
+            buffer, 0, frame.data.data(), bytes);
         sample_unref(sample);
-        if (copied != luma_size) {
+        if (copied != bytes) {
             return MjpegReadStatus::kError;
         }
 
