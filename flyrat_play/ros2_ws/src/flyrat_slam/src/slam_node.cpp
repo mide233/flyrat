@@ -27,6 +27,7 @@
 #include <vector>
 
 #include <opencv2/core.hpp>
+#include <opencv2/core/persistence.hpp>
 #include <opencv2/imgproc.hpp>
 
 #include <diagnostic_msgs/msg/diagnostic_status.hpp>
@@ -41,6 +42,7 @@
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <std_srvs/srv/trigger.hpp>
+#include <tf2_ros/static_transform_broadcaster.h>
 #include <tf2_ros/transform_broadcaster.h>
 
 #include "flyrat/slam/stereo_slam.hpp"
@@ -143,6 +145,7 @@ public:
             "right_topic", "/flyrat/sensors/stereo/right/image_raw");
         imu_topic_ = declare_parameter<std::string>("imu_topic", "/flyrat/sensors/imu");
         world_frame_ = declare_parameter<std::string>("world_frame", "slam_map");
+        body_frame_ = declare_parameter<std::string>("body_frame", "imu_link");
         camera_frame_ = declare_parameter<std::string>(
             "camera_frame", "camera_left_optical_frame");
         sync_slop_ = declare_parameter<double>("sync_slop", 0.010);
@@ -159,6 +162,12 @@ public:
         if (settings_path_.empty()) {
             throw std::runtime_error("settings_path is empty");
         }
+        if (body_frame_.empty() || camera_frame_.empty() ||
+            body_frame_ == camera_frame_) {
+            throw std::runtime_error(
+                "body_frame and camera_frame must be non-empty and different");
+        }
+        load_body_camera_extrinsic();
         if (sync_slop_ <= 0.0 || imu_buffer_seconds_ <= 0.0 ||
             path_publish_period_ <= 0.0 || status_period_ <= 0.0) {
             throw std::runtime_error("time parameters must be positive");
@@ -178,6 +187,9 @@ public:
             std::bind(&SlamNode::on_reset, this, std::placeholders::_1,
                 std::placeholders::_2));
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+        static_tf_broadcaster_ =
+            std::make_unique<tf2_ros::StaticTransformBroadcaster>(*this);
+        publish_static_body_to_camera();
 
         path_.header.frame_id = world_frame_;
 
@@ -250,6 +262,59 @@ private:
         rclcpp::Time stamp;
         double stamp_s = 0.0;
     };
+
+    void load_body_camera_extrinsic()
+    {
+        cv::FileStorage settings(settings_path_, cv::FileStorage::READ);
+        if (!settings.isOpened()) {
+            throw std::runtime_error(
+                "cannot open SLAM settings for IMU.T_b_c1: " + settings_path_);
+        }
+        cv::Mat tbc;
+        settings["IMU.T_b_c1"] >> tbc;
+        if (tbc.rows != 4 || tbc.cols != 4) {
+            throw std::runtime_error(
+                "IMU.T_b_c1 must be a 4x4 matrix in " + settings_path_);
+        }
+        cv::Mat tbc64;
+        tbc.convertTo(tbc64, CV_64F);
+        Eigen::Matrix4d matrix = Eigen::Matrix4d::Identity();
+        for (int row = 0; row < 4; ++row) {
+            for (int col = 0; col < 4; ++col) {
+                matrix(row, col) = tbc64.at<double>(row, col);
+            }
+        }
+        const Eigen::Matrix3d rotation = matrix.block<3, 3>(0, 0);
+        if (!rotation.allFinite() ||
+            (rotation.transpose() * rotation - Eigen::Matrix3d::Identity()).norm() > 1e-3 ||
+            std::abs(rotation.determinant() - 1.0) > 1e-3) {
+            throw std::runtime_error("IMU.T_b_c1 rotation is not orthonormal");
+        }
+
+        // ORB-SLAM3 calls this matrix T_b_c1: camera -> body (IMU). The TF
+        // tree needs the inverse, body -> camera.
+        Eigen::Isometry3d body_camera = Eigen::Isometry3d::Identity();
+        body_camera.linear() = rotation;
+        body_camera.translation() = matrix.block<3, 1>(0, 3);
+        camera_body_ = body_camera.inverse();
+    }
+
+    void publish_static_body_to_camera()
+    {
+        const Eigen::Quaterniond orientation(camera_body_.linear());
+        geometry_msgs::msg::TransformStamped transform;
+        transform.header.stamp = now();
+        transform.header.frame_id = body_frame_;
+        transform.child_frame_id = camera_frame_;
+        transform.transform.translation.x = camera_body_.translation().x();
+        transform.transform.translation.y = camera_body_.translation().y();
+        transform.transform.translation.z = camera_body_.translation().z();
+        transform.transform.rotation.x = orientation.x();
+        transform.transform.rotation.y = orientation.y();
+        transform.transform.rotation.z = orientation.z();
+        transform.transform.rotation.w = orientation.w();
+        static_tf_broadcaster_->sendTransform(transform);
+    }
 
     void on_imu(const sensor_msgs::msg::Imu::ConstSharedPtr& msg)
     {
@@ -390,16 +455,18 @@ private:
             }
             last_frame_stamp_ = frame.stamp_s;
             if (result.pose.valid) {
+                const Eigen::Isometry3d world_body = to_world_body(result);
+                const Eigen::Quaterniond orientation(world_body.linear());
                 geometry_msgs::msg::PoseStamped pose;
                 pose.header.stamp = frame.stamp;
                 pose.header.frame_id = world_frame_;
-                pose.pose.position.x = result.pose.position.x();
-                pose.pose.position.y = result.pose.position.y();
-                pose.pose.position.z = result.pose.position.z();
-                pose.pose.orientation.x = result.pose.orientation.x();
-                pose.pose.orientation.y = result.pose.orientation.y();
-                pose.pose.orientation.z = result.pose.orientation.z();
-                pose.pose.orientation.w = result.pose.orientation.w();
+                pose.pose.position.x = world_body.translation().x();
+                pose.pose.position.y = world_body.translation().y();
+                pose.pose.position.z = world_body.translation().z();
+                pose.pose.orientation.x = orientation.x();
+                pose.pose.orientation.y = orientation.y();
+                pose.pose.orientation.z = orientation.z();
+                pose.pose.orientation.w = orientation.w();
                 path_.poses.push_back(std::move(pose));
                 while (static_cast<int>(path_.poses.size()) > path_max_poses_) {
                     path_.poses.erase(path_.poses.begin());
@@ -417,21 +484,28 @@ private:
         }
     }
 
+    Eigen::Isometry3d to_world_body(const Result& result) const
+    {
+        Eigen::Isometry3d world_camera = Eigen::Isometry3d::Identity();
+        world_camera.linear() = result.pose.orientation.toRotationMatrix();
+        world_camera.translation() = result.pose.position;
+        return world_camera * camera_body_;
+    }
+
     void publish_pose(const Result& result, const rclcpp::Time& stamp)
     {
-        const auto& position = result.pose.position;
-        const auto& orientation = result.pose.orientation;
-        if (!std::isfinite(position.x()) || !std::isfinite(position.y()) ||
-            !std::isfinite(position.z()) || !std::isfinite(orientation.x()) ||
-            !std::isfinite(orientation.y()) || !std::isfinite(orientation.z()) ||
-            !std::isfinite(orientation.w())) {
+        const Eigen::Isometry3d world_body = to_world_body(result);
+        const Eigen::Vector3d& position = world_body.translation();
+        const Eigen::Quaterniond orientation(world_body.linear());
+        if (!position.allFinite() || !Eigen::Vector4d(orientation.x(),
+                orientation.y(), orientation.z(), orientation.w()).allFinite()) {
             return;
         }
 
         nav_msgs::msg::Odometry odometry;
         odometry.header.stamp = stamp;
         odometry.header.frame_id = world_frame_;
-        odometry.child_frame_id = camera_frame_;
+        odometry.child_frame_id = body_frame_;
         odometry.pose.pose.position.x = position.x();
         odometry.pose.pose.position.y = position.y();
         odometry.pose.pose.position.z = position.z();
@@ -444,7 +518,7 @@ private:
         geometry_msgs::msg::TransformStamped transform;
         transform.header.stamp = stamp;
         transform.header.frame_id = world_frame_;
-        transform.child_frame_id = camera_frame_;
+        transform.child_frame_id = body_frame_;
         transform.transform.translation.x = position.x();
         transform.transform.translation.y = position.y();
         transform.transform.translation.z = position.z();
@@ -581,7 +655,9 @@ private:
     std::string right_topic_;
     std::string imu_topic_;
     std::string world_frame_;
+    std::string body_frame_;
     std::string camera_frame_;
+    Eigen::Isometry3d camera_body_ { Eigen::Isometry3d::Identity() };
     double sync_slop_ = 0.010;
     double imu_buffer_seconds_ = 1.0;
     int path_max_poses_ = 1000;
@@ -598,6 +674,7 @@ private:
     message_filters::Subscriber<Image> right_sub_;
     std::unique_ptr<message_filters::Synchronizer<StereoPolicy>> sync_;
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+    std::unique_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;
     rclcpp::TimerBase::SharedPtr status_timer_;
 
     std::unique_ptr<StereoSlam> slam_;

@@ -17,6 +17,7 @@ def generate_launch_description():
     right_topic = LaunchConfiguration('right_topic')
     imu_topic = LaunchConfiguration('imu_topic')
     world_frame = LaunchConfiguration('world_frame')
+    body_frame = LaunchConfiguration('body_frame')
     camera_frame = LaunchConfiguration('camera_frame')
     trajectory_path = LaunchConfiguration('trajectory_path')
 
@@ -41,6 +42,9 @@ def generate_launch_description():
         DeclareLaunchArgument('imu_topic', default_value='/flyrat/sensors/imu'),
         DeclareLaunchArgument('world_frame', default_value='slam_map'),
         DeclareLaunchArgument(
+            'body_frame', default_value='imu_link',
+            description='Vehicle/IMU frame; receives the SLAM pose and TF.'),
+        DeclareLaunchArgument(
             'camera_frame', default_value='camera_left_optical_frame'),
         DeclareLaunchArgument(
             'trajectory_path', default_value='',
@@ -59,6 +63,7 @@ def generate_launch_description():
                     'right_topic': right_topic,
                     'imu_topic': imu_topic,
                     'world_frame': world_frame,
+                    'body_frame': body_frame,
                     'camera_frame': camera_frame,
                     'trajectory_path': trajectory_path,
                 },

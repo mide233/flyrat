@@ -73,6 +73,11 @@ IMU.GyroWalk: 1.9e-05
 IMU.AccWalk: 3.0e-03
 IMU.Frequency: 200.0
 
+# Bench/testing: stereo already provides metric scale, so allow the map to
+# initialise without a sharp linear-acceleration transient. Set to 0 for
+# flight, where the acceleration check rejects a bad inertial initialisation.
+IMU.fastInit: 1
+
 ORBextractor.nFeatures: 1200
 ORBextractor.scaleFactor: 1.2
 ORBextractor.nLevels: 8

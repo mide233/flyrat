@@ -4,6 +4,7 @@ slam_node:
     right_topic: /flyrat/sensors/stereo/right/image_raw
     imu_topic: /flyrat/sensors/imu
     world_frame: slam_map
+    body_frame: imu_link
     camera_frame: camera_left_optical_frame
     sync_slop: 0.010
     imu_buffer_seconds: 1.0

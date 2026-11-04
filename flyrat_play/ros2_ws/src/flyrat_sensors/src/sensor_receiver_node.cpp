@@ -248,18 +248,21 @@ private:
         return true;
     }
 
-    rclcpp::Time stamp_for(std::int64_t device_ns)
+    rclcpp::Time stamp_for(std::int64_t device_ns, bool refresh_offset = false)
     {
         const std::int64_t host_ns = system_now_ns();
         if (device_ns <= 0) {
             return now();
         }
 
-        const std::int64_t sample = host_ns - device_ns;
+        // Estimate the device-to-host offset from small TIME frames only.
+        // Updating it for every message would bias image timestamps by the
+        // JPEG decode time, leaving the IMU tens of milliseconds behind.
         if (!have_offset_) {
-            offset_ns_ = sample;
+            offset_ns_ = host_ns - device_ns;
             have_offset_ = true;
-        } else {
+        } else if (refresh_offset) {
+            const std::int64_t sample = host_ns - device_ns;
             // Light smoothing; a slow drift is fine for algorithm testing.
             offset_ns_ = static_cast<std::int64_t>(
                 static_cast<double>(offset_ns_) * 0.99 +
@@ -273,9 +276,9 @@ private:
     {
         switch (header.type) {
         case flyrat::sensors::MessageType::kTime:
-            // Sampling the offset on TIME frames keeps the mapping fresh even
-            // when no IMU is connected.
-            (void)stamp_for(header.device_time_ns);
+            // TIME frames are tiny and are sent once per second, so they give
+            // an offset that is not biased by image transfer or decode time.
+            (void)stamp_for(header.device_time_ns, true);
             break;
         case flyrat::sensors::MessageType::kImu:
             publish_imu(header, payload);

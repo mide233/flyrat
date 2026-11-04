@@ -418,6 +418,7 @@ namespace ORB_SLAM3 {
         gyroWalk_ = readParameter<float>(fSettings,"IMU.GyroWalk",found);
         accWalk_ = readParameter<float>(fSettings,"IMU.AccWalk",found);
         imuFrequency_ = readParameter<float>(fSettings,"IMU.Frequency",found);
+        fastInit_ = readParameter<int>(fSettings,"IMU.fastInit",found,false) != 0;
 
         cv::Mat cvTbc = readParameter<cv::Mat>(fSettings,"IMU.T_b_c1",found);
         Tbc_ = Converter::toSophus(cvTbc);

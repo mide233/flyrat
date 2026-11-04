@@ -613,6 +613,9 @@ void Tracking::newParameterLoader(Settings *settings) {
     float Na = settings->noiseAcc();
     float Ngw = settings->gyroWalk();
     float Naw = settings->accWalk();
+    mFastInit = settings->fastInit();
+    if(mFastInit)
+        cout << "Fast IMU initialization. Acceleration is not checked \n";
 
     const float sf = sqrt(mImuFreq);
     mpImuCalib = new IMU::Calib(Tbc,Ng*sf,Na*sf,Ngw/sf,Naw/sf);
