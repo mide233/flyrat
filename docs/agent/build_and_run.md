@@ -440,8 +440,8 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 其余参数见 `flyrat_slam/config/slam.yaml`。
 
 Foxglove 中建议把固定坐标系设为 `slam_map` 或 `imu_link`。`camera_left_optical_frame`
-是光学系，占位外参又是倒置 + 左偏 45°，直接看它的轴会把机体滚转分解成
-滚转加偏航。
+是光学系，占位外参是倒置、光轴正对机体前方；直接看它的轴时，机体滚转对应
+光学系的偏航，这是坐标系分解，不是 SLAM 错误。
 
 输出：
 

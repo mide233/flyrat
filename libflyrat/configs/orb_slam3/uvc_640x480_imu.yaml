@@ -50,9 +50,9 @@ Stereo.T_c1_c2: !!opencv-matrix
          0.0, 0.0, 0.0, 1.0]
 
 # T_b_c1: left camera in the IMU/body frame. The nominal mounting below is a
-# starting value only: the camera is assumed to be upside down and pointing 45
-# degrees to the left of the IMU forward axis, with its origin coincident with
-# the IMU. The real translation and mounting angles must be measured.
+# starting value only: the camera is assumed to be upside down and pointing
+# straight along the IMU forward axis, with its origin coincident with the IMU.
+# The real translation and mounting angles must be measured.
 # ORB-SLAM3 expects the body frame to match the IMU convention: X forward,
 # Y left, Z up. The Betaflight raw IMU axes must be mapped accordingly before
 # filling this matrix.
@@ -60,10 +60,10 @@ IMU.T_b_c1: !!opencv-matrix
   rows: 4
   cols: 4
   dt: f
-  data: [-0.707107, 0.0, 0.707107, 0.0,
-          0.707107, 0.0, 0.707107, 0.0,
-          0.0,      1.0, 0.0,      0.0,
-          0.0,      0.0, 0.0,      1.0]
+  data: [0.0, 0.0, 1.0, 0.0,
+         1.0, 0.0, 0.0, 0.0,
+         0.0, 1.0, 0.0, 0.0,
+         0.0, 0.0, 0.0, 1.0]
 
 # Continuous-time noise densities from the IMU datasheet or Allan variance.
 # The values below are typical MEMS starting points, not measurements.

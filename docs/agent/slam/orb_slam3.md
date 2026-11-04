@@ -62,22 +62,22 @@ SLAM 默认关闭，因为它依赖 OpenCV、Boost.Serialization、OpenSSL，并
 注意 `Stereo.T_c1_c2` 的方向与 `cv::stereoCalibrate` 返回的
 `X2 = R * X1 + T` 相反，写入前要取逆。
 
-当前 ROS 2 节点使用的 `IMU.T_b_c1` 是占位值，按“相机倒置、朝向 IMU 前方左侧
-45°、平移为 0”构造，body 轴为 FLU：
+当前 ROS 2 节点使用的 `IMU.T_b_c1` 是占位值，按“相机倒置、光轴正对 IMU 前方、
+平移为 0”构造，body 轴为 FLU：
 
 ```yaml
 IMU.T_b_c1: !!opencv-matrix
   rows: 4
   cols: 4
   dt: f
-  data: [-0.707107, 0.0, 0.707107, 0.0,
-          0.707107, 0.0, 0.707107, 0.0,
-          0.0,      1.0, 0.0,      0.0,
-          0.0,      0.0, 0.0,      1.0]
+  data: [0.0, 0.0, 1.0, 0.0,
+         1.0, 0.0, 0.0, 0.0,
+         0.0, 1.0, 0.0, 0.0,
+         0.0, 0.0, 0.0, 1.0]
 ```
 
 它表示 `T_body_camera`：把左目相机光学坐标变换到 IMU body 坐标。相机绕光轴
-倒置，光轴指向 body 前方左侧约 45°。平移和安装角都没有实测标定，不能用于
+倒置，光轴与 body 的 x 轴（前方）平行。平移和安装角都没有实测标定，不能用于
 精度评估。
 
 ## 5. C++ API
@@ -152,10 +152,10 @@ IMU 缓存默认 1 s。图像回调只保留最新待处理帧，跟踪线程忙
   （由 `IMU.T_b_c1` 求逆得到）。
 
 `camera_left_optical_frame` 是标准光学系（x 右、y 下、z 前）。当前占位外参是
-“相机倒置、光轴朝机体前方左侧 45°”，所以机体绕 x 轴滚转时，在光学系里会同时
-出现滚转和偏航分量；这是坐标系分解，不是 SLAM 把滚转算成了偏航。Foxglove 里
-应把固定坐标系设为 `imu_link` 或 `slam_map`，观察机体轨迹，而不是直接看
-`camera_left_optical_frame` 的轴。
+“相机倒置、光轴正对机体前方”，所以相机光学系的 z 轴与机体 x 轴平行；机体绕 x
+轴滚转时，在光学系里就是绕光轴 z 的偏航。这是坐标系分解，不是 SLAM 把滚转算成
+了偏航。Foxglove 里应把固定坐标系设为 `imu_link` 或 `slam_map`，观察机体轨迹，
+而不是直接看 `camera_left_optical_frame` 的轴。
 
 参数在 `config/slam.yaml`，启动时可用 `-p` 覆盖。`vocabulary_path` 必填；
 `settings_path` 默认使用安装后的 `uvc_640x480_imu.yaml`；`body_frame` 默认
