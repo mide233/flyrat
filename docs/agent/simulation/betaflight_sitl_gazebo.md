@@ -2,7 +2,7 @@
 
 本文介绍如何在开发容器里把 **Betaflight SITL**、**Gazebo Harmonic** 和我们
 自己的 **自动驾驶算法** 串成一个闭环，用于验证飞控算法。底层仿真工程的细节
-见 [`flyrat_play/gazebo/README.md`](../../flyrat_play/gazebo/README.md)，本文侧重"从零到跑起来"的完整流程
+见 [`flyrat_play/gazebo/README.md`](../../../flyrat_play/gazebo/README.md)，本文侧重"从零到跑起来"的完整流程
 以及踩过的坑。
 
 ## 1. 总体结构
