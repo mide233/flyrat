@@ -141,18 +141,30 @@ IMU 缓存默认 1 s。图像回调只保留最新待处理帧，跟踪线程忙
 
 发布：
 
-- `/flyrat/slam/odometry`：`nav_msgs/msg/Odometry`，`slam_map ->
-  camera_left_optical_frame`，位姿是 `T_world_camera`。
+- `/flyrat/slam/odometry`：`nav_msgs/msg/Odometry`，`slam_map -> imu_link`，
+  位姿是 `T_world_body`（门面输出的 `T_world_camera` 再乘 `T_camera_body`）。
 - `/flyrat/slam/path`：`nav_msgs/msg/Path`，限频发布，保留最近
-  `path_max_poses` 个位姿。
+  `path_max_poses` 个位姿，同样是机体轨迹。
 - `/flyrat/slam/status`：`diagnostic_msgs/msg/DiagnosticStatus`，1 Hz，包含状态、
   输入/处理帧率、丢帧、失败帧、IMU 缓冲和 age。
 - `/flyrat/slam/reset`：`std_srvs/srv/Trigger`，清空地图、轨迹和 IMU 缓冲。
-- TF：`slam_map -> camera_left_optical_frame`。
+- TF：动态 `slam_map -> imu_link`，静态 `imu_link -> camera_left_optical_frame`
+  （由 `IMU.T_b_c1` 求逆得到）。
+
+`camera_left_optical_frame` 是标准光学系（x 右、y 下、z 前）。当前占位外参是
+“相机倒置、光轴朝机体前方左侧 45°”，所以机体绕 x 轴滚转时，在光学系里会同时
+出现滚转和偏航分量；这是坐标系分解，不是 SLAM 把滚转算成了偏航。Foxglove 里
+应把固定坐标系设为 `imu_link` 或 `slam_map`，观察机体轨迹，而不是直接看
+`camera_left_optical_frame` 的轴。
 
 参数在 `config/slam.yaml`，启动时可用 `-p` 覆盖。`vocabulary_path` 必填；
-`settings_path` 默认使用安装后的 `uvc_640x480_imu.yaml`；`trajectory_path`
-非空时在节点退出时保存 TUM 轨迹。
+`settings_path` 默认使用安装后的 `uvc_640x480_imu.yaml`；`body_frame` 默认
+`imu_link`；`trajectory_path` 非空时在节点退出时保存 TUM 轨迹。
+
+`uvc_640x480_imu.yaml` 默认设置 `IMU.fastInit: 1`，用于跳过 ORB-SLAM3 的
+逐帧加速度变化门限，方便桌面/手持调试；它不能替代真正的 IMU 初始化。
+静止或只有缓慢滚转时，日志仍会出现 `Not enough motion for initializing`，
+需要平移、加速或明显晃动才能完成重力/尺度对齐。正式飞行前可改回 `0`。
 
 节点要求 IMU 已按 ROS FLU 发布。当前实机 `sensor_receiver_node` 默认
 `imu_accel_axis=none`、`imu_gyro_axis=none`：两路原始数据都已经是 FLU。
@@ -203,10 +215,11 @@ SLAM 输入/处理       60.0 Hz，启动后 dropped=1
 slam_node RSS        约 557 MB（含词袋和 ORB 地图）
 ```
 
-当前桌面场景近似静止、视场内容少，节点能短暂完成地图初始化
-（日志出现 `New Map created with 104 points`），但没有持续的旋转/平移激励，
-随后会因 `Fail to track local map!` 或 `IMU is not or recently initialized`
-回到 `NOT_INITIALIZED`。因此还没有可重复的稳定 `TRACKING` 轨迹数据；
+当前桌面场景近似静止、视场内容少。启用 `IMU.fastInit: 1` 后，节点可以进入
+`TRACKING` 并发布 `slam_map -> imu_link`，输入/处理约 60 Hz，`dropped_frames`
+约 1–2；但日志仍会因缺少平移/加速度激励反复出现
+`Not enough motion for initializing`，世界系尚未完成重力对齐。因此这些位姿
+只能用于验证链路、TF 和 Foxglove 预览，不能作为可重复的轨迹精度数据。
 `/flyrat/slam/reset` 服务已实测返回成功。
 
 ## 9. 无界面改造
@@ -226,8 +239,11 @@ slam_node RSS        约 557 MB（含词袋和 ORB 地图）
 - 内参、外参和 IMU 参数是占位值；需要完整标定。
 - 实机节点已经直接订阅 `/flyrat/sensors/*`，但桌面静止场景无法稳定初始化；
   需要真实运动、有纹理的视场验证 `TRACKING`。
-- 双目和 IMU 没有硬件同步；ROS 节点用图像时间戳和 IMU 缓存做近似对齐。
+- 双目和 IMU 没有硬件同步；`sensor_receiver_node` 只用 1 Hz 的 `TIME` 帧估计
+  设备到主机的偏移，避免把 JPEG 解码时间算进图像时间戳。
 - 图像同步窗口默认 10 ms；左右目时间戳差距更大时会丢帧。
+- 未完成 IMU 初始化前，ORB-SLAM3 的世界系还没有对齐重力，此时 `imu_link`
+  的绝对姿态不能当作真实机体姿态使用。
 - 词袋 139 MB，加载约数秒；启动延迟明显。
 - `reset()` 是异步生效，下一帧才会真正重建地图。
 - GPLv3 会传播到链接本模块的程序。

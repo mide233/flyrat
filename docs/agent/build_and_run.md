@@ -434,14 +434,20 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 ```
 
 `vocabulary_path` 必填，词袋文件不入库。`settings_path` 默认是包内安装的
-`uvc_640x480_imu.yaml`；`trajectory_path:=/tmp/traj.txt` 可在退出时保存 TUM
-轨迹。其余参数见 `flyrat_slam/config/slam.yaml`。
+`uvc_640x480_imu.yaml`；`body_frame:=imu_link` 是默认机体坐标系；
+`trajectory_path:=/tmp/traj.txt` 可在退出时保存 TUM 轨迹。节点会发布动态
+`slam_map -> imu_link` 和静态 `imu_link -> camera_left_optical_frame`。
+其余参数见 `flyrat_slam/config/slam.yaml`。
+
+Foxglove 中建议把固定坐标系设为 `slam_map` 或 `imu_link`。`camera_left_optical_frame`
+是光学系，占位外参又是倒置 + 左偏 45°，直接看它的轴会把机体滚转分解成
+滚转加偏航。
 
 输出：
 
 ```text
-/flyrat/slam/odometry   nav_msgs/Odometry，slam_map -> camera_left_optical_frame
-/flyrat/slam/path       nav_msgs/Path
+/flyrat/slam/odometry   nav_msgs/Odometry，slam_map -> imu_link
+/flyrat/slam/path       nav_msgs/Path，机体轨迹
 /flyrat/slam/status     diagnostic_msgs/DiagnosticStatus，1 Hz
 /flyrat/slam/reset      std_srvs/Trigger
 /tf                     slam_map -> camera_left_optical_frame

@@ -86,10 +86,14 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - 订阅实机转发的左右目和 IMU，双目用 `ApproximateTime` 同步，IMU 缓存约 1 s，
   跟踪线程忙时丢旧帧。
 - 发布 `/flyrat/slam/odometry`、`/flyrat/slam/path`、`/flyrat/slam/status`、
-  `/flyrat/slam/reset` 和 TF `slam_map -> camera_left_optical_frame`。
+  `/flyrat/slam/reset`；动态 TF `slam_map -> imu_link`，静态 TF
+  `imu_link -> camera_left_optical_frame`。
 - 参数 `vocabulary_path` 必填，词袋不入库；`settings_path` 默认使用
-  `uvc_640x480_imu.yaml`；可选 `trajectory_path` 退出时保存 TUM 轨迹。
+  `uvc_640x480_imu.yaml`；`body_frame` 默认 `imu_link`；可选
+  `trajectory_path` 退出时保存 TUM 轨迹。
 - `IMU.T_b_c1` 使用“相机倒置、朝 IMU 前方左侧 45°、平移为 0”的占位矩阵。
+- 默认 `IMU.fastInit: 1`，跳过逐帧加速度门限；但 IMU 重力/尺度初始化仍需要
+  真实平移或明显晃动。
 
 ## 3. 实测指标
 
@@ -134,9 +138,11 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   内存也只有 2 GB。
 - SLAM 配置模板中的内参、双目外参和 IMU 外参都是占位值，未做真实标定；
   当前实测只能说明流程跑通，尺度和轨迹精度不可信。
-- ROS 2 SLAM 节点已直接订阅 `/flyrat/sensors/*`，但桌面静止、低纹理场景只能
-  短暂初始化，无法保持 `TRACKING`；还没有真实运动下的稳定轨迹数据。
-- 双目与 IMU 没有硬件同步；ROS 节点用图像时间戳和 IMU 缓存做近似对齐。
+- ROS 2 SLAM 节点已直接订阅 `/flyrat/sensors/*`；启用 `IMU.fastInit` 后可以在
+  静止桌面进入 `TRACKING`，但会因缺少运动反复重置，世界系尚未完成重力对齐，
+  还没有真实运动下的稳定轨迹数据。
+- 双目与 IMU 没有硬件同步；ROS 节点只用 1 Hz `TIME` 帧估计设备/主机偏移，
+  避免把 JPEG 解码时间算进图像时间戳。
 - 词袋文件 139 MB，加载约 4 秒，且 `ORBvoc.txt` 未入库。
 - SLAM 模块为 GPLv3，链接后整体程序需按 GPLv3 分发。
 
