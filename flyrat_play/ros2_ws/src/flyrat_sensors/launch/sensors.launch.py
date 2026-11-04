@@ -14,6 +14,7 @@ def generate_launch_description():
     stereo_color = LaunchConfiguration('stereo_color')
     acc_lsb_per_g = LaunchConfiguration('acc_lsb_per_g')
     gyro_lsb_per_dps = LaunchConfiguration('gyro_lsb_per_dps')
+    imu_axis = LaunchConfiguration('imu_axis')
 
     return LaunchDescription([
         DeclareLaunchArgument('host', default_value='127.0.0.1'),
@@ -27,6 +28,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'gyro_lsb_per_dps', default_value='16.4',
             description='Betaflight MSP_RAW_IMU gyroscope scale.'),
+        DeclareLaunchArgument(
+            'imu_axis', default_value='none',
+            description="IMU axis convention: 'none' (already FLU) or 'frd_to_flu'."),
         Node(
             package='flyrat_sensors',
             executable='sensor_receiver_node',
@@ -38,6 +42,7 @@ def generate_launch_description():
                 'stereo_color': stereo_color,
                 'acc_lsb_per_g': acc_lsb_per_g,
                 'gyro_lsb_per_dps': gyro_lsb_per_dps,
+                'imu_axis': imu_axis,
             }],
         ),
     ])

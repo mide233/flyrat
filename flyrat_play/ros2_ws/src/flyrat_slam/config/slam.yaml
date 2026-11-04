@@ -1,0 +1,13 @@
+slam_node:
+  ros__parameters:
+    left_topic: /flyrat/sensors/stereo/left/image_raw
+    right_topic: /flyrat/sensors/stereo/right/image_raw
+    imu_topic: /flyrat/sensors/imu
+    world_frame: slam_map
+    camera_frame: camera_left_optical_frame
+    sync_slop: 0.010
+    imu_buffer_seconds: 1.0
+    path_max_poses: 1000
+    path_publish_period: 0.2
+    status_period: 1.0
+    trajectory_path: ""

@@ -104,12 +104,17 @@ public:
             "right_frame_id", "camera_right_optical_frame");
         acc_lsb_per_g_ = declare_parameter<double>("acc_lsb_per_g", 2048.0);
         gyro_lsb_per_dps_ = declare_parameter<double>("gyro_lsb_per_dps", 16.4);
+        imu_axis_ = declare_parameter<std::string>("imu_axis", "none");
         stereo_color_ = declare_parameter<bool>("stereo_color", false);
         const int tof_count = declare_parameter<int>("tof_count", 4);
 
         if (acc_lsb_per_g_ <= 0.0 || gyro_lsb_per_dps_ <= 0.0) {
             throw std::runtime_error("acc_lsb_per_g and gyro_lsb_per_dps must be positive");
         }
+        if (imu_axis_ != "frd_to_flu" && imu_axis_ != "none") {
+            throw std::runtime_error("imu_axis must be 'frd_to_flu' or 'none'");
+        }
+        RCLCPP_INFO(get_logger(), "IMU axis convention: %s", imu_axis_.c_str());
         if (port_ <= 0 || port_ > 65535) {
             throw std::runtime_error("port must be in 1..65535");
         }
@@ -294,18 +299,26 @@ private:
         sensor_msgs::msg::Imu msg;
         msg.header.stamp = stamp_for(header.device_time_ns);
         msg.header.frame_id = imu_frame_id_;
+
+        // The flight controller on the current vehicle already reports a
+        // z-up body frame: at rest the raw Z axis is about +9.8 m/s^2, so the
+        // default "none" maps directly to ROS FLU (x forward, y left, z up).
+        // Set imu_axis:=frd_to_flu for a board whose raw Z is negative at rest.
+        const double y_sign = imu_axis_ == "frd_to_flu" ? -1.0 : 1.0;
+        const double z_sign = imu_axis_ == "frd_to_flu" ? -1.0 : 1.0;
+
         msg.linear_acceleration.x =
             static_cast<double>(raw.acc[0]) / acc_lsb_per_g_ * kGravity;
         msg.linear_acceleration.y =
-            static_cast<double>(raw.acc[1]) / acc_lsb_per_g_ * kGravity;
+            static_cast<double>(raw.acc[1]) / acc_lsb_per_g_ * kGravity * y_sign;
         msg.linear_acceleration.z =
-            static_cast<double>(raw.acc[2]) / acc_lsb_per_g_ * kGravity;
+            static_cast<double>(raw.acc[2]) / acc_lsb_per_g_ * kGravity * z_sign;
         msg.angular_velocity.x =
             static_cast<double>(raw.gyro[0]) / gyro_lsb_per_dps_ * kPi / 180.0;
         msg.angular_velocity.y =
-            static_cast<double>(raw.gyro[1]) / gyro_lsb_per_dps_ * kPi / 180.0;
+            static_cast<double>(raw.gyro[1]) / gyro_lsb_per_dps_ * kPi / 180.0 * y_sign;
         msg.angular_velocity.z =
-            static_cast<double>(raw.gyro[2]) / gyro_lsb_per_dps_ * kPi / 180.0;
+            static_cast<double>(raw.gyro[2]) / gyro_lsb_per_dps_ * kPi / 180.0 * z_sign;
         // No orientation estimate is available from MSP_RAW_IMU.
         msg.orientation_covariance[0] = -1.0;
         imu_pub_->publish(msg);
@@ -390,6 +403,7 @@ private:
     std::string right_frame_id_;
     double acc_lsb_per_g_ = 2048.0;
     double gyro_lsb_per_dps_ = 16.4;
+    std::string imu_axis_ = "none";
     bool stereo_color_ = false;
 
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
