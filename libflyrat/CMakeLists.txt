@@ -68,13 +68,9 @@ add_library(flyrat_vl53l5cx STATIC
 target_include_directories(flyrat_vl53l5cx PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/vl53l5cx/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/vl53l5cx/platform>)
-target_compile_definitions(flyrat_vl53l5cx PUBLIC
-  VL53L5CX_DISABLE_AMBIENT_PER_SPAD
-  VL53L5CX_DISABLE_NB_SPADS_ENABLED
-  VL53L5CX_DISABLE_SIGNAL_PER_SPAD
-  VL53L5CX_DISABLE_RANGE_SIGMA_MM
-  VL53L5CX_DISABLE_REFLECTANCE_PERCENT
-  VL53L5CX_DISABLE_MOTION_INDICATOR)
+# The VL53L5CX output-selection macros live in platform/platform.h, not here.
+# They change the layout of VL53L5CX_ResultsData, so they must be identical for
+# the C driver and every C++ consumer; defining them per-target broke that.
 
 # Hardware access lives in its own target so the protocol layer can depend on
 # the header-only Transport interface without pulling in a particular backend.

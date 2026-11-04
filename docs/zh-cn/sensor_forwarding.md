@@ -42,6 +42,12 @@
 编译 C++ 文件，最后链接 `-pthread -ldl`。也可以按 `flyrat_pilot/CMakeLists.txt`
 中的 target 配置自己的 CMake toolchain。
 
+注意：VL53L5CX 的输出裁剪宏（`VL53L5CX_DISABLE_*`）统一写在
+`libflyrat/third_party/vl53l5cx/platform/platform.h`，C 和 C++ 不需要再传
+`-D`。这些宏会改变 `VL53L5CX_ResultsData` 的内存布局；如果只给 C 文件传、
+不给 C++ 文件传，驱动和读取端会按不同布局解释同一块缓冲区，表现为距离和
+`target_status` 全为 0。不要再按翻译单元单独定义这些宏。
+
 当前设备的可执行文件可以直接放在 `/tmp/flyrat_sensor_forwarder` 运行。
 
 运行：

@@ -30,6 +30,8 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   - 地址固定为 `0x60/0x62/0x64/0x66`，不再支持单独配置。
   - 每次启动逐颗释放 LPn，自动探测残留地址并改回固定地址。
   - 不做任何 I2C 访问前先把四路 LPn 拉低，避免上电都处于 0x52 时冲突。
+  - 输出裁剪宏统一定义在 `platform/platform.h`，保证 C 驱动和 C++ 读取端
+    的 `VL53L5CX_ResultsData` 布局一致。
 - `hardware::Imu`：读取 `MspInteract` 的最新 `MSP_RAW_IMU` 快照。
 - `hardware::StereoCamera`：UVC 双目相机 V4L2 采集。
   - `kYuyv`：原始 YUYV，可输出 YUYV 或 GRAY8。

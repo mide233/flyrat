@@ -62,17 +62,38 @@ typedef struct
  * @brief All macro below are used to configure the sensor output. User can
  * define some macros if he wants to disable selected output, in order to reduce
  * I2C access.
+ *
+ * These are defined here, rather than only on the compiler command line, because
+ * they change the layout of VL53L5CX_ResultsData. Every translation unit that
+ * includes vl53l5cx_api.h also includes this header, so the driver (C) and the
+ * consumer (C++) always agree on the struct layout. Defining them per-target on
+ * the command line is error prone: if a C++ file is compiled without the same
+ * flags, it reads every field at the wrong offset (distances silently become 0).
  */
 
-// #define VL53L5CX_DISABLE_AMBIENT_PER_SPAD
-// #define VL53L5CX_DISABLE_NB_SPADS_ENABLED
+#ifndef VL53L5CX_DISABLE_AMBIENT_PER_SPAD
+#define VL53L5CX_DISABLE_AMBIENT_PER_SPAD
+#endif
+#ifndef VL53L5CX_DISABLE_NB_SPADS_ENABLED
+#define VL53L5CX_DISABLE_NB_SPADS_ENABLED
+#endif
+// nb_target_detected, distance_mm and target_status are kept: they are the only
+// fields flyrat consumes.
 // #define VL53L5CX_DISABLE_NB_TARGET_DETECTED
-// #define VL53L5CX_DISABLE_SIGNAL_PER_SPAD
-// #define VL53L5CX_DISABLE_RANGE_SIGMA_MM
+#ifndef VL53L5CX_DISABLE_SIGNAL_PER_SPAD
+#define VL53L5CX_DISABLE_SIGNAL_PER_SPAD
+#endif
+#ifndef VL53L5CX_DISABLE_RANGE_SIGMA_MM
+#define VL53L5CX_DISABLE_RANGE_SIGMA_MM
+#endif
 // #define VL53L5CX_DISABLE_DISTANCE_MM
-// #define VL53L5CX_DISABLE_REFLECTANCE_PERCENT
+#ifndef VL53L5CX_DISABLE_REFLECTANCE_PERCENT
+#define VL53L5CX_DISABLE_REFLECTANCE_PERCENT
+#endif
 // #define VL53L5CX_DISABLE_TARGET_STATUS
-// #define VL53L5CX_DISABLE_MOTION_INDICATOR
+#ifndef VL53L5CX_DISABLE_MOTION_INDICATOR
+#define VL53L5CX_DISABLE_MOTION_INDICATOR
+#endif
 
 
  /**
