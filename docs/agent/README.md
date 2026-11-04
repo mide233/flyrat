@@ -42,7 +42,7 @@
 
 - [`slam/orb_slam3.md`](slam/orb_slam3.md)
   vendored ORB-SLAM3 的许可证、无界面改造、双目/双目惯性 C++ API、配置、
-  `slam_bench` 和实测结果。
+  `slam_bench`、ROS 2 IMU-stereo 节点和实测结果。
 
 ### 报告
 

@@ -62,6 +62,24 @@ SLAM 默认关闭，因为它依赖 OpenCV、Boost.Serialization、OpenSSL，并
 注意 `Stereo.T_c1_c2` 的方向与 `cv::stereoCalibrate` 返回的
 `X2 = R * X1 + T` 相反，写入前要取逆。
 
+当前 ROS 2 节点使用的 `IMU.T_b_c1` 是占位值，按“相机倒置、朝向 IMU 前方左侧
+45°、平移为 0”构造，body 轴为 FLU：
+
+```yaml
+IMU.T_b_c1: !!opencv-matrix
+  rows: 4
+  cols: 4
+  dt: f
+  data: [-0.707107, 0.0, 0.707107, 0.0,
+          0.707107, 0.0, 0.707107, 0.0,
+          0.0,      1.0, 0.0,      0.0,
+          0.0,      0.0, 0.0,      1.0]
+```
+
+它表示 `T_body_camera`：把左目相机光学坐标变换到 IMU body 坐标。相机绕光轴
+倒置，光轴指向 body 前方左侧约 45°。平移和安装角都没有实测标定，不能用于
+精度评估。
+
 ## 5. C++ API
 
 ```cpp
@@ -105,7 +123,45 @@ auto result = slam.track(left, right, timestamp_s, imu);
 IMU 样本应覆盖上一帧到当前帧的时间段，按时间升序。调用方负责把
 Betaflight 的原始计数换算成 SI 单位，并处理轴向。
 
-## 6. 命令行
+## 6. ROS 2 IMU-stereo 节点
+
+ROS 2 包 `flyrat_play/ros2_ws/src/flyrat_slam/` 把实机转发的双目和 IMU 直接接入
+`flyrat::slam::StereoSlam`。节点固定使用 `Mode::kImuStereo`，不提供纯双目回退。
+
+订阅：
+
+- `/flyrat/sensors/stereo/left/image_raw`
+- `/flyrat/sensors/stereo/right/image_raw`
+- `/flyrat/sensors/imu`
+
+双目用 `message_filters::ApproximateTime` 同步（默认 `sync_slop=0.010` s），
+IMU 缓存默认 1 s。图像回调只保留最新待处理帧，跟踪线程忙时丢旧帧，避免延迟
+累积。跟踪线程用左目时间戳，把上一帧到当前帧之间的 IMU 样本传给
+`StereoSlam::track()`。
+
+发布：
+
+- `/flyrat/slam/odometry`：`nav_msgs/msg/Odometry`，`slam_map ->
+  camera_left_optical_frame`，位姿是 `T_world_camera`。
+- `/flyrat/slam/path`：`nav_msgs/msg/Path`，限频发布，保留最近
+  `path_max_poses` 个位姿。
+- `/flyrat/slam/status`：`diagnostic_msgs/msg/DiagnosticStatus`，1 Hz，包含状态、
+  输入/处理帧率、丢帧、失败帧、IMU 缓冲和 age。
+- `/flyrat/slam/reset`：`std_srvs/srv/Trigger`，清空地图、轨迹和 IMU 缓冲。
+- TF：`slam_map -> camera_left_optical_frame`。
+
+参数在 `config/slam.yaml`，启动时可用 `-p` 覆盖。`vocabulary_path` 必填；
+`settings_path` 默认使用安装后的 `uvc_640x480_imu.yaml`；`trajectory_path`
+非空时在节点退出时保存 TUM 轨迹。
+
+节点要求 IMU 已按 ROS FLU 发布。当前实机 `sensor_receiver_node` 默认
+`imu_axis=none`，静止时 z 约 `+9.8 m/s²`；如果换成原始 z 为负的飞控板，
+需要改为 `frd_to_flu`，否则 `IMU.T_b_c1` 和重力方向都会不一致。
+
+构建和启动命令见 [`build_and_run.md`](../build_and_run.md) 的“ROS 2 SLAM 节点”
+一节。Foxglove 只作为可视化工具，不提交布局文件。
+
+## 7. 命令行
 
 `slam_bench` 的通用参数和启动示例见
 [`build_and_run.md`](../build_and_run.md)。它支持三种输入：
@@ -119,7 +175,7 @@ Betaflight 的原始计数换算成 SI 单位，并处理轴向。
 加 `--mode imu-stereo` 使用双目惯性模式，`--save-traj FILE` 保存 TUM 轨迹。
 运行结束会打印跟踪帧数、平均/最大耗时和峰值 RSS。
 
-## 7. 实测
+## 8. 实测
 
 开发机（x86_64，OpenCV 4.6，Release，占位内参）：
 
@@ -135,7 +191,23 @@ peak RSS=547 MB
 `ctest` 9/9。配置 `FLYRAT_ORB_VOCAB` 时，`test_slam_api` 会额外加载真实
 词袋并构造/销毁 `System`（约 3.5 秒）。
 
-## 8. 无界面改造
+ROS 2 节点用实机转发数据实测（RK3566 采集、adb 转发、开发机 tracking）：
+
+```text
+IMU 输入             200.3–200.8 Hz
+双目输入             60.0 Hz（左右各 640x480 mono8）
+SLAM 输入/处理       60.0 Hz，启动后 dropped=1
+状态发布             1 Hz
+slam_node RSS        约 557 MB（含词袋和 ORB 地图）
+```
+
+当前桌面场景近似静止、视场内容少，节点能短暂完成地图初始化
+（日志出现 `New Map created with 104 points`），但没有持续的旋转/平移激励，
+随后会因 `Fail to track local map!` 或 `IMU is not or recently initialized`
+回到 `NOT_INITIALIZED`。因此还没有可重复的稳定 `TRACKING` 轨迹数据；
+`/flyrat/slam/reset` 服务已实测返回成功。
+
+## 9. 无界面改造
 
 上游 ORB-SLAM3 默认链接 Pangolin 并启动 Viewer 线程。本模块做了以下裁剪：
 
@@ -145,14 +217,15 @@ peak RSS=547 MB
 - `Map` 的缩略图类型从 `GLubyte*` 改为 `unsigned char*`；
 - 上游的 `exit(-1)` 配置错误改为抛出异常，由门面转换成 `SlamError`。
 
-## 9. 已知限制
+## 10. 已知限制
 
 - 当前只在开发机验证，没有在泰山派 aarch64 上构建；泰山派没有 OpenCV，
   且内存只有 2 GB。
 - 内参、外参和 IMU 参数是占位值；需要完整标定。
-- 开发机上的双目图像来自设备录制后回放，尚未把 `/flyrat/sensors/*` 直接
-  喂给 SLAM。
-- 双目和 IMU 没有硬件同步；IMU 模式需要调用方自行做时间对齐。
+- 实机节点已经直接订阅 `/flyrat/sensors/*`，但桌面静止场景无法稳定初始化；
+  需要真实运动、有纹理的视场验证 `TRACKING`。
+- 双目和 IMU 没有硬件同步；ROS 节点用图像时间戳和 IMU 缓存做近似对齐。
+- 图像同步窗口默认 10 ms；左右目时间戳差距更大时会丢帧。
 - 词袋 139 MB，加载约数秒；启动延迟明显。
 - `reset()` 是异步生效，下一帧才会真正重建地图。
 - GPLv3 会传播到链接本模块的程序。

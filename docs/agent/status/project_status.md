@@ -54,6 +54,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 
 - `flyrat_sensors_interfaces`：`TofZone` / `TofFrame` 自定义消息。
 - `flyrat_sensors`：`sensor_receiver_node`，负责 TCP 接收、协议解析、图像解码和发布。
+  IMU 默认按 `imu_axis=none` 发布；当前实机静止时 z 约 `+9.8 m/s²`，符合 ROS FLU。
 - 默认话题：
   - `/flyrat/sensors/imu`
   - `/flyrat/sensors/tof_0` … `/flyrat/sensors/tof_3`
@@ -75,6 +76,20 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - 词袋不入库，通过 `FLYRAT_ORB_VOCAB` 或 `Options::vocabulary_path` 指定。
 - 默认 `FLYRAT_BUILD_SLAM=OFF`；开启后链接的程序整体按 GPLv3 分发。
 
+### 2.5 ROS 2 SLAM 节点
+
+完整构建、参数和 Foxglove 预览见 [`slam/orb_slam3.md`](../slam/orb_slam3.md)。
+
+- `flyrat_play/ros2_ws/src/flyrat_slam/`：新的 ROS 2 包，固定使用
+  `flyrat::slam::StereoSlam` 的 `kImuStereo` 模式。
+- 订阅实机转发的左右目和 IMU，双目用 `ApproximateTime` 同步，IMU 缓存约 1 s，
+  跟踪线程忙时丢旧帧。
+- 发布 `/flyrat/slam/odometry`、`/flyrat/slam/path`、`/flyrat/slam/status`、
+  `/flyrat/slam/reset` 和 TF `slam_map -> camera_left_optical_frame`。
+- 参数 `vocabulary_path` 必填，词袋不入库；`settings_path` 默认使用
+  `uvc_640x480_imu.yaml`；可选 `trajectory_path` 退出时保存 TUM 轨迹。
+- `IMU.T_b_c1` 使用“相机倒置、朝 IMU 前方左侧 45°、平移为 0”的占位矩阵。
+
 ## 3. 实测指标
 
 | 项目 | 实测值 | 说明 |
@@ -90,6 +105,11 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 | ORB-SLAM3 单帧耗时 | 11.5–12.7 ms | 约 79–87 fps，Release，占位内参 |
 | ORB-SLAM3 峰值 RSS | 547 MB | 90 帧回放，含 139 MB 词袋 |
 | ORB-SLAM3 词袋加载 | 约 4 s | `ORBvoc.txt` 文本格式 |
+| ROS 2 IMU 输入 | 200.3–200.8 Hz | 开发机接收节点 |
+| ROS 2 双目输入 | 60.0 Hz | 左右各 640x480 mono8 |
+| ROS 2 SLAM 输入/处理 | 60.0 Hz | 输入按 60 Hz 持续，交互查询时少量丢帧 |
+| ROS 2 SLAM 状态发布 | 1 Hz | `diagnostic_msgs` |
+| ROS 2 SLAM RSS | 约 557 MB | 含词袋和 ORB 地图 |
 
 ## 4. 构建与运行
 
@@ -113,31 +133,32 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   内存也只有 2 GB。
 - SLAM 配置模板中的内参、双目外参和 IMU 外参都是占位值，未做真实标定；
   当前实测只能说明流程跑通，尺度和轨迹精度不可信。
-- SLAM 尚未直接订阅 `/flyrat/sensors/*`；当前用录制序列回放验证。
-- 双目与 IMU 没有硬件同步，IMU 模式需要调用方做时间对齐。
+- ROS 2 SLAM 节点已直接订阅 `/flyrat/sensors/*`，但桌面静止、低纹理场景只能
+  短暂初始化，无法保持 `TRACKING`；还没有真实运动下的稳定轨迹数据。
+- 双目与 IMU 没有硬件同步；ROS 节点用图像时间戳和 IMU 缓存做近似对齐。
 - 词袋文件 139 MB，加载约 4 秒，且 `ORBvoc.txt` 未入库。
 - SLAM 模块为 GPLv3，链接后整体程序需按 GPLv3 分发。
 
 ## 6. 最近提交
 
 ```text
+9f09ae4 docs: move all project documentation under docs/agent
+3f24857 docs: reorganize by topic and centralize build instructions
+60a8483 docs: describe ORB-SLAM3 module and measurements
 73a13b1 feat(slam): vendor headless ORB-SLAM3 with stereo facade
 f2ea59b fix(tof): define result-trimming macros in platform header
 39f5406 docs: record sensor forwarding status and ToF recovery
 2420f7e refactor(tof): hardcode the four sensor addresses
 9ec445d fix(hardware): recover ToF sensors at retained I2C addresses
 390874c feat(sensors): forward real IMU, ToF and stereo over adb
-6c5b4bb feat(hardware): add NV12 color output for MJPEG stereo
-32a3188 feat(hardware): add stereo camera capture with MPP MJPEG decode
-abc224e feat(hardware): add VL53L5CX array and IMU facade
 ```
 
 ## 7. 下一步
 
 1. 标定双目内参、外参和 IMU–相机外参，替换 SLAM 配置模板中的占位值，
    并补充 ROS `CameraInfo`。
-2. 把 `/flyrat/sensors/stereo/*` 直接接入 `flyrat::slam::StereoSlam`，
-   跑真实数据闭环；再把位姿接入状态估计。
+2. 用真实运动和有纹理的场景验证 IMU-stereo 持续 `TRACKING`，在 Foxglove 中
+   检查轨迹、TF 和状态，再评估精度和漂移。
 3. 评估 ToF、双目、IMU 的时间对齐策略，必要时增加设备端统一时间戳。
 4. 将传感器转发和 SLAM 整合进正式 `flyrat_pilot` 运行时，加入失效保护与
    链路健康状态。

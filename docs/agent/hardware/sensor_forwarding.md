@@ -97,6 +97,7 @@ port=5000
 stereo_color=false
 acc_lsb_per_g=2048.0
 gyro_lsb_per_dps=16.4
+imu_axis=none
 ```
 
 节点还支持 `reconnect_ms`、`tof_count`、`imu_frame_id`、`tof_frame_id`、
@@ -104,6 +105,15 @@ gyro_lsb_per_dps=16.4
 传入。
 
 `MSP_RAW_IMU` 的尺度跟飞控板有关，默认值只是常见起点；需要按实际板子校准。
+
+`imu_axis` 控制发布到 ROS 的轴向约定：
+
+- `none`（默认）：原始数据已经是 z 轴向上。当前实机静止时原始
+  `linear_acceleration.z ≈ +9.83 m/s²`，与 ROS FLU（x 前、y 左、z 上）一致。
+- `frd_to_flu`：把 y、z 取反。适用于静止时原始 z 为负的 FRD 飞控板。
+
+这个参数只做轴向选择，不包含安装角旋转；飞控板或 IMU 相对机体的安装角需要
+在后续的 `base_link`/`imu_link` 变换或标定中处理。
 
 ## 4. 话题
 
@@ -117,7 +127,8 @@ gyro_lsb_per_dps=16.4
 /flyrat/sensors/stereo/right/image_raw
 ```
 
-- IMU：`sensor_msgs/msg/Imu`，orientation 暂无，协方差首项为 `-1`。
+- IMU：`sensor_msgs/msg/Imu`，线加速度为 m/s²、角速度为 rad/s，orientation 暂无，
+  协方差首项为 `-1`。`imu_frame_id` 默认 `imu_link`。
 - ToF：每颗一个 `flyrat_sensors_interfaces/msg/TofFrame`，`zones[64]`，
   `valid = target_status in {5, 9}`。
 - 双目：默认 `mono8`，`stereo_color:=true` 时 `bgr8`；宽高为单眼尺寸。
@@ -133,7 +144,7 @@ ros2 topic echo --once /flyrat/sensors/tof_0
 
 预期：
 
-- IMU 约 200 Hz；
+- IMU 约 200 Hz；静止时 `linear_acceleration.z` 约 `+9.8 m/s²`；
 - 每颗 ToF 实测约 57–58 Hz（请求 60 Hz，受传感器实际帧周期限制）；
 - 左右图像各约 60 Hz，`1280x480` 模式下单眼 `640x480`。
 

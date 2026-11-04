@@ -282,6 +282,9 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
   colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release'
 ```
 
+`flyrat_slam` 在配置时会强制 `FLYRAT_BUILD_SLAM=ON`，因此完整构建 ROS 2 包
+还需要 OpenCV、Boost.Serialization 和 OpenSSL。
+
 每次运行前 source：
 
 ```sh
@@ -296,11 +299,13 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 |---|---|
 | `flyrat_sensors_interfaces` | `TofZone`、`TofFrame` 自定义消息 |
 | `flyrat_sensors` | TCP 接收、MJPEG 解码、ROS 发布 |
+| `flyrat_slam` | ORB-SLAM3 IMU-stereo 节点、轨迹、TF 和状态 |
 | `flyrat_msp` | MSP 协议接入 |
 | `flyrat_control` | 控制节点与 SITL launch |
 
 `sensors.launch.py` 参数：`host`（默认 127.0.0.1）、`port`（默认 5000）、
-`stereo_color`、`acc_lsb_per_g`、`gyro_lsb_per_dps`。
+`stereo_color`、`acc_lsb_per_g`、`gyro_lsb_per_dps`、`imu_axis`（默认 `none`，
+原始数据已是 FLU；FRD 飞控板设为 `frd_to_flu`）。
 
 ## 6. Gazebo + Betaflight SITL
 
@@ -403,6 +408,57 @@ IMU 模式加 `--mode imu-stereo`。配置模板里的内参、基线、IMU 外�
 正式使用前必须标定。
 
 接口与限制见 [`slam/orb_slam3.md`](slam/orb_slam3.md)。
+
+### 7.4 ROS 2 SLAM 节点
+
+`flyrat_slam` 把实机转发的双目和 IMU 直接接入 `flyrat::slam::StereoSlam`，
+固定使用 IMU-stereo 模式。先按第 4.3 节启动设备转发和 `flyrat_sensors`。
+
+构建：
+
+```sh
+cd flyrat_play/ros2_ws
+bash -lc 'source /opt/ros/jazzy/setup.bash && \
+  colcon build --packages-select flyrat_sensors flyrat_slam \
+  --cmake-args -DCMAKE_BUILD_TYPE=Release'
+```
+
+启动：
+
+```sh
+bash -lc 'source /opt/ros/jazzy/setup.bash && \
+  source /workspaces/flyrat/flyrat_play/ros2_ws/install/setup.bash && \
+  ros2 launch flyrat_slam slam.launch.py \
+  vocabulary_path:=/workspaces/flyrat/playground/ORB_SLAM3/Vocabulary/ORBvoc.txt'
+```
+
+`vocabulary_path` 必填，词袋文件不入库。`settings_path` 默认是包内安装的
+`uvc_640x480_imu.yaml`；`trajectory_path:=/tmp/traj.txt` 可在退出时保存 TUM
+轨迹。其余参数见 `flyrat_slam/config/slam.yaml`。
+
+输出：
+
+```text
+/flyrat/slam/odometry   nav_msgs/Odometry，slam_map -> camera_left_optical_frame
+/flyrat/slam/path       nav_msgs/Path
+/flyrat/slam/status     diagnostic_msgs/DiagnosticStatus，1 Hz
+/flyrat/slam/reset      std_srvs/Trigger
+/tf                     slam_map -> camera_left_optical_frame
+```
+
+Foxglove 预览：
+
+```sh
+.script/foxglove.sh
+```
+
+默认 WebSocket 是 `ws://localhost:8765`。在 Foxglove 中打开该连接，添加 3D 面板
+显示 `/tf`、`/flyrat/slam/path` 和 `/flyrat/slam/odometry`，再添加两个 Image
+面板显示左右目话题，以及 Diagnostic 面板查看 `/flyrat/slam/status`。布局文件
+不入库，按需在本地保存。
+
+当前配置的内参、双目外参和 `IMU.T_b_c1` 都是占位值；静止桌面场景不足以稳定
+初始化，需要实际运动和有纹理的视场验证跟踪。
 
 ## 8. Docker 与 CI
 
