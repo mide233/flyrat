@@ -291,24 +291,25 @@ private:
             throw std::runtime_error("IMU.T_b_c1 rotation is not orthonormal");
         }
 
-        // ORB-SLAM3 calls this matrix T_b_c1: camera -> body (IMU). The TF
-        // tree needs the inverse, body -> camera.
-        Eigen::Isometry3d body_camera = Eigen::Isometry3d::Identity();
-        body_camera.linear() = rotation;
-        body_camera.translation() = matrix.block<3, 1>(0, 3);
-        camera_body_ = body_camera.inverse();
+        // ORB-SLAM3 calls this matrix T_b_c1 and uses it as camera -> body:
+        // a point in the left optical frame is mapped into the IMU/body frame.
+        // The TF tree and Twb composition need the inverse, body -> camera.
+        Eigen::Isometry3d camera_to_body = Eigen::Isometry3d::Identity();
+        camera_to_body.linear() = rotation;
+        camera_to_body.translation() = matrix.block<3, 1>(0, 3);
+        body_to_camera_ = camera_to_body.inverse();
     }
 
     void publish_static_body_to_camera()
     {
-        const Eigen::Quaterniond orientation(camera_body_.linear());
+        const Eigen::Quaterniond orientation(body_to_camera_.linear());
         geometry_msgs::msg::TransformStamped transform;
         transform.header.stamp = now();
         transform.header.frame_id = body_frame_;
         transform.child_frame_id = camera_frame_;
-        transform.transform.translation.x = camera_body_.translation().x();
-        transform.transform.translation.y = camera_body_.translation().y();
-        transform.transform.translation.z = camera_body_.translation().z();
+        transform.transform.translation.x = body_to_camera_.translation().x();
+        transform.transform.translation.y = body_to_camera_.translation().y();
+        transform.transform.translation.z = body_to_camera_.translation().z();
         transform.transform.rotation.x = orientation.x();
         transform.transform.rotation.y = orientation.y();
         transform.transform.rotation.z = orientation.z();
@@ -489,7 +490,7 @@ private:
         Eigen::Isometry3d world_camera = Eigen::Isometry3d::Identity();
         world_camera.linear() = result.pose.orientation.toRotationMatrix();
         world_camera.translation() = result.pose.position;
-        return world_camera * camera_body_;
+        return world_camera * body_to_camera_;
     }
 
     void publish_pose(const Result& result, const rclcpp::Time& stamp)
@@ -657,7 +658,8 @@ private:
     std::string world_frame_;
     std::string body_frame_;
     std::string camera_frame_;
-    Eigen::Isometry3d camera_body_ { Eigen::Isometry3d::Identity() };
+    // body -> camera, i.e. the inverse of ORB-SLAM3's T_b_c1.
+    Eigen::Isometry3d body_to_camera_ { Eigen::Isometry3d::Identity() };
     double sync_slop_ = 0.010;
     double imu_buffer_seconds_ = 1.0;
     int path_max_poses_ = 1000;

@@ -49,10 +49,14 @@ Stereo.T_c1_c2: !!opencv-matrix
          0.0, 0.0, 1.0, 0.0,
          0.0, 0.0, 0.0, 1.0]
 
-# T_b_c1: left camera in the IMU/body frame. The nominal mounting below is a
-# starting value only: the camera is assumed to be upside down and pointing
-# straight along the IMU forward axis, with its origin coincident with the IMU.
-# The real translation and mounting angles must be measured.
+# T_b_c1: camera -> body (IMU). A point in the left optical frame is mapped
+# into the body frame. The columns are the camera axes expressed in body; the
+# translation is the camera origin in body. ORB-SLAM3 uses the inverse
+# (body -> camera) internally, so do not write a body -> camera matrix here.
+# The nominal mounting below is a starting value only: the camera is assumed
+# to be upside down and pointing straight along the IMU forward axis, with its
+# origin coincident with the IMU. The real translation and mounting angles must
+# be measured.
 # ORB-SLAM3 expects the body frame to match the IMU convention: X forward,
 # Y left, Z up. The Betaflight raw IMU axes must be mapped accordingly before
 # filling this matrix.
