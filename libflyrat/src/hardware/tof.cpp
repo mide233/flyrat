@@ -6,8 +6,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <thread>
@@ -62,6 +64,59 @@ bool ensure_exported(int gpio, std::string& error)
     }
     error = "GPIO " + std::to_string(gpio) + " did not appear in sysfs";
     return false;
+}
+
+void add_address(std::vector<std::uint16_t>& addresses, std::uint16_t address)
+{
+    if (address < 0x08 || address > 0xEE || (address & 1) != 0) {
+        return;
+    }
+    if (std::find(addresses.begin(), addresses.end(), address) == addresses.end()) {
+        addresses.push_back(address);
+    }
+}
+
+std::uint16_t probe_existing_address(VL53L5CX_Configuration& driver,
+    const TofConfig& config, int sensor, int configured_count,
+    std::uint8_t& last_status)
+{
+    std::vector<std::uint16_t> candidates;
+    add_address(candidates, config.initial_addresses[sensor]);
+    add_address(candidates, 0x52);
+    for (int i = 0; i < config.sensor_count; ++i) {
+        add_address(candidates, config.addresses[i]);
+    }
+
+    // A sensor keeps its last address until it is really powered down. If it
+    // was moved by an older configuration, search the whole 7-bit range after
+    // the cheap, known candidates. Only this sensor's LPn is high here, so no
+    // other VL53L5CX is visible on the bus.
+    if (config.recover_existing_address) {
+        for (std::uint16_t address = 0x08; address <= 0xEE; address += 2) {
+            add_address(candidates, address);
+        }
+    }
+
+    for (const std::uint16_t address : candidates) {
+        bool already_owned = false;
+        for (int i = 0; i < configured_count; ++i) {
+            if (config.addresses[i] == address) {
+                already_owned = true;
+                break;
+            }
+        }
+        if (already_owned) {
+            continue;
+        }
+
+        driver.platform.address = address;
+        std::uint8_t alive = 0;
+        last_status = vl53l5cx_is_alive(&driver, &alive);
+        if (last_status == 0 && alive != 0) {
+            return address;
+        }
+    }
+    return 0;
 }
 
 class GpioOutput {
@@ -265,23 +320,32 @@ struct TofArray::Impl {
                 fail(i, "I2C open", 255);
             }
             device.initialized = true;
-            device.driver.platform.address = config.initial_addresses[i];
 
-            std::uint8_t alive = 0;
-            std::uint8_t status = vl53l5cx_is_alive(&device.driver, &alive);
-            if (status != 0 || alive == 0) {
-                fail(i, "is_alive", status);
+            std::uint8_t last_status = 255;
+            const std::uint16_t current_address =
+                probe_existing_address(device.driver, config, i, i, last_status);
+            if (current_address == 0) {
+                fail(i, "is_alive", last_status);
+            }
+            if (current_address != config.initial_addresses[i]) {
+                std::fprintf(stderr, "ToF sensor %d found at 0x%02X\n",
+                    i, current_address);
             }
 
-            status = vl53l5cx_init(&device.driver);
+            std::uint8_t status = vl53l5cx_init(&device.driver);
             if (status != 0) {
                 fail(i, "init", status);
             }
 
-            if (config.addresses[i] != config.initial_addresses[i]) {
+            if (config.addresses[i] != current_address) {
                 status = vl53l5cx_set_i2c_address(&device.driver, config.addresses[i]);
                 if (status != 0) {
                     fail(i, "set_i2c_address", status);
+                }
+                std::uint8_t alive = 0;
+                status = vl53l5cx_is_alive(&device.driver, &alive);
+                if (status != 0 || alive == 0) {
+                    fail(i, "is_alive_after_address_change", status);
                 }
             }
 
@@ -310,7 +374,32 @@ struct TofArray::Impl {
                 fail(i, "start_ranging", status);
             }
             device.ranging = true;
+
+            // Keep only the sensor being configured visible on the bus. This
+            // is what makes probing for a retained address safe: otherwise a
+            // previously configured sensor at 0x60/0x62/... can answer for the
+            // next sensor and get its address changed by mistake.
+            if (i + 1 < config.sensor_count) {
+                std::string lpn_error;
+                if (!lpn[i].set(false, lpn_error)) {
+                    fail(i, "LPn low", 255);
+                }
+                // Give the just-configured sensor time to stop driving the bus
+                // before the next LPn is released. Without this, a probe can
+                // still see the previous sensor at its new address.
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
         }
+
+        // All sensors have their final address; re-enable I2C on every LPn.
+        for (int i = 0; i < config.sensor_count; ++i) {
+            if (!lpn[i].set(true, error)) {
+                cleanup();
+                throw TofError("LPn GPIO " + std::to_string(config.lpn_gpio[i]) +
+                    ": " + error);
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
         if (config.use_interrupts) {
             for (int i = 0; i < config.sensor_count; ++i) {

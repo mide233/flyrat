@@ -57,6 +57,11 @@ struct TofConfig {
     // Address each sensor is expected to answer at before assignment. Normally
     // all 0x52; this is overridable to recover a sensor left at another address.
     std::array<std::uint16_t, kTofMaxSensors> initial_addresses { 0x52, 0x52, 0x52, 0x52 };
+    // If the initial address does not answer, probe the configured addresses
+    // and then the 7-bit I2C address range for the address the sensor retained
+    // from a previous run. Addresses are volatile and only a power cycle sends
+    // them back to 0x52, so this makes a warm restart self-healing.
+    bool recover_existing_address = true;
     int resolution = 4; // 4 or 8
     int ranging_hz = 60; // 4x4 supports 60 Hz; 8x8 is capped at 15 Hz
     int poll_interval_ms = 2;
