@@ -61,55 +61,19 @@ UDP 9004，实机走串口 MSP。
 
 ## 3. 构建
 
-一次构建全部产物（算法库、实机程序、SITL、桥接插件、ROS 2 包）：
+构建脚本、参数和产物路径统一列在
+[`build_and_run.md`](../build_and_run.md)。本节只保留仿真相关的注意事项。
 
-```bash
-.script/build_all.sh
-```
+- 需要先初始化子模块：`git submodule update --init --recursive`。
+- 桥接插件需要 `pkg-config --exists gz-sim8`。
+- SITL 默认目标是 `SITL`，可用 `BETAFLIGHT_TARGET` 覆盖。
+- 桥接插件的两处修复已经固定在上游 `mide233/aeroloop_gazebo` 的 `gz` 分支：
 
-也可以只构建其中一部分：
+  - 物理步进内等待电机指令包的上限从 1000 ms 降到 **2 ms**，否则丢一个包就会让
+    整个仿真卡死（详见第 10 节）；
+  - IMU 输出**比力**（世界系加回重力后旋到机体系），否则飞控的高度估计不可用。
 
-| 脚本 | 产物 |
-|---|---|
-| `.script/build_libflyrat.sh` | `libflyrat/build/libflyrat.a`（并运行单元测试） |
-| `.script/build_flyrat_pilot.sh` | `flyrat_pilot/build/flyrat_pilot` |
-| `.script/build_betaflight.sh` | `.../betaflight/obj/main/betaflight_SITL.elf` |
-| `.script/build_plugin.sh` | `.../aeroloop_gazebo/plugins/build/libBetaflightPlugin.so` |
-| `.script/build_ros2.sh` | `flyrat_play/ros2_ws/install/`（`flyrat_msp`、`flyrat_control`） |
-
-常用参数：
-
-- `--clean`：先删除对应构建目录再编译（`build_betaflight.sh` 用环境变量 `CLEAN=1`）。
-- `--no-sim` / `--no-ros`（仅 `build_all.sh`）：跳过仿真或 ROS 2 部分。
-- `--no-tests` / `--debug`（`build_libflyrat.sh`、`build_flyrat_pilot.sh`）：跳过单元测试 / 编译 Debug 版。
-- `build_ros2.sh` 的额外参数会透传给 colcon，例如 `--packages-select flyrat_msp`。
-- `JOBS`：并行编译数，默认 `nproc`。
-
-仿真侧的完整产物：
-
-- `flyrat_play/gazebo/third_party/betaflight/obj/main/betaflight_SITL.elf`
-- `flyrat_play/gazebo/third_party/aeroloop_gazebo/plugins/build/libBetaflightPlugin.so`
-
-细节（串行拉取固件子模块、`JOBS`、`CLEAN=1` 等）见 `flyrat_play/gazebo/README.md`。
-
-清理构建产物：
-
-```bash
-.script/clean_build.sh --dry-run   # 只列出将删除的路径
-.script/clean_build.sh             # 删除 SITL/插件/colcon/CMake 产物与缓存
-.script/clean_build.sh --keep-sim  # 保留 SITL ELF 与桥接插件
-```
-
-> 桥接插件需要的两处修复已经作为提交放在 `mide233/aeroloop_gazebo` 的 `gz` 分支上，
-> 由子模块指针固定：
->
-> - 物理步进内等待电机指令包的上限从 1000 ms 降到 **2 ms**，否则丢一个包就会让
->   整个仿真卡死（详见第 10 节）；
-> - IMU 输出**比力**（世界系加回重力后旋到机体系），否则飞控的高度估计不可用。
->
-> 所以 `.script/build_plugin.sh` **不再打补丁**：干净的 checkout 直接
-> `git submodule update --init --recursive` 就能构建出修好的插件，脚本会检查
-> `waitMs = 2` 以防子模块没更新。
+  `.script/build_plugin.sh` 不再打补丁，但会检查 `waitMs = 2`，防止子模块没有更新。
 
 ## 4. 一次性配置飞控
 
@@ -172,18 +136,9 @@ python3 flyrat_play/gazebo/scripts/bringup_test.py --takeoff
 
 ### 7.1 编译
 
-```bash
-# 纯算法库（无 ROS）+ 单元测试
-.script/build_libflyrat.sh
-
-# ROS 2 包（脚本内部会 source /opt/ros/jazzy/setup.bash）
-.script/build_ros2.sh
-```
-
-两者都可以加 `--clean` 从零开始；`build_ros2.sh` 的额外参数会透传给 colcon。
-
-> 手动执行时，在 zsh 里请用 `bash -c 'source /opt/ros/jazzy/setup.bash && ...'`
-> 包一层再 source，直接 source 可能出错。
+ROS 2 工作区的构建命令见
+[`build_and_run.md`](../build_and_run.md) 的“ROS 2”一节。构建后每次运行前都要
+source `/opt/ros/jazzy/setup.bash` 和工作区的 `install/setup.bash`。
 
 ### 7.2 运行
 
@@ -191,9 +146,9 @@ python3 flyrat_play/gazebo/scripts/bringup_test.py --takeoff
 # 终端 A：仿真
 flyrat_play/gazebo/scripts/launch_sim.sh
 # 终端 B：控制
-source /opt/ros/jazzy/setup.bash
-source flyrat_play/ros2_ws/install/setup.bash
-ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true
+bash -lc 'source /opt/ros/jazzy/setup.bash && \
+  source flyrat_play/ros2_ws/install/setup.bash && \
+  ros2 launch flyrat_control flyrat_sitl.launch.py auto_takeoff:=true'
 ```
 
 `auto_takeoff:=true` 会走一遍"解锁 → 缓慢加油门 → 悬停 → 自动上锁"的流程。
@@ -527,7 +482,7 @@ mpc: cmd=(...) att_err=.. vel=(.. .. ..) att_thr=.. thr2acc=.. thr=.. err=(.. ..
   `NOT_DISARMED` / `ARM_SWITCH` 同时锁存，而这两个标志只有在开关回到低位时才会
   清除。`msp_node` 现在会在每次 `/flyrat/set_arm(true)` 时先拉低 250 ms 再拉高，
   并在「已请求解锁但飞控未 armed」期间每 3 s 重复一次。完整分析见
-  [`arming_and_msp_link.md`](arming_and_msp_link.md)。
+  [`reports/arming_and_msp_link.md`](../reports/arming_and_msp_link.md)。
 - 若日志出现 `accepted the TCP connection but never answered MSP_API_VERSION`，
   说明 5761 端口被别的进程（多半是上一轮残留的 SITL）占着，或飞控没在处理 MSP：
   先 `ss -ltnp | grep 5761` 看归属，再重启仿真栈。该错误由 `msp_node` 的握手校验

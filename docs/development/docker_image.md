@@ -1,6 +1,7 @@
-# Build Docker Image
+# 开发镜像与 CI
 
-镜像由 GitHub Actions 构建并推送到 Docker Hub，**日常开发直接拉取，不需要本地构建**：
+镜像由 GitHub Actions 构建并推送到 Docker Hub，**日常开发直接拉取，不需要本地构建**。
+构建与运行环境总览见 [`build_and_run.md`](../build_and_run.md)。
 
 ```bash
 docker pull mide233/flyrat-dev-full:latest

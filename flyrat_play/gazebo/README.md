@@ -149,7 +149,7 @@ ros2 launch flyrat_control flyrat_sitl.launch.py \
 不依赖 ROS 的链路自检：`bringup_test.py`（覆盖 / 解锁 / 拉升）。
 
 完整流程、接口表、MPC 调参与排查清单见
-[`docs/zh-cn/betaflight_sitl_gazebo.md`](../../../docs/zh-cn/betaflight_sitl_gazebo.md)。
+[`docs/simulation/betaflight_sitl_gazebo.md`](../../../docs/simulation/betaflight_sitl_gazebo.md)。
 
 可视化：另开一个终端运行 `.script/foxglove.sh`，在主机上用 Foxglove
 Studio 连接 `ws://<主机地址>:8765`，即可看到 `/flyrat/*` 话题。
@@ -165,7 +165,7 @@ Studio 连接 `ws://<主机地址>:8765`，即可看到 `/flyrat/*` 话题。
 `/flyrat/position`、`/flyrat/velocity`，`frame_id=map`）。实机上换成 VSLAM，接口不变。
 `use_ground_truth:=false` 退回飞控 GPS + `flyrat::LocalEstimator` 的 10 Hz 通路，
 只用于自检。坐标契约、两条数据链和 IMU 比力补丁见
-[`docs/zh-cn/betaflight_sitl_gazebo.md`](../../../docs/zh-cn/betaflight_sitl_gazebo.md) 7.6 节。
+[`docs/simulation/betaflight_sitl_gazebo.md`](../../../docs/simulation/betaflight_sitl_gazebo.md) 7.6 节。
 
 如果只想看图像、不启动控制节点，再单独跑 `.script/camera.sh`（不要和 launch 同时开）。
 

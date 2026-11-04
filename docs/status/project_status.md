@@ -40,7 +40,8 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 
 ### 2.3 实机传感器转发
 
-完整启动、参数和话题说明见 [`sensor_forwarding.md`](sensor_forwarding.md)。
+完整启动、参数和话题说明见
+[`hardware/sensor_forwarding.md`](../hardware/sensor_forwarding.md)。
 
 设备端 `flyrat_sensor_forwarder`：
 
@@ -61,7 +62,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 
 ### 2.4 ORB-SLAM3 双目模块
 
-完整构建、配置和 API 说明见 [`orb_slam3.md`](orb_slam3.md)。
+完整构建、配置和 API 说明见 [`slam/orb_slam3.md`](../slam/orb_slam3.md)。
 
 - `libflyrat/third_party/orb_slam3/`：vendored ORB-SLAM3 核心（GPLv3），
   保留 DBoW2、g2o、Sophus，删除 Viewer、MapDrawer 和 Pangolin 依赖。
@@ -90,52 +91,10 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 | ORB-SLAM3 峰值 RSS | 547 MB | 90 帧回放，含 139 MB 词袋 |
 | ORB-SLAM3 词袋加载 | 约 4 s | `ORBvoc.txt` 文本格式 |
 
-## 4. 运行方式
+## 4. 构建与运行
 
-### 4.1 设备端
-
-```sh
-adb push flyrat_sensor_forwarder /tmp/
-adb shell chmod +x /tmp/flyrat_sensor_forwarder
-adb shell /tmp/flyrat_sensor_forwarder --listen 127.0.0.1:5000
-```
-
-### 4.2 开发机
-
-```sh
-adb -s 4c24d56142f3d0e3 forward tcp:5000 tcp:5000
-
-cd flyrat_play/ros2_ws
-bash -lc 'source /opt/ros/jazzy/setup.bash && \
-  colcon build --packages-select flyrat_sensors_interfaces flyrat_sensors && \
-  source install/setup.bash && \
-  ros2 launch flyrat_sensors sensors.launch.py'
-```
-
-也可以直接运行：
-
-```sh
-ros2 run flyrat_sensors sensor_receiver_node
-```
-
-注意可执行文件名是 `sensor_receiver_node`，不是 `sensor_receiver`。
-
-### 4.3 ORB-SLAM3
-
-```sh
-cmake -S libflyrat -B build-slam \
-  -DFLYRAT_BUILD_SLAM=ON \
-  -DCMAKE_BUILD_TYPE=Release
-cmake --build build-slam -j
-
-./build-slam/slam_bench \
-  --vocab /path/to/ORBvoc.txt \
-  --settings libflyrat/configs/orb_slam3/uvc_640x480.yaml \
-  --left /path/to/left --right /path/to/right --fps 30
-```
-
-实时 UVC 输入使用 `--sbs /dev/video0 --width 1280 --height 480 --fps 60`。
-词袋也可以配置为 `-DFLYRAT_ORB_VOCAB=/path/to/ORBvoc.txt`。
+所有组件的编译、测试和运行命令见
+[`build_and_run.md`](../build_and_run.md)。
 
 ## 5. 已知限制
 

@@ -5,9 +5,11 @@
 - 不依赖 ROS，链接与仿真共用的 `libflyrat`。
 - 主飞行逻辑仍是占位 `main()`（MSP 指令下发、遥测、失效保护、算法接入尚未实现）。
 - `flyrat_sensor_forwarder` 已实现实机传感器转发，接入方法见
-  [`docs/zh-cn/sensor_forwarding.md`](../docs/zh-cn/sensor_forwarding.md)。
+  [`docs/hardware/sensor_forwarding.md`](../docs/hardware/sensor_forwarding.md)。
 - 项目整体进度与实测指标见
-  [`docs/zh-cn/project_status.md`](../docs/zh-cn/project_status.md)。
+  [`docs/status/project_status.md`](../docs/status/project_status.md)。
+- 所有组件的编译与运行方式见
+  [`docs/build_and_run.md`](../docs/build_and_run.md)。
 
 ## 构建
 

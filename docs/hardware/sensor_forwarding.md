@@ -2,7 +2,8 @@
 
 本文说明如何把泰山派上的 IMU、4 颗 VL53L5CX ToF 和双目相机，通过 adb 转发到
 开发机，并在 ROS 2 中发布为标准/自定义话题，用于算法调试。项目整体状态见
-[`project_status.md`](project_status.md)。
+[`status/project_status.md`](../status/project_status.md)，编译与运行命令见
+[`build_and_run.md`](../build_and_run.md)。
 
 ## 1. 数据路径
 
@@ -35,22 +36,10 @@
 
 ## 2. 设备端
 
-构建：
+交叉编译和推送命令见
+[`build_and_run.md`](../build_and_run.md) 的“flyrat_pilot 与传感器转发”。
 
-设备端需要交叉编译 `flyrat_sensor_forwarder`。`libflyrat` 的 ULD 是 C 源码，
-建议分别用 `aarch64-linux-gnu-gcc` 编译 C 文件、用 `aarch64-linux-gnu-g++`
-编译 C++ 文件，最后链接 `-pthread -ldl`。也可以按 `flyrat_pilot/CMakeLists.txt`
-中的 target 配置自己的 CMake toolchain。
-
-注意：VL53L5CX 的输出裁剪宏（`VL53L5CX_DISABLE_*`）统一写在
-`libflyrat/third_party/vl53l5cx/platform/platform.h`，C 和 C++ 不需要再传
-`-D`。这些宏会改变 `VL53L5CX_ResultsData` 的内存布局；如果只给 C 文件传、
-不给 C++ 文件传，驱动和读取端会按不同布局解释同一块缓冲区，表现为距离和
-`target_status` 全为 0。不要再按翻译单元单独定义这些宏。
-
-当前设备的可执行文件可以直接放在 `/tmp/flyrat_sensor_forwarder` 运行。
-
-运行：
+运行时只监听回环地址：
 
 ```sh
 ./flyrat_sensor_forwarder --listen 127.0.0.1:5000
@@ -68,7 +57,10 @@
 --no-imu / --no-tof / --no-stereo
 ```
 
-只监听回环地址；adb forward 会从开发机连到设备的 5000 端口。
+VL53L5CX 的输出裁剪宏（`VL53L5CX_DISABLE_*`）统一写在
+`libflyrat/third_party/vl53l5cx/platform/platform.h`。这些宏会改变
+`VL53L5CX_ResultsData` 的内存布局，C 和 C++ 必须使用同一套；不要再按翻译单元
+单独传 `-D`，否则会出现距离和 `target_status` 全为 0。
 
 ToF 的 4 个 I2C 地址已经硬编码为 `0x60/0x62/0x64/0x66`，不再支持单独配置。
 每次启动会逐颗释放 LPn，自动探测传感器上次残留的地址，初始化后再统一改回这四个
@@ -92,22 +84,24 @@ ros2 run flyrat_sensors adb_forward.sh 2>/dev/null || \
 
 ```sh
 cd flyrat_play/ros2_ws
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
-ros2 launch flyrat_sensors sensors.launch.py
+bash -lc 'source /opt/ros/jazzy/setup.bash && \
+  source install/setup.bash && \
+  ros2 launch flyrat_sensors sensors.launch.py'
 ```
 
-参数：
+`sensors.launch.py` 暴露的参数：
 
 ```text
 host=127.0.0.1
 port=5000
-reconnect_ms=1000
-acc_lsb_per_g=2048
-gyro_lsb_per_dps=16.4
 stereo_color=false
-tof_count=4
+acc_lsb_per_g=2048.0
+gyro_lsb_per_dps=16.4
 ```
+
+节点还支持 `reconnect_ms`、`tof_count`、`imu_frame_id`、`tof_frame_id`、
+`left_frame_id`、`right_frame_id`，直接运行节点时可用 `--ros-args -p 名字:=值`
+传入。
 
 `MSP_RAW_IMU` 的尺度跟飞控板有关，默认值只是常见起点；需要按实际板子校准。
 

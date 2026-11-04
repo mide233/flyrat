@@ -19,15 +19,9 @@ ORB-SLAM3 采用 **GPLv3**。`third_party/orb_slam3/LICENSE` 保留原许可证�
 
 ## 2. 构建
 
-SLAM 默认关闭，因为它依赖 OpenCV、Boost.Serialization、OpenSSL，并需要一个
-约 139 MB 的 ORB 词袋文件。
-
-```sh
-cmake -S libflyrat -B build-slam \
-  -DFLYRAT_BUILD_SLAM=ON \
-  -DCMAKE_BUILD_TYPE=Release
-cmake --build build-slam -j
-```
+SLAM 默认关闭，因为它依赖 OpenCV、Boost.Serialization、OpenSSL，并需要约
+139 MB 的 ORB 词袋文件。配置选项、依赖安装和构建命令见
+[`build_and_run.md`](../build_and_run.md) 的“ORB-SLAM3”一节。
 
 构建产物：
 
@@ -43,16 +37,12 @@ cmake --build build-slam -j
 ## 3. 词袋
 
 词袋文件不入库。ORB-SLAM3 只支持它的文本格式，当前版本没有二进制加载接口。
-可以从 ORB-SLAM3 的 `Vocabulary/ORBvoc.txt` 复制，或在配置时指定：
-
-```sh
-cmake -S libflyrat -B build-slam \
-  -DFLYRAT_BUILD_SLAM=ON \
-  -DFLYRAT_ORB_VOCAB=/path/to/ORBvoc.txt
-```
+可以从 ORB-SLAM3 的 `Vocabulary/ORBvoc.txt` 复制，并通过
+`-DFLYRAT_ORB_VOCAB=/path/to/ORBvoc.txt` 传给构建，或运行时用
+`Options::vocabulary_path` / `slam_bench --vocab` 指定。
 
 `FLYRAT_ORB_VOCAB` 只用于给测试和本地构建提供路径，运行时仍由
-`Options::vocabulary_path` 指定。
+`Options::vocabulary_path` 决定。
 
 ## 4. 配置
 
@@ -117,35 +107,17 @@ Betaflight 的原始计数换算成 SI 单位，并处理轴向。
 
 ## 6. 命令行
 
-左右目图像序列：
+`slam_bench` 的通用参数和启动示例见
+[`build_and_run.md`](../build_and_run.md)。它支持三种输入：
 
-```sh
-./build-slam/slam_bench \
-  --vocab /path/to/ORBvoc.txt \
-  --settings libflyrat/configs/orb_slam3/uvc_640x480.yaml \
-  --left /tmp/uvc_stereo/left \
-  --right /tmp/uvc_stereo/right \
-  --fps 30 \
-  --save-traj /tmp/traj.txt
-```
+| 输入 | 参数 | 时间戳 |
+|---|---|---|
+| 左右图像序列 | `--left DIR --right DIR` | 按 `--fps` 生成 |
+| 左右拼接视频 | `--video FILE` | 按 `--fps` 生成 |
+| 实时 V4L2 相机 | `--sbs /dev/video0` | 单调时钟 |
 
-左右拼接视频：
-
-```sh
-./build-slam/slam_bench --vocab ... --settings ... \
-  --video recording.avi --fps 60
-```
-
-实时 UVC（开发机直接接相机时）：
-
-```sh
-./build-slam/slam_bench --vocab ... --settings ... \
-  --sbs /dev/video0 --width 1280 --height 480 --fps 60 --seconds 20
-```
-
-`slam_bench` 会打印每帧状态、`T_world_camera`、单帧耗时，最后输出跟踪帧数、
-平均耗时、最大耗时和峰值 RSS。实时模式的时间戳来自单调时钟；图像序列模式
-按 `--fps` 生成。
+加 `--mode imu-stereo` 使用双目惯性模式，`--save-traj FILE` 保存 TUM 轨迹。
+运行结束会打印跟踪帧数、平均/最大耗时和峰值 RSS。
 
 ## 7. 实测
 
