@@ -1,7 +1,8 @@
 # 实机传感器转发到 ROS 2
 
 本文说明如何把泰山派上的 IMU、4 颗 VL53L5CX ToF 和双目相机，通过 adb 转发到
-开发机，并在 ROS 2 中发布为标准/自定义话题，用于算法调试。
+开发机，并在 ROS 2 中发布为标准/自定义话题，用于算法调试。项目整体状态见
+[`project_status.md`](project_status.md)。
 
 ## 1. 数据路径
 
@@ -36,23 +37,12 @@
 
 构建：
 
-```sh
-aarch64-linux-gnu-g++ -static -O2 -std=c++17 \
-  -Ilibflyrat/include -Ilibflyrat/third_party/vl53l5cx/include \
-  -Ilibflyrat/third_party/vl53l5cx/platform \
-  -DVL53L5CX_I2C_BUS='"/dev/i2c-2"' \
-  -o flyrat_sensor_forwarder \
-  flyrat_pilot/src/sensors/sensor_forwarder.cpp \
-  flyrat_pilot/src/sensors/sensor_forwarder_main.cpp \
-  libflyrat/src/msp_frame.cpp libflyrat/src/msp_parse.cpp \
-  libflyrat/src/msp_interact.cpp \
-  libflyrat/src/hardware/serial_transport.cpp \
-  libflyrat/src/hardware/tof.cpp \
-  libflyrat/src/hardware/stereo_jpeg_source.cpp \
-  libflyrat/third_party/vl53l5cx/src/*.c \
-  libflyrat/third_party/vl53l5cx/platform/platform.c \
-  -pthread
-```
+设备端需要交叉编译 `flyrat_sensor_forwarder`。`libflyrat` 的 ULD 是 C 源码，
+建议分别用 `aarch64-linux-gnu-gcc` 编译 C 文件、用 `aarch64-linux-gnu-g++`
+编译 C++ 文件，最后链接 `-pthread -ldl`。也可以按 `flyrat_pilot/CMakeLists.txt`
+中的 target 配置自己的 CMake toolchain。
+
+当前设备的可执行文件可以直接放在 `/tmp/flyrat_sensor_forwarder` 运行。
 
 运行：
 
@@ -73,6 +63,11 @@ aarch64-linux-gnu-g++ -static -O2 -std=c++17 \
 ```
 
 只监听回环地址；adb forward 会从开发机连到设备的 5000 端口。
+
+ToF 的 4 个 I2C 地址已经硬编码为 `0x60/0x62/0x64/0x66`，不再支持单独配置。
+每次启动会逐颗释放 LPn，自动探测传感器上次残留的地址，初始化后再统一改回这四个
+固定地址；即使没有断电、传感器停在旧地址，也能自动恢复。四颗 ToF 初始化大约需要
+7.2 秒，主要耗时在 ULD 固件下载和参数配置。
 
 ## 3. 开发机
 
@@ -139,15 +134,18 @@ ros2 topic echo --once /flyrat/sensors/tof_0
 预期：
 
 - IMU 约 200 Hz；
-- 每颗 ToF 约 60 Hz；
+- 每颗 ToF 实测约 57–58 Hz（请求 60 Hz，受传感器实际帧周期限制）；
 - 左右图像各约 60 Hz，`1280x480` 模式下单眼 `640x480`。
 
 拔掉 adb 后 receiver 会每秒重连；重新执行 `adb forward` 后恢复。
 
 ## 6. 已知限制
 
-- 当前环境中 ToF 的 I2C 总线上没有器件，forwarder 会打印 `ToF disabled`；
-  接好并重新上电后才会初始化。
+- ToF 地址是易失的，掉电后会回到 `0x52`；当前的启动探测会自动恢复并改回固定地址。
+  LPn 拉低只关闭 I2C，不复位地址。
+- 四颗 ToF 初始化约 7.2 秒，forwarder 在这段时间内还不能提供 ToF 数据；
+  IMU 和双目也会等 `start()` 完成，因此从启动到监听约 7 秒。
 - 双目是原生 MJPEG，有损；需要原始像素时应改为低帧率 GRAY8/NV12 模式。
 - 设备时间戳和主机时间戳通过 `TIME` 帧做偏移估计，不是硬实时同步。
 - MJPEG 解码在开发机完成，设备端 CPU 只负责采集和发送。
+- 双目和 ToF 没有硬件同步，跨传感器时间戳只能按到达时间/设备时间近似对齐。

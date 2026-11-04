@@ -1,11 +1,13 @@
 # flyrat_pilot
 
-实机端程序的**占位骨架**，具体实现留待后续补充。
+实机端程序的骨架与传感器转发程序。
 
 - 不依赖 ROS，链接与仿真共用的 `libflyrat`。
-- 目前只有一个可编译、可运行的 `main()`，运行时逻辑（MSP 链路、50 Hz 指令下发、遥测与失效保护、算法接入）尚未实现。
+- 主飞行逻辑仍是占位 `main()`（MSP 指令下发、遥测、失效保护、算法接入尚未实现）。
 - `flyrat_sensor_forwarder` 已实现实机传感器转发，接入方法见
   [`docs/zh-cn/sensor_forwarding.md`](../docs/zh-cn/sensor_forwarding.md)。
+- 项目整体进度与实测指标见
+  [`docs/zh-cn/project_status.md`](../docs/zh-cn/project_status.md)。
 
 ## 构建
 
@@ -23,9 +25,10 @@ cmake --build flyrat_pilot/build -j
   link 回调返回；`send_rc()` 只写单槽邮箱，不等待 ACK。
 - `flyrat::hardware::TofArray`：4 颗 VL53L5CX 共用 i2c2 的用户态驱动。
   默认 4x4@60 Hz、只保留 distance/target_status/nb_target（128 B/帧），
-  按 LPn 逐颗释放并分配 0x60/0x62/0x64/0x66；LPn 默认
+  地址硬编码为 `0x60/0x62/0x64/0x66`，不再单独配置；LPn 默认
   `108/114/101/98`，INT 默认 `107/104/100/97`（下/后/左/右）。
-  上电后所有传感器都回到 0x52，若模块没有真正断电，需先给传感器断电重启。
+  每次启动逐颗释放 LPn，自动探测传感器残留的旧地址并改回固定地址；
+  四颗从启动到监听约 7.2 秒。
 - `flyrat::hardware::Imu`：读取 `MspInteract` 的 IMU 最新快照，可带最大年龄检查。
 - `flyrat::hardware::StereoCamera`：UVC 双目相机 V4L2 采集，按左右拼接帧拆成两个
   同时间戳的视图。`StereoFormat::kYuyv` 为原始 YUYV（默认 `1280x480@15`，左右各
