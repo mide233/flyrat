@@ -79,7 +79,9 @@ target_compile_definitions(flyrat_vl53l5cx PUBLIC
 # Hardware access lives in its own target so the protocol layer can depend on
 # the header-only Transport interface without pulling in a particular backend.
 add_library(flyrat_hardware
+  src/hardware/mjpeg_decoder.cpp
   src/hardware/serial_transport.cpp
+  src/hardware/stereo_camera.cpp
   src/hardware/tcp_transport.cpp
   src/hardware/tof.cpp)
 add_library(flyrat::flyrat_hardware ALIAS flyrat_hardware)
@@ -87,7 +89,7 @@ target_include_directories(flyrat_hardware PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 target_link_libraries(flyrat_hardware PUBLIC Threads::Threads)
-target_link_libraries(flyrat_hardware PRIVATE flyrat_vl53l5cx)
+target_link_libraries(flyrat_hardware PRIVATE flyrat_vl53l5cx ${CMAKE_DL_LIBS})
 target_compile_options(flyrat_hardware PRIVATE -Wall -Wextra)
 
 # MSP protocol and scheduling. It only depends on the header-only Transport
@@ -139,6 +141,10 @@ if(FLYRAT_BUILD_TOOLS)
   add_executable(tof_bench tools/tof_bench.cpp)
   target_link_libraries(tof_bench PRIVATE flyrat_hardware)
   target_compile_options(tof_bench PRIVATE -Wall -Wextra)
+
+  add_executable(stereo_bench tools/stereo_bench.cpp)
+  target_link_libraries(stereo_bench PRIVATE flyrat_hardware)
+  target_compile_options(stereo_bench PRIVATE -Wall -Wextra)
 endif()
 
 if(FLYRAT_BUILD_TESTS)

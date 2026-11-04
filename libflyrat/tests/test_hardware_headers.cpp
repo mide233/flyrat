@@ -6,6 +6,7 @@
 #include <string>
 
 #include "flyrat/hardware/imu.hpp"
+#include "flyrat/hardware/stereo_camera.hpp"
 #include "flyrat/hardware/tof.hpp"
 
 namespace {
@@ -42,6 +43,17 @@ int main()
     flyrat::hardware::TofConfig config;
     check(config.sensor_count == 4, "four sensors by default");
     check(config.addresses[0] == 0x60 && config.addresses[3] == 0x66, "address defaults");
+
+    flyrat::hardware::StereoConfig stereo;
+    check(stereo.width == 1280 && stereo.height == 480, "stereo defaults");
+    check(stereo.format == flyrat::hardware::StereoFormat::kYuyv, "stereo YUYV default");
+    check(stereo.width / 2 == 640, "stereo eye width");
+    flyrat::hardware::StereoFrame stereo_frame;
+    stereo_frame.width = 640;
+    stereo_frame.height = 480;
+    stereo_frame.left.resize(640 * 480);
+    stereo_frame.right.resize(640 * 480);
+    check(stereo_frame.left.size() == stereo_frame.right.size(), "stereo eye buffers");
 
     if (g_failures != 0) {
         std::printf("%d hardware header check(s) failed\n", g_failures);

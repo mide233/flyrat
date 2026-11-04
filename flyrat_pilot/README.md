@@ -25,6 +25,11 @@ cmake --build flyrat_pilot/build -j
   `108/114/101/98`，INT 默认 `107/104/100/97`（下/后/左/右）。
   上电后所有传感器都回到 0x52，若模块没有真正断电，需先给传感器断电重启。
 - `flyrat::hardware::Imu`：读取 `MspInteract` 的 IMU 最新快照，可带最大年龄检查。
+- `flyrat::hardware::StereoCamera`：UVC 双目相机 V4L2 采集，按左右拼接帧拆成两个
+  同时间戳的视图。`StereoFormat::kYuyv` 为原始 YUYV（默认 `1280x480@15`，左右各
+  640x480）；`StereoFormat::kMjpeg` 使用 Rockchip MPP 硬解，推荐 `1280x480@60`
+  （左右各 640x480）或 `640x240@60`，输出左右 GRAY8。MJPEG 解码通过运行时
+  `dlopen` 加载 GStreamer，需要目标端有 `mppjpegdec`，因此使用该模式的程序需动态链接。
 - `flyrat::hardware::Transport` / `make_serial_transport()` / `make_tcp_transport()`：
   MSP 使用的字节流后端，单测可注入假传输。
 - `flyrat::RcReceiver`：UDP 9004 虚拟接收机（仅仿真用）。
