@@ -54,8 +54,8 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 
 - `flyrat_sensors_interfaces`：`TofZone` / `TofFrame` 自定义消息。
 - `flyrat_sensors`：`sensor_receiver_node`，负责 TCP 接收、协议解析、图像解码和发布。
-  IMU 默认 `imu_accel_axis=none`、`imu_gyro_axis=none`：两路原始数据都已经是
-  ROS FLU。
+  IMU 默认 `imu_accel_axis=none`、`imu_gyro_axis=bf_to_flu`：加速度原始数据
+  已是 ROS FLU，陀螺仪只翻转 z（Betaflight 左偏航为负）。
 - 默认话题：
   - `/flyrat/sensors/imu`
   - `/flyrat/sensors/tof_0` … `/flyrat/sensors/tof_3`
@@ -79,7 +79,8 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 
 ### 2.5 ROS 2 SLAM 节点
 
-完整构建、参数和 Foxglove 预览见 [`slam/orb_slam3.md`](../slam/orb_slam3.md)。
+完整构建、参数和 Foxglove 预览见 [`slam/orb_slam3.md`](../slam/orb_slam3.md)；
+坐标链和变换调整见 [`slam/coordinates.md`](../slam/coordinates.md)。
 
 - `flyrat_play/ros2_ws/src/flyrat_slam/`：新的 ROS 2 包，固定使用
   `flyrat::slam::StereoSlam` 的 `kImuStereo` 模式。

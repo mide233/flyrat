@@ -76,9 +76,10 @@ IMU.T_b_c1: !!opencv-matrix
          0.0, 0.0, 0.0, 1.0]
 ```
 
-它表示 `T_body_camera`：把左目相机光学坐标变换到 IMU body 坐标。相机绕光轴
-倒置，光轴与 body 的 x 轴（前方）平行。平移和安装角都没有实测标定，不能用于
-精度评估。
+它表示 `T_b_c1`：把左目相机光学坐标变换到 IMU body 坐标（相机 → body）。
+相机绕光轴倒置，光轴与 body 的 x 轴（前方）平行。平移和安装角都没有实测标定，
+不能用于精度评估。矩阵方向、列的含义和调整方法见
+[`coordinates.md`](coordinates.md)。
 
 ## 5. C++ API
 
@@ -167,10 +168,13 @@ IMU 缓存默认 1 s。图像回调只保留最新待处理帧，跟踪线程忙
 需要平移、加速或明显晃动才能完成重力/尺度对齐。正式飞行前可改回 `0`。
 
 节点要求 IMU 已按 ROS FLU 发布。当前实机 `sensor_receiver_node` 默认
-`imu_accel_axis=none`、`imu_gyro_axis=none`：两路原始数据都已经是 FLU。
-若两路原始约定不同，按
+`imu_accel_axis=none`、`imu_gyro_axis=bf_to_flu`：加速度原始数据已是 FLU，
+陀螺仪只有 z 需要取反。若原始约定不同，按
 [`sensor_forwarding.md`](../hardware/sensor_forwarding.md) 调整，否则
 `IMU.T_b_c1`、重力方向和 IMU 预积分都会不一致。
+
+坐标链、`T_b_c1` 的方向、当前占位矩阵和逐步调试方法见
+[`coordinates.md`](coordinates.md)。
 
 构建和启动命令见 [`build_and_run.md`](../build_and_run.md) 的“ROS 2 SLAM 节点”
 一节。Foxglove 只作为可视化工具，不提交布局文件。

@@ -13,6 +13,7 @@
    - 实机传感器 → [`hardware/sensor_forwarding.md`](hardware/sensor_forwarding.md)
    - 仿真 → [`simulation/betaflight_sitl_gazebo.md`](simulation/betaflight_sitl_gazebo.md)
    - SLAM → [`slam/orb_slam3.md`](slam/orb_slam3.md)
+   - 坐标系与变换 → [`slam/coordinates.md`](slam/coordinates.md)
 
 ## 目录
 
@@ -43,6 +44,8 @@
 - [`slam/orb_slam3.md`](slam/orb_slam3.md)
   vendored ORB-SLAM3 的许可证、无界面改造、双目/双目惯性 C++ API、配置、
   `slam_bench`、ROS 2 IMU-stereo 节点和实测结果。
+- [`slam/coordinates.md`](slam/coordinates.md)
+  IMU/相机坐标系、`IMU.T_b_c1` 方向、TF 链、当前占位外参和逐步调试方法。
 
 ### 报告
 
