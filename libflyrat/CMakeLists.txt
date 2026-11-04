@@ -6,7 +6,7 @@ cmake_minimum_required(VERSION 3.16)
 # into one file at the repository root.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-project(flyrat VERSION 0.1.0 LANGUAGES CXX)
+project(flyrat VERSION 0.1.0 LANGUAGES C CXX)
 
 # libflyrat is the ROS-free core shared by the simulator and the real machine:
 # the autopilot algorithms plus the Betaflight MSP / UDP transport. It builds as
@@ -56,16 +56,38 @@ else()
 endif()
 target_compile_options(flyrat PRIVATE -Wall -Wextra)
 
+# ST VL53L5CX user-space driver (ULD). The output is trimmed to the blocks the
+# flight stack needs: distance, target status, target count and temperature.
+# Four sensors on one 750 kHz bus cannot afford the full 532-byte result block.
+add_library(flyrat_vl53l5cx STATIC
+  third_party/vl53l5cx/src/vl53l5cx_api.c
+  third_party/vl53l5cx/src/vl53l5cx_plugin_detection_thresholds.c
+  third_party/vl53l5cx/src/vl53l5cx_plugin_motion_indicator.c
+  third_party/vl53l5cx/src/vl53l5cx_plugin_xtalk.c
+  third_party/vl53l5cx/platform/platform.c)
+target_include_directories(flyrat_vl53l5cx PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/vl53l5cx/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/vl53l5cx/platform>)
+target_compile_definitions(flyrat_vl53l5cx PUBLIC
+  VL53L5CX_DISABLE_AMBIENT_PER_SPAD
+  VL53L5CX_DISABLE_NB_SPADS_ENABLED
+  VL53L5CX_DISABLE_SIGNAL_PER_SPAD
+  VL53L5CX_DISABLE_RANGE_SIGMA_MM
+  VL53L5CX_DISABLE_REFLECTANCE_PERCENT
+  VL53L5CX_DISABLE_MOTION_INDICATOR)
+
 # Hardware access lives in its own target so the protocol layer can depend on
 # the header-only Transport interface without pulling in a particular backend.
 add_library(flyrat_hardware
   src/hardware/serial_transport.cpp
-  src/hardware/tcp_transport.cpp)
+  src/hardware/tcp_transport.cpp
+  src/hardware/tof.cpp)
 add_library(flyrat::flyrat_hardware ALIAS flyrat_hardware)
 target_include_directories(flyrat_hardware PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 target_link_libraries(flyrat_hardware PUBLIC Threads::Threads)
+target_link_libraries(flyrat_hardware PRIVATE flyrat_vl53l5cx)
 target_compile_options(flyrat_hardware PRIVATE -Wall -Wextra)
 
 # MSP protocol and scheduling. It only depends on the header-only Transport
@@ -82,11 +104,16 @@ target_include_directories(flyrat_msp_interact PUBLIC
 target_link_libraries(flyrat_msp_interact PUBLIC Threads::Threads)
 target_compile_options(flyrat_msp_interact PRIVATE -Wall -Wextra)
 
-install(TARGETS flyrat flyrat_hardware flyrat_msp_interact
+# The IMU facade reads MspInteract snapshots, so hardware depends on the
+# protocol layer (not the other way around).
+target_link_libraries(flyrat_hardware PUBLIC flyrat_msp_interact)
+
+install(TARGETS flyrat flyrat_hardware flyrat_msp_interact flyrat_vl53l5cx
   EXPORT flyrat_targets
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib)
 install(DIRECTORY include/ DESTINATION include)
+install(FILES third_party/vl53l5cx/LICENSE DESTINATION share/doc/flyrat)
 if(FLYRAT_STANDALONE)
   install(EXPORT flyrat_targets
     NAMESPACE flyrat:: DESTINATION lib/cmake/flyrat)
@@ -108,6 +135,10 @@ if(FLYRAT_BUILD_TOOLS)
   add_executable(msp_interact_bench tools/msp_interact_bench.cpp)
   target_link_libraries(msp_interact_bench PRIVATE flyrat_msp_interact flyrat_hardware)
   target_compile_options(msp_interact_bench PRIVATE -Wall -Wextra)
+
+  add_executable(tof_bench tools/tof_bench.cpp)
+  target_link_libraries(tof_bench PRIVATE flyrat_hardware)
+  target_compile_options(tof_bench PRIVATE -Wall -Wextra)
 endif()
 
 if(FLYRAT_BUILD_TESTS)
@@ -146,4 +177,9 @@ if(FLYRAT_BUILD_TESTS)
   target_link_libraries(test_msp_interact PRIVATE flyrat_msp_interact)
   target_compile_options(test_msp_interact PRIVATE -Wall -Wextra)
   add_test(NAME test_msp_interact COMMAND test_msp_interact)
+
+  add_executable(test_hardware_headers tests/test_hardware_headers.cpp)
+  target_link_libraries(test_hardware_headers PRIVATE flyrat_hardware)
+  target_compile_options(test_hardware_headers PRIVATE -Wall -Wextra)
+  add_test(NAME test_hardware_headers COMMAND test_hardware_headers)
 endif()

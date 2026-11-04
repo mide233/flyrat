@@ -19,8 +19,14 @@ cmake --build flyrat_pilot/build -j
   内部 I/O 线程按配置轮询姿态 / IMU / 状态 / 高度 / GPS，专用分发线程执行回调，
   同时提供每类数据的最新快照。断线自动重连，运行期错误通过 `LinkStats` 与
   link 回调返回；`send_rc()` 只写单槽邮箱，不等待 ACK。
+- `flyrat::hardware::TofArray`：4 颗 VL53L5CX 共用 i2c2 的用户态驱动。
+  默认 4x4@60 Hz、只保留 distance/target_status/nb_target（128 B/帧），
+  按 LPn 逐颗释放并分配 0x60/0x62/0x64/0x66；LPn 默认
+  `108/114/101/98`，INT 默认 `107/104/100/97`（下/后/左/右）。
+  上电后所有传感器都回到 0x52，若模块没有真正断电，需先给传感器断电重启。
+- `flyrat::hardware::Imu`：读取 `MspInteract` 的 IMU 最新快照，可带最大年龄检查。
 - `flyrat::hardware::Transport` / `make_serial_transport()` / `make_tcp_transport()`：
-  MSP 使用的字节流后端，msp_interact 通过抽象接口访问，单测可注入假传输。
+  MSP 使用的字节流后端，单测可注入假传输。
 - `flyrat::RcReceiver`：UDP 9004 虚拟接收机（仅仿真用）。
 - `flyrat::Autopilot` / `flyrat::AttitudeHold`：姿态保持实现。
 - `flyrat::Ommpc`：on-manifold MPC（9 维误差状态 + 4 维输入，LTV + OSQP，默认
