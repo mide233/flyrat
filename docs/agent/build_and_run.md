@@ -395,7 +395,8 @@ IMU 模式加 `--mode imu-stereo`。配置模板里的内参、基线、IMU 外�
 ### 7.4 ROS 2 SLAM 节点
 
 `flyrat_slam` 把实机转发的双目和 IMU 直接接入 `flyrat::slam::StereoSlam`，
-固定使用 IMU-stereo 模式。先按第 4.3 节启动设备转发和 `flyrat_sensors`。
+默认使用 IMU-stereo 模式，也可以用 `mode:=stereo` 只跑纯双目。先按第 4.3 节
+启动设备转发和 `flyrat_sensors`。
 
 构建：
 
@@ -420,6 +421,17 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 `trajectory_path:=/tmp/traj.txt` 可在退出时保存 TUM 轨迹。节点会发布动态
 `slam_map -> imu_link` 和静态 `imu_link -> camera_left_optical_frame`。
 其余参数见 `flyrat_slam/config/slam.yaml`。
+
+纯双目启动：
+
+```sh
+ros2 launch flyrat_slam slam.launch.py mode:=stereo \
+  vocabulary_path:=/workspaces/flyrat/playground/ORB_SLAM3/Vocabulary/ORBvoc.txt
+```
+
+`mode:=stereo` 时节点不订阅 IMU，ORB-SLAM3 使用 `Stereo` 模式。默认的
+`uvc_640x480_imu.yaml` 仍可用，IMU 噪声参数会被忽略；`IMU.T_b_c1` 仍用于
+静态 TF 和机体位姿。
 
 Foxglove 中建议把固定坐标系设为 `slam_map` 或 `imu_link`。`camera_left_optical_frame`
 是光学系，占位外参是倒置、光轴正对机体前方；直接看它的轴时，机体滚转对应
@@ -456,6 +468,7 @@ Foxglove 预览：
 
 ```sh
 .script/bringup_real.sh                        # 传感器 + SLAM
+.script/bringup_real.sh mode:=stereo            # 纯双目，不订阅 IMU
 .script/bringup_real.sh start_foxglove:=true   # 再加 Foxglove bridge
 .script/bringup_real.sh start_slam:=false      # 只看传感器
 .script/bringup_real.sh start_adb_forward:=false start_device:=false  # 复用已有转发
@@ -496,6 +509,7 @@ start_device=true
 start_adb_forward=true
 start_sensors=true
 start_slam=true
+mode=imu_stereo        # 纯双目用 mode:=stereo
 start_foxglove=false
 foxglove_port=8765
 stereo_color=false

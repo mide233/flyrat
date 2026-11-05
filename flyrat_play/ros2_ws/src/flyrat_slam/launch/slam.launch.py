@@ -16,6 +16,7 @@ def generate_launch_description():
     left_topic = LaunchConfiguration('left_topic')
     right_topic = LaunchConfiguration('right_topic')
     imu_topic = LaunchConfiguration('imu_topic')
+    mode = LaunchConfiguration('mode')
     world_frame = LaunchConfiguration('world_frame')
     body_frame = LaunchConfiguration('body_frame')
     camera_frame = LaunchConfiguration('camera_frame')
@@ -40,6 +41,9 @@ def generate_launch_description():
             'right_topic',
             default_value='/flyrat/sensors/stereo/right/image_raw'),
         DeclareLaunchArgument('imu_topic', default_value='/flyrat/sensors/imu'),
+        DeclareLaunchArgument(
+            'mode', default_value='imu_stereo',
+            description="SLAM mode: 'imu_stereo' or 'stereo'."),
         DeclareLaunchArgument('world_frame', default_value='slam_map'),
         DeclareLaunchArgument(
             'body_frame', default_value='imu_link',
@@ -62,6 +66,7 @@ def generate_launch_description():
                     'left_topic': left_topic,
                     'right_topic': right_topic,
                     'imu_topic': imu_topic,
+                    'mode': mode,
                     'world_frame': world_frame,
                     'body_frame': body_frame,
                     'camera_frame': camera_frame,

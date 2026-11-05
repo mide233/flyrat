@@ -82,8 +82,9 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 完整构建、参数和 Foxglove 预览见 [`slam/orb_slam3.md`](../slam/orb_slam3.md)；
 坐标链和变换调整见 [`slam/coordinates.md`](../slam/coordinates.md)。
 
-- `flyrat_play/ros2_ws/src/flyrat_slam/`：新的 ROS 2 包，固定使用
-  `flyrat::slam::StereoSlam` 的 `kImuStereo` 模式。
+- `flyrat_play/ros2_ws/src/flyrat_slam/`：新的 ROS 2 包，支持
+  `flyrat::slam::StereoSlam` 的 `kImuStereo`（默认）和 `kStereo` 模式；
+  `mode:=stereo` 时只订阅双目，不订阅 IMU。
 - 订阅实机转发的左右目和 IMU，双目用 `ApproximateTime` 同步，IMU 缓存约 1 s，
   跟踪线程忙时丢旧帧。
 - 发布 `/flyrat/slam/odometry`、`/flyrat/slam/path`、`/flyrat/slam/status`、

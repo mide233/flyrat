@@ -124,10 +124,22 @@ auto result = slam.track(left, right, timestamp_s, imu);
 IMU 样本应覆盖上一帧到当前帧的时间段，按时间升序。调用方负责把
 Betaflight 的原始计数换算成 SI 单位，并处理轴向。
 
-## 6. ROS 2 IMU-stereo 节点
+## 6. ROS 2 双目/双目惯性节点
 
 ROS 2 包 `flyrat_play/ros2_ws/src/flyrat_slam/` 把实机转发的双目和 IMU 直接接入
-`flyrat::slam::StereoSlam`。节点固定使用 `Mode::kImuStereo`，不提供纯双目回退。
+`flyrat::slam::StereoSlam`。参数 `mode` 选择模式：
+
+- `imu_stereo`（默认）：`Mode::kImuStereo`，订阅双目和 IMU；
+- `stereo`：`Mode::kStereo`，只订阅双目，不订阅 IMU。
+
+```sh
+ros2 launch flyrat_slam slam.launch.py mode:=stereo \
+  vocabulary_path:=/path/to/ORBvoc.txt
+```
+
+纯双目模式仍需要 `IMU.T_b_c1` 来生成 `imu_link -> camera_left_optical_frame`
+静态 TF 和机体位姿；默认的 `uvc_640x480_imu.yaml` 可以直接用，ORB-SLAM3 在
+`Stereo` 模式下会忽略其中的 IMU 噪声参数。
 
 订阅：
 

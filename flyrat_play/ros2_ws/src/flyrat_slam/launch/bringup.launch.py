@@ -206,6 +206,7 @@ def _launch_setup(context, *args, **kwargs):
                 launch_arguments={
                     'vocabulary_path': vocabulary,
                     'settings_path': settings,
+                    'mode': LaunchConfiguration('mode'),
                     'trajectory_path': LaunchConfiguration('trajectory_path'),
                 }.items(),
             )],
@@ -270,6 +271,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'start_slam', default_value='true',
             description='Start slam_node.'),
+        DeclareLaunchArgument(
+            'mode', default_value='imu_stereo',
+            description="SLAM mode: 'imu_stereo' or 'stereo'."),
         DeclareLaunchArgument(
             'start_foxglove', default_value='false',
             description='Start foxglove_bridge as well.'),

@@ -144,6 +144,7 @@ public:
         right_topic_ = declare_parameter<std::string>(
             "right_topic", "/flyrat/sensors/stereo/right/image_raw");
         imu_topic_ = declare_parameter<std::string>("imu_topic", "/flyrat/sensors/imu");
+        mode_ = declare_parameter<std::string>("mode", "imu_stereo");
         world_frame_ = declare_parameter<std::string>("world_frame", "slam_map");
         body_frame_ = declare_parameter<std::string>("body_frame", "imu_link");
         camera_frame_ = declare_parameter<std::string>(
@@ -161,6 +162,9 @@ public:
         }
         if (settings_path_.empty()) {
             throw std::runtime_error("settings_path is empty");
+        }
+        if (mode_ != "stereo" && mode_ != "imu_stereo") {
+            throw std::runtime_error("mode must be 'stereo' or 'imu_stereo'");
         }
         if (body_frame_.empty() || camera_frame_.empty() ||
             body_frame_ == camera_frame_) {
@@ -205,20 +209,26 @@ public:
             std::bind(&SlamNode::on_stereo, this, std::placeholders::_1,
                 std::placeholders::_2));
 
-        imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
-            imu_topic_, rclcpp::SensorDataQoS(),
-            std::bind(&SlamNode::on_imu, this, std::placeholders::_1));
+        const bool use_imu = mode_ == "imu_stereo";
+        if (use_imu) {
+            imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
+                imu_topic_, rclcpp::SensorDataQoS(),
+                std::bind(&SlamNode::on_imu, this, std::placeholders::_1));
+        }
 
         Options options;
-        options.mode = Mode::kImuStereo;
+        options.mode = use_imu ? Mode::kImuStereo : Mode::kStereo;
         options.vocabulary_path = vocabulary_path_;
         options.settings_path = settings_path_;
-        RCLCPP_INFO(get_logger(), "loading ORB-SLAM3 IMU-stereo vocabulary and settings");
+        RCLCPP_INFO(get_logger(), "loading ORB-SLAM3 %s vocabulary and settings",
+            use_imu ? "IMU-stereo" : "stereo");
         slam_ = std::make_unique<StereoSlam>(options);
-        RCLCPP_INFO(get_logger(), "ORB-SLAM3 IMU-stereo ready");
+        RCLCPP_INFO(get_logger(), "ORB-SLAM3 %s ready",
+            use_imu ? "IMU-stereo" : "stereo");
+        const std::string imu_suffix = use_imu ? ", " + imu_topic_ : "";
         RCLCPP_INFO(get_logger(),
-            "subscribed to %s, %s, %s; publishing /flyrat/slam/{odometry,path,status}",
-            left_topic_.c_str(), right_topic_.c_str(), imu_topic_.c_str());
+            "subscribed to %s, %s%s; publishing /flyrat/slam/{odometry,path,status}",
+            left_topic_.c_str(), right_topic_.c_str(), imu_suffix.c_str());
 
         last_status_time_ = std::chrono::duration<double>(
             std::chrono::steady_clock::now().time_since_epoch())
@@ -655,6 +665,7 @@ private:
     std::string left_topic_;
     std::string right_topic_;
     std::string imu_topic_;
+    std::string mode_;
     std::string world_frame_;
     std::string body_frame_;
     std::string camera_frame_;
