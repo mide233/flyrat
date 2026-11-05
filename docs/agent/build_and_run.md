@@ -187,54 +187,34 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 ### 4.2 交叉编译到泰山派
 
 `flyrat_pilot` 的 CMake 会链接依赖 Eigen/OSQP 的 `flyrat::flyrat`，目前没有为
-aarch64 提供完整 toolchain。设备端使用的手工交叉编译命令已验证可用：
+aarch64 提供完整 toolchain。传感器转发程序用脚本交叉编译：
 
 ```sh
-mkdir -p build-arm
-SYS_INC="-Ilibflyrat/include \
-  -Ilibflyrat/third_party/vl53l5cx/include \
-  -Ilibflyrat/third_party/vl53l5cx/platform"
+.script/build_sensor_forwarder_arm.sh
+```
 
-for f in \
-  libflyrat/third_party/vl53l5cx/src/vl53l5cx_api.c \
-  libflyrat/third_party/vl53l5cx/src/vl53l5cx_plugin_xtalk.c \
-  libflyrat/third_party/vl53l5cx/src/vl53l5cx_plugin_detection_thresholds.c \
-  libflyrat/third_party/vl53l5cx/src/vl53l5cx_plugin_motion_indicator.c \
-  libflyrat/third_party/vl53l5cx/platform/platform.c
-do
-  aarch64-linux-gnu-gcc -O2 -static $SYS_INC -c "$f" \
-    -o "build-arm/$(basename "$f" .c).o" || exit 1
-done
+产物是 `build-arm/flyrat_sensor_forwarder`（AArch64 静态链接）。脚本参数：
 
-for f in \
-  flyrat_pilot/src/sensors/sensor_forwarder.cpp \
-  flyrat_pilot/src/sensors/sensor_forwarder_main.cpp \
-  libflyrat/src/msp_frame.cpp \
-  libflyrat/src/msp_parse.cpp \
-  libflyrat/src/msp_interact.cpp \
-  libflyrat/src/hardware/serial_transport.cpp \
-  libflyrat/src/hardware/tof.cpp \
-  libflyrat/src/hardware/stereo_jpeg_source.cpp
-do
-  aarch64-linux-gnu-g++ -O2 -static -std=c++17 -Wall -Wextra $SYS_INC \
-    -c "$f" -o "build-arm/$(basename "$f" .cpp).o" || exit 1
-done
-
-aarch64-linux-gnu-g++ -O2 -static build-arm/*.o -pthread -ldl \
-  -o build-arm/flyrat_sensor_forwarder
+```text
+--clean                 先删除 build-arm/
+CROSS_COMPILE=...       工具链前缀，默认 aarch64-linux-gnu-
+BUILD_DIR=...           输出目录
 ```
 
 编译 C 和 C++ 时不要额外传 `VL53L5CX_DISABLE_*`；这些宏统一定义在
 `libflyrat/third_party/vl53l5cx/platform/platform.h`，只给 C 文件传会导致结果
 结构体布局不一致、距离全 0。
 
-推送到设备：
+手动推送：
 
 ```sh
 adb -s 4c24d56142f3d0e3 push build-arm/flyrat_sensor_forwarder /tmp/
 adb -s 4c24d56142f3d0e3 shell chmod +x /tmp/flyrat_sensor_forwarder
-adb -s 4c24d56142f3d0e3 shell /tmp/flyrat_sensor_forwarder --listen 127.0.0.1:5000
 ```
+
+`.script/bringup_real.sh` 每次启动都会自动把 `build-arm/flyrat_sensor_forwarder`
+推到设备，因此重启后 `/tmp` 被清空也不需要手动处理。设备上缺少二进制且本地也
+没有编译产物时，脚本会直接报错并提示先运行上面的交叉编译命令。
 
 ### 4.3 转发到 ROS 2
 
@@ -488,12 +468,16 @@ ros2 launch flyrat_slam bringup.launch.py
 
 也可以直接运行上面的 `ros2 launch`。默认行为：
 
+- 把 `build-arm/flyrat_sensor_forwarder` 推到设备 `/tmp` 并加执行权限
+  （设置 `FLYRAT_PUSH_FORWARDER=0` 可跳过）；
 - 建立 `adb forward tcp:5000 tcp:5000`；
 - 先结束设备上旧的 `flyrat_sensor_forwarder`，再启动
   `/tmp/flyrat_sensor_forwarder --listen 127.0.0.1:5000`；
+- 设备 forwarder 意外退出时整个 launch 停止，不会让接收节点无限重连；
 - 1 秒后启动 `sensor_receiver_node`（ToF 初始化约 7 秒，接收节点会自动重连）；
 - 1 秒后启动 `slam_node`；
-- `Ctrl-C` 时停止设备端 forwarder 并删除 adb forward。
+- 使用脚本时，`Ctrl-C` 会停止设备端 forwarder 并删除 adb forward；直接
+  `ros2 launch` 不会做这两步清理。
 
 词袋默认从 `FLYRAT_ORB_VOCAB` 或
 `playground/ORB_SLAM3/Vocabulary/ORBvoc.txt` 查找；`settings_path` 默认优先使用
