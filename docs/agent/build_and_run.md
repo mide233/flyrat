@@ -223,7 +223,8 @@ adb -s 4c24d56142f3d0e3 forward tcp:5000 tcp:5000
 
 cd flyrat_play/ros2_ws
 bash -lc 'source /opt/ros/jazzy/setup.bash && \
-  colcon build --packages-select flyrat_sensors_interfaces flyrat_sensors && \
+  colcon build --symlink-install \
+  --packages-select flyrat_sensors_interfaces flyrat_sensors && \
   source install/setup.bash && \
   ros2 launch flyrat_sensors sensors.launch.py'
 ```
@@ -401,7 +402,7 @@ IMU 模式加 `--mode imu-stereo`。配置模板里的内参、基线、IMU 外�
 ```sh
 cd flyrat_play/ros2_ws
 bash -lc 'source /opt/ros/jazzy/setup.bash && \
-  colcon build --packages-select flyrat_sensors flyrat_slam \
+  colcon build --symlink-install --packages-select flyrat_sensors flyrat_slam \
   --cmake-args -DCMAKE_BUILD_TYPE=Release'
 ```
 
