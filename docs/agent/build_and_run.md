@@ -519,6 +519,8 @@ record_path=           # 空则 /tmp/flyrat_bags/<时间戳>
 record_topics=/flyrat/sensors/imu /flyrat/sensors/stereo/left/image_raw /flyrat/sensors/stereo/right/image_raw
 record_imu_only=false  # true 时只录 IMU（Allan 方差）
 record_storage=mcap
+record_duration=0      # 秒数或 30m/3h；>0 时倒计时并自动停止录制
+record_warmup=8        # 先等设备启动，再开始倒计时
 start_foxglove=false
 foxglove_port=8765
 stereo_color=false
@@ -535,7 +537,8 @@ trajectory_path=
 方差：
 
 ```sh
-.script/bringup_real.sh start_slam:=false record:=true record_imu_only:=true
+.script/bringup_real.sh start_slam:=false record:=true record_imu_only:=true \
+  record_duration:=3h
 ```
 
 录双目 + IMU 做 Kalibr，相机降到 20 Hz：
@@ -545,8 +548,9 @@ trajectory_path=
 ```
 
 默认写到 `/tmp/flyrat_bags/<时间戳>`，用 `record_path:=/path/to/bag` 指定；
-`ros2 bag info /path/to/bag` 可检查消息数和频率。`record:=true` 不会传给
-`bringup.launch.py`，它只是脚本参数。
+`record_duration` 结束后自动给录制进程发 SIGTERM 并写完 MCAP；录制停止后
+bringup 仍在运行，按 `Ctrl-C` 结束。`ros2 bag info /path/to/bag` 可检查消息数和
+频率。`record:=true` 不会传给 `bringup.launch.py`，它只是脚本参数。
 
 ## 8. Docker 与 CI
 

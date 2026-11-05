@@ -12,6 +12,7 @@
 #   .script/bringup_real.sh
 #   .script/bringup_real.sh start_foxglove:=true
 #   .script/bringup_real.sh start_slam:=false
+#   .script/bringup_real.sh record:=true record_imu_only:=true record_duration:=3h
 #   .script/bringup_real.sh vocabulary_path:=/path/to/ORBvoc.txt
 #
 # Environment:
@@ -59,6 +60,15 @@ if ! "${ADB[@]}" get-state >/dev/null 2>&1; then
     exit 1
 fi
 
+parse_duration() {
+    case "$1" in
+        *h) echo $(( ${1%h} * 3600 )) ;;
+        *m) echo $(( ${1%m} * 60 )) ;;
+        *s) echo "${1%s}" ;;
+        *) echo "$1" ;;
+    esac
+}
+
 LAUNCH_ARGS=()
 LOCAL_PORT=5000
 START_ADB_FORWARD=1
@@ -68,7 +78,10 @@ RECORD_PATH=""
 RECORD_TOPICS="/flyrat/sensors/imu /flyrat/sensors/stereo/left/image_raw /flyrat/sensors/stereo/right/image_raw"
 RECORD_IMU_ONLY=0
 RECORD_STORAGE=mcap
+RECORD_DURATION=0
+RECORD_WARMUP=8
 RECORD_PID=""
+WATCHDOG_PID=""
 for arg in "$@"; do
     case "${arg}" in
         device_binary:=*) DEVICE_BINARY="${arg#device_binary:=}"; LAUNCH_ARGS+=("${arg}") ;;
@@ -82,9 +95,21 @@ for arg in "$@"; do
         record_imu_only:=true|record_imu_only:=1) RECORD_IMU_ONLY=1 ;;
         record_imu_only:=*) RECORD_IMU_ONLY=0 ;;
         record_storage:=*) RECORD_STORAGE="${arg#record_storage:=}" ;;
+        record_duration:=*) RECORD_DURATION="${arg#record_duration:=}" ;;
+        record_warmup:=*) RECORD_WARMUP="${arg#record_warmup:=}" ;;
         *) LAUNCH_ARGS+=("${arg}") ;;
     esac
 done
+
+RECORD_DURATION="$(parse_duration "${RECORD_DURATION}")"
+if ! [[ "${RECORD_DURATION}" =~ ^[0-9]+$ ]]; then
+    echo "error: record_duration must be seconds, or use a suffix such as 30m/3h" >&2
+    exit 1
+fi
+if ! [[ "${RECORD_WARMUP}" =~ ^[0-9]+$ ]]; then
+    echo "error: record_warmup must be a non-negative integer number of seconds" >&2
+    exit 1
+fi
 
 # /tmp is cleared on reboot, so refresh the device binary whenever the host
 # cross-compiled one exists.
@@ -130,6 +155,28 @@ if [ "${RECORD}" -eq 1 ]; then
         --topics "${RECORD_TOPIC_ARRAY[@]}" \
         >"${RECORD_PATH}.log" 2>&1 &
     RECORD_PID=$!
+    if [ "${RECORD_DURATION}" -gt 0 ]; then
+        (
+            if [ "${RECORD_WARMUP}" -gt 0 ]; then
+                echo "[bringup] recording warmup: ${RECORD_WARMUP}s (device startup)"
+                sleep "${RECORD_WARMUP}"
+            fi
+            remaining="${RECORD_DURATION}"
+            while [ "${remaining}" -gt 0 ]; do
+                if [ "${remaining}" -le 10 ] || [ $((remaining % 60)) -eq 0 ]; then
+                    echo "[bringup] recording stops in ${remaining}s"
+                fi
+                sleep 1
+                remaining=$((remaining - 1))
+            done
+            echo "[bringup] recording duration reached; finalizing ${RECORD_PATH}"
+            kill -TERM "${RECORD_PID}" 2>/dev/null || true
+            wait "${RECORD_PID}" 2>/dev/null || true
+            echo "[bringup] bag finalized: ${RECORD_PATH}"
+            echo "[bringup] bringup is still running; press Ctrl-C to stop it"
+        ) &
+        WATCHDOG_PID=$!
+    fi
 fi
 
 has_arg() {
@@ -147,6 +194,10 @@ if [ -n "${ADB_SERIAL:-}" ]; then
 fi
 
 cleanup() {
+    if [ -n "${WATCHDOG_PID}" ] && kill -0 "${WATCHDOG_PID}" 2>/dev/null; then
+        kill -TERM "${WATCHDOG_PID}" 2>/dev/null || true
+        wait "${WATCHDOG_PID}" 2>/dev/null || true
+    fi
     if [ -n "${RECORD_PID}" ] && kill -0 "${RECORD_PID}" 2>/dev/null; then
         kill -TERM "${RECORD_PID}" 2>/dev/null || true
         wait "${RECORD_PID}" 2>/dev/null || true
