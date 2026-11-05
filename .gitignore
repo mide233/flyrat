@@ -1,6 +1,7 @@
 devel/
 log/
 build/
+build-arm/
 install/
 log-cross-*/
 build-cross-*/

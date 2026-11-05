@@ -3,10 +3,11 @@
 # One-command bring-up for the real vehicle sensor + SLAM pipeline:
 #
 #   adb forward -> device forwarder -> sensor_receiver_node -> slam_node
+#   (the push step is handled by .script/bringup_real.sh)
 #
 # It can also start foxglove_bridge, so the whole stack runs from one terminal.
-# Stop everything with Ctrl-C; the launch removes the adb forward and stops the
-# device-side forwarder on shutdown.
+# .script/bringup_real.sh wraps this launch and cleans up adb forward and the
+# device-side forwarder when it exits.
 #
 # Usage:
 #   ros2 launch flyrat_slam bringup.launch.py \
@@ -14,6 +15,7 @@
 #
 # All other arguments have usable defaults; see the declared arguments below.
 import os
+import re
 import shlex
 from pathlib import Path
 
@@ -26,9 +28,10 @@ from launch.actions import (
     LogInfo,
     OpaqueFunction,
     RegisterEventHandler,
+    Shutdown,
     TimerAction,
 )
-from launch.event_handlers import OnShutdown
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import (
     AnyLaunchDescriptionSource,
     PythonLaunchDescriptionSource,
@@ -93,6 +96,16 @@ def _resolve_settings(context):
         'uvc_640x480_imu.yaml')
 
 
+def _on_device_exit(event, context):
+    # Ctrl-C also terminates the device process, so only treat the exit as a
+    # failure when launch is not already shutting down.
+    if context.is_shutdown:
+        return []
+    return [Shutdown(reason=(
+        'device forwarder exited; check device_binary, adb and the '
+        'forwarder log'))]
+
+
 def _launch_setup(context, *args, **kwargs):
     serial = _text(context, 'adb_serial')
     adb = ['adb'] + (['-s', serial] if serial else [])
@@ -127,19 +140,32 @@ def _launch_setup(context, *args, **kwargs):
     if start_device:
         device_binary = _text(context, 'device_binary')
         # Restart any forwarder left over from a previous run, otherwise the
-        # new instance cannot bind the TCP port. pkill here is device-side and
-        # matches the executable name exactly.
+        # new instance cannot bind the TCP port. Match the full command line,
+        # anchored at the executable path: the process name is truncated to 15
+        # characters, so pkill -x cannot find "flyrat_sensor_forwarder".
+        forwarder_pattern = '^' + re.escape(device_binary)
+        wait_old = (
+            'i=0; '
+            f'while pgrep -f {shlex.quote(forwarder_pattern)} >/dev/null 2>&1 '
+            '&& [ $i -lt 30 ]; do sleep 0.2; i=$((i+1)); done; ')
         remote_command = (
-            'pkill -x flyrat_sensor_forwarder 2>/dev/null; '
-            'sleep 0.5; '
+            f'pkill -f {shlex.quote(forwarder_pattern)} 2>/dev/null; '
+            f'{wait_old}'
             f'exec {shlex.quote(device_binary)} '
             f'--listen {shlex.quote(device_host)}:{device_port}')
-        actions.append(ExecuteProcess(
+        device_process = ExecuteProcess(
             cmd=adb + ['shell', remote_command],
             name='device_forwarder',
             output='screen',
             emulate_tty=True,
-        ))
+        )
+        actions.append(device_process)
+        # The forwarder only exits on error. Stop the whole bring-up instead of
+        # leaving the receiver retrying forever.
+        actions.append(RegisterEventHandler(OnProcessExit(
+            target_action=device_process,
+            on_exit=_on_device_exit,
+        )))
 
     if start_sensors:
         sensors_launch = os.path.join(
@@ -201,22 +227,9 @@ def _launch_setup(context, *args, **kwargs):
             )],
         ))
 
-    cleanup = []
-    if start_adb_forward:
-        cleanup.append(ExecuteProcess(
-            cmd=adb + ['forward', '--remove', f'tcp:{local_port}'],
-            name='adb_forward_cleanup',
-            output='log',
-        ))
-    if start_device:
-        cleanup.append(ExecuteProcess(
-            cmd=adb + ['shell', 'pkill', '-x', 'flyrat_sensor_forwarder'],
-            name='device_forwarder_cleanup',
-            output='log',
-        ))
-    if cleanup:
-        actions.append(RegisterEventHandler(OnShutdown(on_shutdown=cleanup)))
-
+    # adb forward and device-process cleanup lives in .script/bringup_real.sh.
+    # Its trap runs reliably after ros2 launch exits; OnShutdown actions can be
+    # skipped when launch is interrupted with SIGINT.
     return actions
 
 

@@ -2,7 +2,8 @@
 #
 # One-command bring-up for the real-vehicle sensor + SLAM stack:
 #
-#   adb forward -> device forwarder -> sensor_receiver_node -> slam_node
+#   adb push -> adb forward -> device forwarder
+#            -> sensor_receiver_node -> slam_node
 #
 # Usage:
 #   .script/bringup_real.sh [launch arguments...]
@@ -14,10 +15,13 @@
 #   .script/bringup_real.sh vocabulary_path:=/path/to/ORBvoc.txt
 #
 # Environment:
-#   ROS_DISTRO       ROS 2 distribution (default: jazzy)
-#   FLYRAT_ROS_WS    ROS 2 workspace (default: <repo>/flyrat_play/ros2_ws)
-#   ADB_SERIAL       Device serial when several devices are connected
-#   FLYRAT_ORB_VOCAB ORBvoc.txt path when it is not in playground/ORB_SLAM3
+#   ROS_DISTRO                ROS 2 distribution (default: jazzy)
+#   FLYRAT_ROS_WS             ROS 2 workspace (default: <repo>/flyrat_play/ros2_ws)
+#   ADB_SERIAL                Device serial when several devices are connected
+#   FLYRAT_ORB_VOCAB          ORBvoc.txt path when it is not in playground/ORB_SLAM3
+#   FLYRAT_SENSOR_FORWARDER   Host aarch64 binary (default: <repo>/build-arm/...)
+#   FLYRAT_DEVICE_BINARY      Device path (default: /tmp/flyrat_sensor_forwarder)
+#   FLYRAT_PUSH_FORWARDER     Set to 0 to skip the push step
 #
 set -euo pipefail
 
@@ -29,6 +33,9 @@ ROS_WS="${FLYRAT_ROS_WS:-${REPO_ROOT}/flyrat_play/ros2_ws}"
 ROS_SETUP="/opt/ros/${ROS_DISTRO}/setup.bash"
 WS_SETUP="${ROS_WS}/install/setup.bash"
 
+HOST_BINARY="${FLYRAT_SENSOR_FORWARDER:-${REPO_ROOT}/build-arm/flyrat_sensor_forwarder}"
+DEVICE_BINARY="${FLYRAT_DEVICE_BINARY:-/tmp/flyrat_sensor_forwarder}"
+
 if [ ! -f "${ROS_SETUP}" ]; then
     echo "ROS 2 ${ROS_DISTRO} not found: ${ROS_SETUP}" >&2
     exit 1
@@ -36,6 +43,45 @@ fi
 if [ ! -f "${WS_SETUP}" ]; then
     echo "workspace not built: ${WS_SETUP}" >&2
     echo "Build it first: .script/build_ros2.sh" >&2
+    exit 1
+fi
+
+ADB=(adb)
+if [ -n "${ADB_SERIAL:-}" ]; then
+    ADB+=(-s "${ADB_SERIAL}")
+fi
+
+echo "[bringup] adb devices:"
+"${ADB[@]}" devices
+
+if ! "${ADB[@]}" get-state >/dev/null 2>&1; then
+    echo "error: no adb device. Connect the RK3566 or set ADB_SERIAL." >&2
+    exit 1
+fi
+
+LAUNCH_ARGS=("$@")
+LOCAL_PORT=5000
+START_ADB_FORWARD=1
+START_DEVICE=1
+for arg in "${LAUNCH_ARGS[@]}"; do
+    case "${arg}" in
+        device_binary:=*) DEVICE_BINARY="${arg#device_binary:=}" ;;
+        local_port:=*) LOCAL_PORT="${arg#local_port:=}" ;;
+        start_adb_forward:=false|start_adb_forward:=0) START_ADB_FORWARD=0 ;;
+        start_device:=false|start_device:=0) START_DEVICE=0 ;;
+    esac
+done
+
+# /tmp is cleared on reboot, so refresh the device binary whenever the host
+# cross-compiled one exists.
+if [ "${FLYRAT_PUSH_FORWARDER:-1}" != "0" ] && [ -f "${HOST_BINARY}" ]; then
+    echo "[bringup] pushing ${HOST_BINARY} -> ${DEVICE_BINARY}"
+    "${ADB[@]}" push "${HOST_BINARY}" "${DEVICE_BINARY}" >/dev/null
+    "${ADB[@]}" shell "chmod +x ${DEVICE_BINARY}"
+elif ! "${ADB[@]}" shell "test -x ${DEVICE_BINARY}" 2>/dev/null; then
+    echo "error: ${DEVICE_BINARY} is missing on the device." >&2
+    echo "Build and push it first:" >&2
+    echo "  .script/build_sensor_forwarder_arm.sh" >&2
     exit 1
 fi
 
@@ -48,7 +94,30 @@ source "${ROS_SETUP}"
 source "${WS_SETUP}"
 set -u
 
-echo "[bringup] adb devices:"
-adb devices
+has_arg() {
+    local prefix="$1"
+    local arg
+    for arg in "${LAUNCH_ARGS[@]}"; do
+        [[ "${arg}" == "${prefix}"* ]] && return 0
+    done
+    return 1
+}
 
-exec ros2 launch flyrat_slam bringup.launch.py "$@"
+has_arg 'device_binary:=' || LAUNCH_ARGS+=("device_binary:=${DEVICE_BINARY}")
+if [ -n "${ADB_SERIAL:-}" ]; then
+    has_arg 'adb_serial:=' || LAUNCH_ARGS+=("adb_serial:=${ADB_SERIAL}")
+fi
+
+cleanup() {
+    if [ "${START_ADB_FORWARD}" -eq 1 ]; then
+        "${ADB[@]}" forward --remove "tcp:${LOCAL_PORT}" >/dev/null 2>&1 || true
+    fi
+    if [ "${START_DEVICE}" -eq 1 ]; then
+        # pkill -x cannot match the 15-character process name; anchor the full
+        # command line at the executable path instead.
+        "${ADB[@]}" shell "pkill -f '^${DEVICE_BINARY}'" >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup EXIT INT TERM
+
+ros2 launch flyrat_slam bringup.launch.py "${LAUNCH_ARGS[@]}"
