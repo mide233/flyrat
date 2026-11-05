@@ -89,6 +89,17 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
   ros2 launch flyrat_sensors sensors.launch.py'
 ```
 
+如果还要启动 SLAM，不需要手动执行上面的 `adb forward`、设备 forwarder 和接收
+节点；用一键启动即可：
+
+```sh
+.script/bringup_real.sh
+```
+
+它会把 adb forward、设备端 forwarder、`sensor_receiver_node` 和 `slam_node`
+一起拉起，详见
+[`../build_and_run.md`](../build_and_run.md) 的“一键 bringup”。
+
 `sensors.launch.py` 暴露的参数：
 
 ```text

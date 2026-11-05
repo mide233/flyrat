@@ -92,6 +92,9 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - 参数 `vocabulary_path` 必填，词袋不入库；`settings_path` 默认使用
   `uvc_640x480_imu.yaml`；`body_frame` 默认 `imu_link`；可选
   `trajectory_path` 退出时保存 TUM 轨迹。
+- `bringup.launch.py` / `.script/bringup_real.sh`：一条命令拉起 adb forward、
+  设备 forwarder、接收节点和 SLAM，可选 Foxglove；退出时自动清理。
+  词袋和源码树 settings 自动查找。
 - `IMU.T_b_c1` 使用“相机倒置、光轴正对 IMU 前方、平移为 0”的占位矩阵。
 - 默认 `IMU.fastInit: 1`，跳过逐帧加速度门限；但 IMU 重力/尺度初始化仍需要
   真实平移或明显晃动。

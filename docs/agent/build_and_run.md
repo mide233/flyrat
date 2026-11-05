@@ -468,6 +468,60 @@ Foxglove 预览：
 当前配置的内参、双目外参和 `IMU.T_b_c1` 都是占位值；静止桌面场景不足以稳定
 初始化，需要实际运动和有纹理的视场验证跟踪。
 
+### 7.5 一键 bringup
+
+`bringup.launch.py` 把 adb forward、设备端 forwarder、`sensor_receiver_node` 和
+`slam_node` 串成一条启动链，不再需要多个终端：
+
+```sh
+.script/bringup_real.sh                        # 传感器 + SLAM
+.script/bringup_real.sh start_foxglove:=true   # 再加 Foxglove bridge
+.script/bringup_real.sh start_slam:=false      # 只看传感器
+.script/bringup_real.sh start_adb_forward:=false start_device:=false  # 复用已有转发
+```
+
+脚本会 source ROS 2 和 `flyrat_play/ros2_ws/install/setup.bash`，然后执行：
+
+```sh
+ros2 launch flyrat_slam bringup.launch.py
+```
+
+也可以直接运行上面的 `ros2 launch`。默认行为：
+
+- 建立 `adb forward tcp:5000 tcp:5000`；
+- 先结束设备上旧的 `flyrat_sensor_forwarder`，再启动
+  `/tmp/flyrat_sensor_forwarder --listen 127.0.0.1:5000`；
+- 1 秒后启动 `sensor_receiver_node`（ToF 初始化约 7 秒，接收节点会自动重连）；
+- 1 秒后启动 `slam_node`；
+- `Ctrl-C` 时停止设备端 forwarder 并删除 adb forward。
+
+词袋默认从 `FLYRAT_ORB_VOCAB` 或
+`playground/ORB_SLAM3/Vocabulary/ORBvoc.txt` 查找；`settings_path` 默认优先使用
+源码树的 `libflyrat/configs/orb_slam3/uvc_640x480_imu.yaml`，所以改外参后不需要
+重新 `colcon build`。找不到词袋时用 `vocabulary_path:=...` 显式指定。
+
+常用参数：
+
+```text
+adb_serial=            # 多设备时指定；默认用唯一连接的设备
+device_binary=/tmp/flyrat_sensor_forwarder
+local_port=5000
+device_port=5000
+start_device=true
+start_adb_forward=true
+start_sensors=true
+start_slam=true
+start_foxglove=false
+foxglove_port=8765
+stereo_color=false
+imu_accel_axis=none
+imu_gyro_axis=bf_to_flu
+trajectory_path=
+```
+
+`start_foxglove:=true` 需要安装 `ros-jazzy-foxglove-bridge`；否则保持默认，用
+`.script/foxglove.sh` 单独启动。
+
 ## 8. Docker 与 CI
 
 拉取预构建镜像：

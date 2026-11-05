@@ -162,6 +162,17 @@ IMU 缓存默认 1 s。图像回调只保留最新待处理帧，跟踪线程忙
 `settings_path` 默认使用安装后的 `uvc_640x480_imu.yaml`；`body_frame` 默认
 `imu_link`；`trajectory_path` 非空时在节点退出时保存 TUM 轨迹。
 
+实机一键启动（adb forward + 设备 forwarder + 接收节点 + SLAM）：
+
+```sh
+.script/bringup_real.sh
+.script/bringup_real.sh start_foxglove:=true
+```
+
+`bringup.launch.py` 会自动查找词袋和源码树中的 settings，`Ctrl-C` 时清理
+adb forward 和设备 forwarder。参数和单独启动方式见
+[`../build_and_run.md`](../build_and_run.md) 的“一键 bringup”。
+
 `uvc_640x480_imu.yaml` 默认设置 `IMU.fastInit: 1`，用于跳过 ORB-SLAM3 的
 逐帧加速度变化门限，方便桌面/手持调试；它不能替代真正的 IMU 初始化。
 静止或只有缓慢滚转时，日志仍会出现 `Not enough motion for initializing`，
