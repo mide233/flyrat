@@ -34,9 +34,10 @@ def generate_launch_description():
             'imu_accel_axis', default_value='none',
             description="Accelerometer axes: 'none' (already FLU) or 'frd_to_flu'."),
         DeclareLaunchArgument(
-            'imu_gyro_axis', default_value='bf_to_flu',
-            description="Gyroscope axes: 'bf_to_flu' (Betaflight, flip z), "
-                        "'frd_to_flu' (flip y and z) or 'none' (already FLU)."),
+            'imu_gyro_axis', default_value='none',
+            description="Gyroscope axes: 'none' (already FLU), "
+                        "'bf_to_flu' (clockwise yaw, flip z) or "
+                        "'frd_to_flu' (flip y and z)."),
         Node(
             package='flyrat_sensors',
             executable='sensor_receiver_node',

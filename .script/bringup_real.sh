@@ -59,16 +59,30 @@ if ! "${ADB[@]}" get-state >/dev/null 2>&1; then
     exit 1
 fi
 
-LAUNCH_ARGS=("$@")
+LAUNCH_ARGS=()
 LOCAL_PORT=5000
 START_ADB_FORWARD=1
 START_DEVICE=1
-for arg in "${LAUNCH_ARGS[@]}"; do
+RECORD=0
+RECORD_PATH=""
+RECORD_TOPICS="/flyrat/sensors/imu /flyrat/sensors/stereo/left/image_raw /flyrat/sensors/stereo/right/image_raw"
+RECORD_IMU_ONLY=0
+RECORD_STORAGE=mcap
+RECORD_PID=""
+for arg in "$@"; do
     case "${arg}" in
-        device_binary:=*) DEVICE_BINARY="${arg#device_binary:=}" ;;
-        local_port:=*) LOCAL_PORT="${arg#local_port:=}" ;;
-        start_adb_forward:=false|start_adb_forward:=0) START_ADB_FORWARD=0 ;;
-        start_device:=false|start_device:=0) START_DEVICE=0 ;;
+        device_binary:=*) DEVICE_BINARY="${arg#device_binary:=}"; LAUNCH_ARGS+=("${arg}") ;;
+        local_port:=*) LOCAL_PORT="${arg#local_port:=}"; LAUNCH_ARGS+=("${arg}") ;;
+        start_adb_forward:=false|start_adb_forward:=0) START_ADB_FORWARD=0; LAUNCH_ARGS+=("${arg}") ;;
+        start_device:=false|start_device:=0) START_DEVICE=0; LAUNCH_ARGS+=("${arg}") ;;
+        record:=true|record:=1) RECORD=1 ;;
+        record:=*) RECORD=0 ;;
+        record_path:=*) RECORD_PATH="${arg#record_path:=}" ;;
+        record_topics:=*) RECORD_TOPICS="${arg#record_topics:=}" ;;
+        record_imu_only:=true|record_imu_only:=1) RECORD_IMU_ONLY=1 ;;
+        record_imu_only:=*) RECORD_IMU_ONLY=0 ;;
+        record_storage:=*) RECORD_STORAGE="${arg#record_storage:=}" ;;
+        *) LAUNCH_ARGS+=("${arg}") ;;
     esac
 done
 
@@ -94,6 +108,30 @@ source "${ROS_SETUP}"
 source "${WS_SETUP}"
 set -u
 
+if [ "${RECORD}" -eq 1 ]; then
+    if [ -z "${RECORD_PATH}" ]; then
+        RECORD_PATH="/tmp/flyrat_bags/$(date +%Y%m%d_%H%M%S)"
+    fi
+    mkdir -p "$(dirname "${RECORD_PATH}")"
+    if [ "${RECORD_IMU_ONLY}" -eq 1 ]; then
+        RECORD_TOPICS="/flyrat/sensors/imu"
+    fi
+    # shellcheck disable=SC2206
+    RECORD_TOPIC_ARRAY=(${RECORD_TOPICS})
+    if [ "${#RECORD_TOPIC_ARRAY[@]}" -eq 0 ]; then
+        echo "error: record_topics is empty" >&2
+        exit 1
+    fi
+    echo "[bringup] recording ${RECORD_TOPIC_ARRAY[*]} -> ${RECORD_PATH}"
+    # Keep the recorder outside ros2 launch: launch does not reliably forward
+    # Ctrl-C to rosbag2 when stdin is not a tty, so this process is stopped
+    # with SIGTERM from cleanup() and flushes the bag.
+    ros2 bag record -s "${RECORD_STORAGE}" -o "${RECORD_PATH}" \
+        --topics "${RECORD_TOPIC_ARRAY[@]}" \
+        >"${RECORD_PATH}.log" 2>&1 &
+    RECORD_PID=$!
+fi
+
 has_arg() {
     local prefix="$1"
     local arg
@@ -109,6 +147,10 @@ if [ -n "${ADB_SERIAL:-}" ]; then
 fi
 
 cleanup() {
+    if [ -n "${RECORD_PID}" ] && kill -0 "${RECORD_PID}" 2>/dev/null; then
+        kill -TERM "${RECORD_PID}" 2>/dev/null || true
+        wait "${RECORD_PID}" 2>/dev/null || true
+    fi
     if [ "${START_ADB_FORWARD}" -eq 1 ]; then
         "${ADB[@]}" forward --remove "tcp:${LOCAL_PORT}" >/dev/null 2>&1 || true
     fi

@@ -149,6 +149,8 @@ public:
         body_frame_ = declare_parameter<std::string>("body_frame", "imu_link");
         camera_frame_ = declare_parameter<std::string>(
             "camera_frame", "camera_left_optical_frame");
+        right_camera_frame_ = declare_parameter<std::string>(
+            "right_camera_frame", "camera_right_optical_frame");
         sync_slop_ = declare_parameter<double>("sync_slop", 0.010);
         imu_buffer_seconds_ = declare_parameter<double>("imu_buffer_seconds", 1.0);
         path_max_poses_ = declare_parameter<int>("path_max_poses", 1000);
@@ -171,7 +173,12 @@ public:
             throw std::runtime_error(
                 "body_frame and camera_frame must be non-empty and different");
         }
-        load_body_camera_extrinsic();
+        if (right_camera_frame_.empty() || right_camera_frame_ == camera_frame_ ||
+            right_camera_frame_ == body_frame_) {
+            throw std::runtime_error(
+                "right_camera_frame must be non-empty and differ from body/camera frames");
+        }
+        load_extrinsics();
         if (sync_slop_ <= 0.0 || imu_buffer_seconds_ <= 0.0 ||
             path_publish_period_ <= 0.0 || status_period_ <= 0.0) {
             throw std::runtime_error("time parameters must be positive");
@@ -193,7 +200,7 @@ public:
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
         static_tf_broadcaster_ =
             std::make_unique<tf2_ros::StaticTransformBroadcaster>(*this);
-        publish_static_body_to_camera();
+        publish_static_extrinsics();
 
         path_.header.frame_id = world_frame_;
 
@@ -274,61 +281,91 @@ private:
         double stamp_s = 0.0;
     };
 
-    void load_body_camera_extrinsic()
+    void load_extrinsics()
     {
         cv::FileStorage settings(settings_path_, cv::FileStorage::READ);
         if (!settings.isOpened()) {
             throw std::runtime_error(
-                "cannot open SLAM settings for IMU.T_b_c1: " + settings_path_);
+                "cannot open SLAM settings for extrinsics: " + settings_path_);
         }
-        cv::Mat tbc;
-        settings["IMU.T_b_c1"] >> tbc;
-        if (tbc.rows != 4 || tbc.cols != 4) {
-            throw std::runtime_error(
-                "IMU.T_b_c1 must be a 4x4 matrix in " + settings_path_);
-        }
-        cv::Mat tbc64;
-        tbc.convertTo(tbc64, CV_64F);
-        Eigen::Matrix4d matrix = Eigen::Matrix4d::Identity();
-        for (int row = 0; row < 4; ++row) {
-            for (int col = 0; col < 4; ++col) {
-                matrix(row, col) = tbc64.at<double>(row, col);
+
+        const auto read_isometry = [&](const std::string& key) {
+            cv::Mat node_mat;
+            settings[key] >> node_mat;
+            if (node_mat.rows != 4 || node_mat.cols != 4) {
+                throw std::runtime_error(
+                    key + " must be a 4x4 matrix in " + settings_path_);
             }
-        }
-        const Eigen::Matrix3d rotation = matrix.block<3, 3>(0, 0);
-        if (!rotation.allFinite() ||
-            (rotation.transpose() * rotation - Eigen::Matrix3d::Identity()).norm() > 1e-3 ||
-            std::abs(rotation.determinant() - 1.0) > 1e-3) {
-            throw std::runtime_error("IMU.T_b_c1 rotation is not orthonormal");
-        }
+            cv::Mat mat64;
+            node_mat.convertTo(mat64, CV_64F);
+            Eigen::Matrix4d matrix = Eigen::Matrix4d::Identity();
+            for (int row = 0; row < 4; ++row) {
+                for (int col = 0; col < 4; ++col) {
+                    matrix(row, col) = mat64.at<double>(row, col);
+                }
+            }
+            const Eigen::Matrix3d rotation = matrix.block<3, 3>(0, 0);
+            if (!rotation.allFinite() ||
+                (rotation.transpose() * rotation - Eigen::Matrix3d::Identity()).norm() > 1e-3 ||
+                std::abs(rotation.determinant() - 1.0) > 1e-3) {
+                throw std::runtime_error(key + " rotation is not orthonormal");
+            }
+            Eigen::Isometry3d out = Eigen::Isometry3d::Identity();
+            out.linear() = rotation;
+            out.translation() = matrix.block<3, 1>(0, 3);
+            return out;
+        };
 
         // ORB-SLAM3 calls this matrix T_b_c1 and uses it as camera -> body:
         // a point in the left optical frame is mapped into the IMU/body frame.
         // That is also the pose of the camera in the body frame, which is
         // exactly what the imu_link -> camera static TF must broadcast.
-        Eigen::Isometry3d body_camera = Eigen::Isometry3d::Identity();
-        body_camera.linear() = rotation;
-        body_camera.translation() = matrix.block<3, 1>(0, 3);
-        T_body_camera_ = body_camera;
+        T_body_camera_ = read_isometry("IMU.T_b_c1");
         // Composing T_world_camera into T_world_body needs the inverse.
-        T_camera_body_ = body_camera.inverse();
+        T_camera_body_ = T_body_camera_.inverse();
+
+        // Stereo.T_c1_c2 maps right-camera coordinates into the left-camera
+        // frame (p_left = T_c1_c2 * p_right), which is exactly the pose of the
+        // right camera expressed in the left camera frame.
+        const bool has_stereo_extrinsic = !settings["Stereo.T_c1_c2"].empty();
+        if (has_stereo_extrinsic) {
+            T_left_right_ = read_isometry("Stereo.T_c1_c2");
+            has_right_camera_extrinsic_ = true;
+        } else {
+            RCLCPP_WARN(get_logger(),
+                "Stereo.T_c1_c2 is missing; not publishing %s -> %s",
+                camera_frame_.c_str(), right_camera_frame_.c_str());
+        }
     }
 
-    void publish_static_body_to_camera()
+    void publish_static_extrinsics()
     {
-        const Eigen::Quaterniond orientation(T_body_camera_.linear());
-        geometry_msgs::msg::TransformStamped transform;
-        transform.header.stamp = now();
-        transform.header.frame_id = body_frame_;
-        transform.child_frame_id = camera_frame_;
-        transform.transform.translation.x = T_body_camera_.translation().x();
-        transform.transform.translation.y = T_body_camera_.translation().y();
-        transform.transform.translation.z = T_body_camera_.translation().z();
-        transform.transform.rotation.x = orientation.x();
-        transform.transform.rotation.y = orientation.y();
-        transform.transform.rotation.z = orientation.z();
-        transform.transform.rotation.w = orientation.w();
-        static_tf_broadcaster_->sendTransform(transform);
+        const auto make_transform = [&](const std::string& parent,
+                                        const std::string& child,
+                                        const Eigen::Isometry3d& pose) {
+            const Eigen::Quaterniond orientation(pose.linear());
+            geometry_msgs::msg::TransformStamped transform;
+            transform.header.stamp = now();
+            transform.header.frame_id = parent;
+            transform.child_frame_id = child;
+            transform.transform.translation.x = pose.translation().x();
+            transform.transform.translation.y = pose.translation().y();
+            transform.transform.translation.z = pose.translation().z();
+            transform.transform.rotation.x = orientation.x();
+            transform.transform.rotation.y = orientation.y();
+            transform.transform.rotation.z = orientation.z();
+            transform.transform.rotation.w = orientation.w();
+            return transform;
+        };
+
+        std::vector<geometry_msgs::msg::TransformStamped> transforms;
+        transforms.push_back(make_transform(
+            body_frame_, camera_frame_, T_body_camera_));
+        if (has_right_camera_extrinsic_) {
+            transforms.push_back(make_transform(
+                camera_frame_, right_camera_frame_, T_left_right_));
+        }
+        static_tf_broadcaster_->sendTransform(transforms);
     }
 
     void on_imu(const sensor_msgs::msg::Imu::ConstSharedPtr& msg)
@@ -695,12 +732,16 @@ private:
     std::string world_frame_;
     std::string body_frame_;
     std::string camera_frame_;
+    std::string right_camera_frame_;
     // IMU.T_b_c1: pose of the left camera in the body frame, used by the
     // imu_link -> camera static TF.
     Eigen::Isometry3d T_body_camera_ { Eigen::Isometry3d::Identity() };
     // Inverse of T_body_camera_: maps body coordinates into camera
     // coordinates and composes T_world_camera into T_world_body.
     Eigen::Isometry3d T_camera_body_ { Eigen::Isometry3d::Identity() };
+    // Stereo.T_c1_c2: pose of the right camera in the left camera frame.
+    Eigen::Isometry3d T_left_right_ { Eigen::Isometry3d::Identity() };
+    bool has_right_camera_extrinsic_ = false;
     bool use_imu_ = false;
     // Pure stereo only: body pose of the first tracked frame, used to rebase
     // slam_map from the camera optical frame to the initial body frame.

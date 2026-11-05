@@ -139,6 +139,7 @@ def _launch_setup(context, *args, **kwargs):
 
     if start_device:
         device_binary = _text(context, 'device_binary')
+        camera_fps = _text(context, 'camera_fps')
         # Restart any forwarder left over from a previous run, otherwise the
         # new instance cannot bind the TCP port. Match the full command line,
         # anchored at the executable path: the process name is truncated to 15
@@ -152,7 +153,8 @@ def _launch_setup(context, *args, **kwargs):
             f'pkill -f {shlex.quote(forwarder_pattern)} 2>/dev/null; '
             f'{wait_old}'
             f'exec {shlex.quote(device_binary)} '
-            f'--listen {shlex.quote(device_host)}:{device_port}')
+            f'--listen {shlex.quote(device_host)}:{device_port} '
+            f'--camera-fps {shlex.quote(camera_fps)}')
         device_process = ExecuteProcess(
             cmd=adb + ['shell', remote_command],
             name='device_forwarder',
@@ -260,6 +262,9 @@ def generate_launch_description():
             'device_binary', default_value='/tmp/flyrat_sensor_forwarder',
             description='Path to flyrat_sensor_forwarder on the device.'),
         DeclareLaunchArgument(
+            'camera_fps', default_value='60',
+            description='Device stereo FPS; use 20 for Kalibr recording.'),
+        DeclareLaunchArgument(
             'start_adb_forward', default_value='true',
             description='Create and remove adb forward tcp:LOCAL->tcp:DEVICE.'),
         DeclareLaunchArgument(
@@ -293,8 +298,8 @@ def generate_launch_description():
             'imu_accel_axis', default_value='none',
             description="Accelerometer axes: 'none' or 'frd_to_flu'."),
         DeclareLaunchArgument(
-            'imu_gyro_axis', default_value='bf_to_flu',
-            description="Gyroscope axes: 'bf_to_flu', 'frd_to_flu' or 'none'."),
+            'imu_gyro_axis', default_value='none',
+            description="Gyroscope axes: 'none', 'bf_to_flu' or 'frd_to_flu'."),
         DeclareLaunchArgument(
             'trajectory_path', default_value='',
             description='Optional TUM trajectory file written when SLAM exits.'),

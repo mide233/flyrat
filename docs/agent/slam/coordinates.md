@@ -48,7 +48,9 @@ flyrat_slam / slam_node
   ▼
 /flyrat/slam/odometry          slam_map -> imu_link
 TF  slam_map -> imu_link       （动态）
-TF  imu_link -> camera_left_optical_frame（静态）
+TF  imu_link -> camera_left_optical_frame（静态，来自 IMU.T_b_c1）
+TF  camera_left_optical_frame -> camera_right_optical_frame
+                                          （静态，来自 Stereo.T_c1_c2）
 ```
 
 ORB-SLAM3 的 body 系就是 IMU 系，要求 FLU、重力方向 `(0, 0, -9.81)`。
@@ -56,19 +58,22 @@ ORB-SLAM3 的 body 系就是 IMU 系，要求 FLU、重力方向 `(0, 0, -9.81)`
 
 ## 3. IMU 轴向映射
 
-`MSP_RAW_IMU` 同时包含加速度和陀螺仪，但两者在本机上的约定不同：
+本机实测 `MSP_RAW_IMU` 的加速度和陀螺仪都已经是 ROS FLU，不需要翻转：
 
 | 数据 | 原始约定 | 映射 | 参数 |
 |---|---|---|---|
 | 加速度 | 已是 FLU | `(x, y, z)` | `imu_accel_axis=none` |
-| 陀螺仪 | x/y 为 FLU，偏航为顺时针正 | `(x, y, -z)` | `imu_gyro_axis=bf_to_flu` |
+| 陀螺仪 | 已是 FLU，左偏航为正 | `(x, y, z)` | `imu_gyro_axis=none` |
+
+实测：静止水平 `linear_acceleration.z ≈ +9.81`；机头向左偏航时
+`angular_velocity.z ≈ +0.43 rad/s`；机头向右偏航时为负。
 
 `imu_gyro_axis` 的可选值：
 
 | 值 | 变换 | 适用情况 |
 |---|---|---|
-| `none` | `(x, y, z)` | 原始数据已经是完整 FLU |
-| `bf_to_flu` | `(x, y, -z)` | Betaflight 陀螺仪，偏航符号相反 |
+| `none` | `(x, y, z)` | 原始数据已经是完整 FLU（当前实机） |
+| `bf_to_flu` | `(x, y, -z)` | 某些飞控的偏航为顺时针正，只翻 z |
 | `frd_to_flu` | `(x, -y, -z)` | 原始数据是 FRD |
 
 `imu_accel_axis` 的可选值：
@@ -94,6 +99,8 @@ p_body = T_b_c1 * p_camera
 
 - 静态 TF `imu_link -> camera_left_optical_frame` 直接使用 `T_b_c1`
   （TF 存的是 child 在 parent 中的位姿）；
+- 静态 TF `camera_left_optical_frame -> camera_right_optical_frame` 直接使用
+  `Stereo.T_c1_c2`（它把右目坐标变到左目：`p_left = T * p_right`）；
 - 求逆得到 `T_camera_body`，用于
   `T_world_body = T_world_camera * T_camera_body`。
 
@@ -157,7 +164,7 @@ IMU.T_b_c1: !!opencv-matrix
 ```sh
 ros2 launch flyrat_sensors sensors.launch.py \
   imu_accel_axis:=none \
-  imu_gyro_axis:=bf_to_flu
+  imu_gyro_axis:=none
 ```
 
 ### 6.2 改相机外参
@@ -179,10 +186,12 @@ ros2 launch flyrat_slam slam.launch.py \
 ```sh
 ros2 run tf2_ros tf2_echo slam_map imu_link
 ros2 run tf2_ros tf2_echo imu_link camera_left_optical_frame
+ros2 run tf2_ros tf2_echo camera_left_optical_frame camera_right_optical_frame
 ```
 
 第二条应输出 `T_body_camera`，即 `IMU.T_b_c1` 本身（`tf2_echo` 打印的是把
 target 的数据变换到 source 的矩阵）。若结果是它的逆，说明静态 TF 方向写反。
+第三条应输出 `Stereo.T_c1_c2`，当前占位值是平移 `(+0.06, 0, 0)`、旋转单位。
 
 ## 7. 验证动作
 
@@ -200,8 +209,9 @@ ros2 topic echo /flyrat/sensors/imu --field angular_velocity
 | 抬头 | `angular_velocity.y < 0` |
 | 右侧下沉（向右滚转） | `angular_velocity.x > 0` |
 
-如果偏航符号相反，`imu_gyro_axis` 用 `bf_to_flu`；如果 y 也相反，用
-`frd_to_flu`；如果全部相反，用 `none` 并检查加速度计是否也需要翻转。
+如果左偏航时 `angular_velocity.z` 为负，`imu_gyro_axis` 改用 `bf_to_flu`
+（只翻 z）；如果 y 也相反，用 `frd_to_flu`（翻 y、z）。本机实测 `none`
+正确，不需要翻转。
 
 然后启动 SLAM，在 Foxglove 中：
 
@@ -234,5 +244,7 @@ ros2 topic echo /flyrat/sensors/imu --field angular_velocity
 | `0675026` | 发布机体位姿、对齐传感器时间戳 | `T_world_body = T_world_camera * T_camera_body`，数值链路正确 |
 | `2e9e00b` | 占位外参改为倒置正视前方 | 相机 z 与 body x 平行，滚转在相机系里表现为绕光轴旋转 |
 
-`4d0005c` 的回归已在本轮恢复为 `imu_gyro_axis=bf_to_flu`。如果后续再改轴向，
+本轮用实机逐项复测后确认：本机陀螺仪原始数据已经是 FLU，默认应为
+`imu_gyro_axis=none`。左偏航实测 `angular_velocity.z ≈ +0.43 rad/s`，
+右偏航为负；此前默认 `bf_to_flu` 会把偏航方向翻反。如果后续再改轴向，
 请按第 7 节的偏航、俯仰、滚转三个动作逐项验证，不要只用静止加速度判断。

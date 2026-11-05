@@ -198,8 +198,8 @@ adb forward 和设备 forwarder。参数和单独启动方式见
 需要平移、加速或明显晃动才能完成重力/尺度对齐。正式飞行前可改回 `0`。
 
 节点要求 IMU 已按 ROS FLU 发布。当前实机 `sensor_receiver_node` 默认
-`imu_accel_axis=none`、`imu_gyro_axis=bf_to_flu`：加速度原始数据已是 FLU，
-陀螺仪只有 z 需要取反。若原始约定不同，按
+`imu_accel_axis=none`、`imu_gyro_axis=none`：加速度和陀螺仪原始数据都已是
+FLU。若原始约定不同，按
 [`sensor_forwarding.md`](../hardware/sensor_forwarding.md) 调整，否则
 `IMU.T_b_c1`、重力方向和 IMU 预积分都会不一致。
 

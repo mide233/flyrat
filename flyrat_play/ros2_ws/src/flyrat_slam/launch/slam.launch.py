@@ -20,6 +20,7 @@ def generate_launch_description():
     world_frame = LaunchConfiguration('world_frame')
     body_frame = LaunchConfiguration('body_frame')
     camera_frame = LaunchConfiguration('camera_frame')
+    right_camera_frame = LaunchConfiguration('right_camera_frame')
     trajectory_path = LaunchConfiguration('trajectory_path')
 
     params_file = PathJoinSubstitution(
@@ -51,6 +52,8 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'camera_frame', default_value='camera_left_optical_frame'),
         DeclareLaunchArgument(
+            'right_camera_frame', default_value='camera_right_optical_frame'),
+        DeclareLaunchArgument(
             'trajectory_path', default_value='',
             description='Optional TUM trajectory file written on shutdown.'),
         Node(
@@ -70,6 +73,7 @@ def generate_launch_description():
                     'world_frame': world_frame,
                     'body_frame': body_frame,
                     'camera_frame': camera_frame,
+                    'right_camera_frame': right_camera_frame,
                     'trajectory_path': trajectory_path,
                 },
             ],

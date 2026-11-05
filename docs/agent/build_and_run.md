@@ -286,9 +286,9 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 
 `sensors.launch.py` 参数：`host`（默认 127.0.0.1）、`port`（默认 5000）、
 `stereo_color`、`acc_lsb_per_g`、`gyro_lsb_per_dps`、`imu_accel_axis`（默认
-`none`）、`imu_gyro_axis`（默认 `bf_to_flu`）。当前实机加速度原始数据已是
-ROS FLU；陀螺仪左偏航时原始 z 为负，所以默认只翻转 z。只有真正的 FRD
-陀螺仪数据源才需要 `frd_to_flu`（同时翻转 y、z）。
+`none`）、`imu_gyro_axis`（默认 `none`）。当前实机加速度和陀螺仪原始数据
+都已是 ROS FLU，实测左偏航 `angular_velocity.z > 0`。只有偏航为顺时针正的
+飞控才需要 `bf_to_flu`（翻 z）；真正的 FRD 数据源用 `frd_to_flu`。
 
 ## 6. Gazebo + Betaflight SITL
 
@@ -419,8 +419,9 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 `vocabulary_path` 必填，词袋文件不入库。`settings_path` 默认是包内安装的
 `uvc_640x480_imu.yaml`；`body_frame:=imu_link` 是默认机体坐标系；
 `trajectory_path:=/tmp/traj.txt` 可在退出时保存 TUM 轨迹。节点会发布动态
-`slam_map -> imu_link` 和静态 `imu_link -> camera_left_optical_frame`。
-其余参数见 `flyrat_slam/config/slam.yaml`。
+`slam_map -> imu_link`、静态 `imu_link -> camera_left_optical_frame`，以及
+`camera_left_optical_frame -> camera_right_optical_frame`（来自
+`Stereo.T_c1_c2`）。其余参数见 `flyrat_slam/config/slam.yaml`。
 
 纯双目启动：
 
@@ -512,16 +513,40 @@ start_adb_forward=true
 start_sensors=true
 start_slam=true
 mode=imu_stereo        # 纯双目用 mode:=stereo
+camera_fps=60          # 标定录制用 20
+record=false           # true 时用 ros2 bag record 录传感器
+record_path=           # 空则 /tmp/flyrat_bags/<时间戳>
+record_topics=/flyrat/sensors/imu /flyrat/sensors/stereo/left/image_raw /flyrat/sensors/stereo/right/image_raw
+record_imu_only=false  # true 时只录 IMU（Allan 方差）
+record_storage=mcap
 start_foxglove=false
 foxglove_port=8765
 stereo_color=false
 imu_accel_axis=none
-imu_gyro_axis=bf_to_flu
+imu_gyro_axis=none
 trajectory_path=
 ```
 
 `start_foxglove:=true` 需要安装 `ros-jazzy-foxglove-bridge`；否则保持默认，用
 `.script/foxglove.sh` 单独启动。
+
+录制由 `.script/bringup_real.sh` 启动，和 `ros2 launch` 平级，按 `Ctrl-C` 时
+脚本会给 `ros2 bag record` 发 `SIGTERM` 并等待它写完 MCAP。只录 IMU 做 Allan
+方差：
+
+```sh
+.script/bringup_real.sh start_slam:=false record:=true record_imu_only:=true
+```
+
+录双目 + IMU 做 Kalibr，相机降到 20 Hz：
+
+```sh
+.script/bringup_real.sh start_slam:=false camera_fps:=20 record:=true
+```
+
+默认写到 `/tmp/flyrat_bags/<时间戳>`，用 `record_path:=/path/to/bag` 指定；
+`ros2 bag info /path/to/bag` 可检查消息数和频率。`record:=true` 不会传给
+`bringup.launch.py`，它只是脚本参数。
 
 ## 8. Docker 与 CI
 
