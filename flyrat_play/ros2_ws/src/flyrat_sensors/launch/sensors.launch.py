@@ -6,6 +6,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -43,10 +44,11 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'host': host,
-                'port': port,
-                'stereo_color': stereo_color,
-                'acc_lsb_per_g': acc_lsb_per_g,
-                'gyro_lsb_per_dps': gyro_lsb_per_dps,
+                'port': ParameterValue(port, value_type=int),
+                'stereo_color': ParameterValue(stereo_color, value_type=bool),
+                'acc_lsb_per_g': ParameterValue(acc_lsb_per_g, value_type=float),
+                'gyro_lsb_per_dps': ParameterValue(
+                    gyro_lsb_per_dps, value_type=float),
                 'imu_accel_axis': imu_accel_axis,
                 'imu_gyro_axis': imu_gyro_axis,
             }],
