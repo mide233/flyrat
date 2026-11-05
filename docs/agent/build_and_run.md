@@ -431,7 +431,9 @@ ros2 launch flyrat_slam slam.launch.py mode:=stereo \
 
 `mode:=stereo` 时节点不订阅 IMU，ORB-SLAM3 使用 `Stereo` 模式。默认的
 `uvc_640x480_imu.yaml` 仍可用，IMU 噪声参数会被忽略；`IMU.T_b_c1` 仍用于
-静态 TF 和机体位姿。
+静态 TF 和机体位姿。纯双目下 `slam_map` 会重定基到第一帧的 `imu_link`
+位姿，即 FLU（x 前、y 左、z 上），所以 Foxglove 里前进对应 +x、左移 +y、
+上升 +z。
 
 Foxglove 中建议把固定坐标系设为 `slam_map` 或 `imu_link`。`camera_left_optical_frame`
 是光学系，占位外参是倒置、光轴正对机体前方；直接看它的轴时，机体滚转对应

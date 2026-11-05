@@ -89,11 +89,13 @@ ORB-SLAM3 配置中的 `IMU.T_b_c1` 是**相机 → body**：
 p_body = T_b_c1 * p_camera
 ```
 
-不是 body → camera。`slam_node` 在启动时读取它，并求逆得到
-`T_camera_body`，用于：
+不是 body → camera。它同时就是相机在 body 中的位姿 `T_body_camera`，所以
+`slam_node` 在启动时读出后：
 
-- `T_world_body = T_world_camera * T_camera_body`；
-- 静态 TF `imu_link -> camera_left_optical_frame`。
+- 静态 TF `imu_link -> camera_left_optical_frame` 直接使用 `T_b_c1`
+  （TF 存的是 child 在 parent 中的位姿）；
+- 求逆得到 `T_camera_body`，用于
+  `T_world_body = T_world_camera * T_camera_body`。
 
 如果手上拿到的是 body → camera（例如某些 CAD 或标定工具的输出），写入
 YAML 前必须求逆。
@@ -179,7 +181,8 @@ ros2 run tf2_ros tf2_echo slam_map imu_link
 ros2 run tf2_ros tf2_echo imu_link camera_left_optical_frame
 ```
 
-第二条应输出 `T_camera_body`，即 `IMU.T_b_c1` 的逆。若方向相反，说明矩阵写反。
+第二条应输出 `T_body_camera`，即 `IMU.T_b_c1` 本身（`tf2_echo` 打印的是把
+target 的数据变换到 source 的矩阵）。若结果是它的逆，说明静态 TF 方向写反。
 
 ## 7. 验证动作
 

@@ -105,7 +105,8 @@ if (result.pose.valid) {
 
 约定：
 
-- 世界系是 ORB-SLAM3 第一次成功初始化时的左目相机位姿；
+- 世界系是 ORB-SLAM3 第一次成功初始化时的左目相机位姿（`slam_node` 在纯双目
+  模式下会把它重定基到第一帧机体位姿，见第 6 节）；
 - `position` / `orientation` 是 `T_world_camera`，不是 ORB-SLAM3 内部的
   `Tcw`；门面已经取逆；
 - `track()` 只能单线程调用；
@@ -141,6 +142,12 @@ ros2 launch flyrat_slam slam.launch.py mode:=stereo \
 静态 TF 和机体位姿；默认的 `uvc_640x480_imu.yaml` 可以直接用，ORB-SLAM3 在
 `Stereo` 模式下会忽略其中的 IMU 噪声参数。
 
+ORB-SLAM3 的纯双目世界系是初始左目光学系（x 右、y 下、z 前）。`slam_node`
+在第一帧跟踪成功后会把世界系重定基到该帧的机体位姿，因此纯双目下 `slam_map`
+就是初始 `imu_link` 系（FLU：x 前、y 左、z 上）：前进对应 +x，左移对应 +y，
+上升对应 +z。轨迹第一帧为单位位姿，`reset` 后会重新取基准。相机 frame 仍按
+`IMU.T_b_c1` 显示其真实安装姿态。
+
 订阅：
 
 - `/flyrat/sensors/stereo/left/image_raw`
@@ -162,7 +169,7 @@ IMU 缓存默认 1 s。图像回调只保留最新待处理帧，跟踪线程忙
   输入/处理帧率、丢帧、失败帧、IMU 缓冲和 age。
 - `/flyrat/slam/reset`：`std_srvs/srv/Trigger`，清空地图、轨迹和 IMU 缓冲。
 - TF：动态 `slam_map -> imu_link`，静态 `imu_link -> camera_left_optical_frame`
-  （由 `IMU.T_b_c1` 求逆得到）。
+  （直接使用 `IMU.T_b_c1`，即相机在机体中的位姿；机体位姿组合时才用它的逆）。
 
 `camera_left_optical_frame` 是标准光学系（x 右、y 下、z 前）。当前占位外参是
 “相机倒置、光轴正对机体前方”，所以相机光学系的 z 轴与机体 x 轴平行；机体绕 x

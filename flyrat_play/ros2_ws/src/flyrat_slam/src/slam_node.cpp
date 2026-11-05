@@ -209,7 +209,8 @@ public:
             std::bind(&SlamNode::on_stereo, this, std::placeholders::_1,
                 std::placeholders::_2));
 
-        const bool use_imu = mode_ == "imu_stereo";
+        use_imu_ = mode_ == "imu_stereo";
+        const bool use_imu = use_imu_;
         if (use_imu) {
             imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
                 imu_topic_, rclcpp::SensorDataQoS(),
@@ -303,23 +304,26 @@ private:
 
         // ORB-SLAM3 calls this matrix T_b_c1 and uses it as camera -> body:
         // a point in the left optical frame is mapped into the IMU/body frame.
-        // The TF tree and Twb composition need the inverse, body -> camera.
-        Eigen::Isometry3d camera_to_body = Eigen::Isometry3d::Identity();
-        camera_to_body.linear() = rotation;
-        camera_to_body.translation() = matrix.block<3, 1>(0, 3);
-        body_to_camera_ = camera_to_body.inverse();
+        // That is also the pose of the camera in the body frame, which is
+        // exactly what the imu_link -> camera static TF must broadcast.
+        Eigen::Isometry3d body_camera = Eigen::Isometry3d::Identity();
+        body_camera.linear() = rotation;
+        body_camera.translation() = matrix.block<3, 1>(0, 3);
+        T_body_camera_ = body_camera;
+        // Composing T_world_camera into T_world_body needs the inverse.
+        T_camera_body_ = body_camera.inverse();
     }
 
     void publish_static_body_to_camera()
     {
-        const Eigen::Quaterniond orientation(body_to_camera_.linear());
+        const Eigen::Quaterniond orientation(T_body_camera_.linear());
         geometry_msgs::msg::TransformStamped transform;
         transform.header.stamp = now();
         transform.header.frame_id = body_frame_;
         transform.child_frame_id = camera_frame_;
-        transform.transform.translation.x = body_to_camera_.translation().x();
-        transform.transform.translation.y = body_to_camera_.translation().y();
-        transform.transform.translation.z = body_to_camera_.translation().z();
+        transform.transform.translation.x = T_body_camera_.translation().x();
+        transform.transform.translation.y = T_body_camera_.translation().y();
+        transform.transform.translation.z = T_body_camera_.translation().z();
         transform.transform.rotation.x = orientation.x();
         transform.transform.rotation.y = orientation.y();
         transform.transform.rotation.z = orientation.z();
@@ -495,12 +499,29 @@ private:
         }
     }
 
-    Eigen::Isometry3d to_world_body(const Result& result) const
+    Eigen::Isometry3d to_world_body(const Result& result)
     {
         Eigen::Isometry3d world_camera = Eigen::Isometry3d::Identity();
         world_camera.linear() = result.pose.orientation.toRotationMatrix();
         world_camera.translation() = result.pose.position;
-        return world_camera * body_to_camera_;
+        Eigen::Isometry3d world_body = world_camera * T_camera_body_;
+
+        // ORB-SLAM3 defines the stereo world at the first left-camera frame, so
+        // its axes are optical (x right, y down, z forward). Rebase the world to
+        // the first tracked body pose so slam_map is the initial imu_link frame
+        // (FLU: x forward, y left, z up). Without this, a forward motion shows
+        // up as +z and a climb as -y in Foxglove.
+        if (!use_imu_) {
+            std::lock_guard<std::mutex> lock(world_origin_mutex_);
+            if (!have_body_world_origin_) {
+                body_world_origin_ = world_body;
+                have_body_world_origin_ = true;
+                RCLCPP_INFO(get_logger(),
+                    "stereo world frame rebased to the first body pose (FLU)");
+            }
+            return body_world_origin_.inverse() * world_body;
+        }
+        return world_body;
     }
 
     void publish_pose(const Result& result, const rclcpp::Time& stamp)
@@ -574,6 +595,11 @@ private:
                 path_.header.stamp = now();
                 last_path_publish_ = -1.0;
                 reset_epoch_.fetch_add(1);
+            }
+            {
+                std::lock_guard<std::mutex> lock(world_origin_mutex_);
+                have_body_world_origin_ = false;
+                body_world_origin_.setIdentity();
             }
             {
                 std::lock_guard<std::mutex> lock(imu_mutex_);
@@ -669,8 +695,18 @@ private:
     std::string world_frame_;
     std::string body_frame_;
     std::string camera_frame_;
-    // body -> camera, i.e. the inverse of ORB-SLAM3's T_b_c1.
-    Eigen::Isometry3d body_to_camera_ { Eigen::Isometry3d::Identity() };
+    // IMU.T_b_c1: pose of the left camera in the body frame, used by the
+    // imu_link -> camera static TF.
+    Eigen::Isometry3d T_body_camera_ { Eigen::Isometry3d::Identity() };
+    // Inverse of T_body_camera_: maps body coordinates into camera
+    // coordinates and composes T_world_camera into T_world_body.
+    Eigen::Isometry3d T_camera_body_ { Eigen::Isometry3d::Identity() };
+    bool use_imu_ = false;
+    // Pure stereo only: body pose of the first tracked frame, used to rebase
+    // slam_map from the camera optical frame to the initial body frame.
+    bool have_body_world_origin_ = false;
+    Eigen::Isometry3d body_world_origin_ { Eigen::Isometry3d::Identity() };
+    std::mutex world_origin_mutex_;
     double sync_slop_ = 0.010;
     double imu_buffer_seconds_ = 1.0;
     int path_max_poses_ = 1000;
