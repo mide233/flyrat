@@ -101,7 +101,9 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - IMU 的 scale/misalignment 由 `flyrat_sensors/config/imu_intrinsics.yaml`
   在发布前修正；IMU 时间戳扣除约 3.8 ms 的相机–IMU 固定时间差。
 - 默认 `IMU.fastInit: 1`，跳过逐帧加速度门限；但 IMU 重力/尺度初始化仍需要
-  真实平移或明显晃动。
+  真实平移或明显晃动。实机已验证：连续平稳运动约 20 s 完成 VIBA 1，约 40 s
+  完成 VIBA 2，之后 IMU-stereo 可持续跟踪且不再重置；启动阶段的重置属于
+  ORB-SLAM3 初始化条件，不是标定问题。
 
 ## 3. 实测指标
 

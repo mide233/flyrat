@@ -205,6 +205,43 @@ adb forward 和设备 forwarder。参数和单独启动方式见
 静止或只有缓慢滚转时，日志仍会出现 `Not enough motion for initializing`，
 需要平移、加速或明显晃动才能完成重力/尺度对齐。正式飞行前可改回 `0`。
 
+### 8.1 IMU-stereo 启动阶段的重置
+
+标定完成后，实机在启动阶段仍会打印大量：
+
+```text
+LM: Active map reset, waiting...
+Not enough motion for initializing. Reseting...
+Fail to track local map!
+IMU is not or recently initialized. Reseting active map...
+```
+
+这些不是标定错误。ORB-SLAM3 在 IMU 尚未完成重力/尺度初始化时有两个硬性
+条件：
+
+- `LocalMapping` 在 IMU 初始化后、BA2 完成前，要求最近两个关键帧的相机中心
+  位移之和大于 2 cm（`dist < 0.02` 会重置），并在首次 10 s 内累计；
+- 每次 active map 重置后的 `Camera.fps`（当前 60）帧内，`TrackLocalMap`
+  要求至少 50 个 inlier，之后只要求 15 个。
+
+因此启动时如果几乎静止，或运动太慢、太急、画面模糊，就会反复重置。实测
+纯双目在同一场景可以稳定跟踪，IMU-stereo 的重置来自上述初始化条件，而不是
+相机内参、双目外参、`IMU.T_b_c1` 或时间偏移。
+
+建议启动动作：
+
+1. 视场对着有纹理的物体，避免纯白墙和强逆光；
+2. 不要静止等待，直接手持设备做连续、平稳的平移/画圈，速度约
+   15–20 cm/s，直径 20–30 cm，持续 20–40 s；
+3. 不要突然停住或快速甩动，启动阶段单帧内点少于 15 个就会丢跟踪；
+4. 日志出现 `start VIBA 1`、`end VIBA 1`、`start VIBA 2`、`end VIBA 2`
+   后，IMU 初始化和 BA2 完成，之后即使静止也不再因 `Not enough motion`
+   重置。
+
+实机验证：前 20 s 内出现多次重置，约 20 s 完成 VIBA 1，约 40 s 完成
+VIBA 2；VIBA 2 之后连续记录中没有再出现 `Fail to track local map` 或
+`TRACK: Reset`，`TrackLocalMap` inlier 保持在 100–200。
+
 节点要求 IMU 已按 ROS FLU 发布。当前实机 `sensor_receiver_node` 默认
 `imu_accel_axis=none`、`imu_gyro_axis=none`：加速度和陀螺仪原始数据都已是
 FLU。若原始约定不同，按
@@ -259,10 +296,11 @@ slam_node RSS        约 557 MB（含词袋和 ORB 地图）
 
 当前桌面场景近似静止、视场内容少。启用 `IMU.fastInit: 1` 后，节点可以进入
 `TRACKING` 并发布 `slam_map -> imu_link`，输入/处理约 60 Hz，`dropped_frames`
-约 1–2；但日志仍会因缺少平移/加速度激励反复出现
-`Not enough motion for initializing`，世界系尚未完成重力对齐。因此这些位姿
-只能用于验证链路、TF 和 Foxglove 预览，不能作为可重复的轨迹精度数据。
-`/flyrat/slam/reset` 服务已实测返回成功。
+约 1–2。启动阶段如果没有持续运动，会反复出现 `Not enough motion for
+initializing`；按 8.1 节做 20–40 s 连续运动后实测可完成 VIBA 1 和 VIBA 2，
+之后不再重置。因此静止日志只能用于验证链路、TF 和 Foxglove 预览；轨迹精度
+仍需在完成初始化后的真实运动数据上评估。`/flyrat/slam/reset` 服务已实测
+返回成功。
 
 ## 9. 无界面改造
 
@@ -278,10 +316,11 @@ slam_node RSS        约 557 MB（含词袋和 ORB 地图）
 
 - 当前只在开发机验证，没有在泰山派 aarch64 上构建；泰山派没有 OpenCV，
   且内存只有 2 GB。
-- 内参、双目外参、IMU 外参和噪声已按 `kalibr_ws/` 标定；仍需真实运动验证
-  长时间 `TRACKING` 和轨迹精度。
-- 实机节点已经直接订阅 `/flyrat/sensors/*`，但桌面静止场景无法稳定初始化；
-  需要真实运动、有纹理的视场验证 `TRACKING`。
+- 内参、双目外参、IMU 外参和噪声已按 `kalibr_ws/` 标定；已完成实机
+  IMU-stereo 初始化验证（VIBA 1/2 后持续跟踪），仍需评估长时间轨迹精度。
+- 实机节点已经直接订阅 `/flyrat/sensors/*`。IMU-stereo 启动阶段需要持续、
+  平稳的真实运动才能完成重力/尺度初始化；静止或过慢运动会反复重置，属于
+  ORB-SLAM3 的初始化条件，不是标定问题（见 8.1 节）。
 - 双目和 IMU 没有硬件同步；`sensor_receiver_node` 只用 1 Hz 的 `TIME` 帧估计
   设备到主机的偏移，避免把 JPEG 解码时间算进图像时间戳。
 - 图像同步窗口默认 10 ms；左右目时间戳差距更大时会丢帧。
