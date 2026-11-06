@@ -1,0 +1,35 @@
+# Kalibr IMU scale-misalignment model from kalibr_ws/calib-imu.yaml.
+#
+# The model is applied after the MSP counts -> SI conversion and axis mapping
+# in sensor_receiver_node:
+#
+#   a_body = inv(imu_acc_M) * a_raw
+#   w_body = imu_gyr_C_gyro_i^T * inv(imu_gyr_M) *
+#            (w_raw - imu_gyr_A * (imu_gyr_C_gyro_i * a_body))
+#
+# Biases are not included: Kalibr estimated them as time-varying splines and
+# ORB-SLAM3 estimates its own bias states. Matrices are row-major.
+#
+# imu_time_offset shifts the IMU header stamp back by the Kalibr cam0 time
+# shift (t_imu = t_cam + shift), so the IMU sample is aligned with the camera
+# exposure time.
+sensor_receiver:
+  ros__parameters:
+    imu_intrinsics_enable: true
+    imu_time_offset: 0.0038053510703300744
+    imu_acc_M:
+      [1.0024698066902495, 0.0, 0.0,
+       -0.0015384172588575149, 1.0033819894065437, 0.0,
+       -0.0010433375089335423, 0.002191290799585061, 1.0033889759294747]
+    imu_gyr_M:
+      [0.996598825928575, 0.0, 0.0,
+       0.0034357491485880395, 1.00252974972003, 0.0,
+       -0.010649025698022731, 0.009529722420907223, 0.9977265667784869]
+    imu_gyr_A:
+      [4.6509571270773773e-05, 2.2847209487859863e-05, 3.483750969002419e-06,
+       -8.87700084620558e-06, -3.8660457566362315e-05, 0.00023696330034489867,
+       -5.31377920134e-05, -0.00012576960700577886, 6.835031558319445e-05]
+    imu_gyr_C_gyro_i:
+      [0.9999838511300967, 0.003409319661940665, -0.004546869083469178,
+       -0.003391261502133721, 0.9999863557328428, 0.003973373072284332,
+       0.0045603535437122415, -0.003957889284721501, 0.9999817689777976]

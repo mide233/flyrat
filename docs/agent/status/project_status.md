@@ -73,7 +73,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - `slam_bench`：支持左右图像序列、左右拼接视频和实时 UVC 三种输入，
   输出每帧耗时、平均/最大耗时和峰值 RSS。
 - 配置模板：`configs/orb_slam3/uvc_640x480.yaml`、
-  `configs/orb_slam3/uvc_640x480_imu.yaml`（内参和外参为占位值）。
+  `configs/orb_slam3/uvc_640x480_imu.yaml`（后者已按 `kalibr_ws/` 实机标定）。
 - 词袋不入库，通过 `FLYRAT_ORB_VOCAB` 或 `Options::vocabulary_path` 指定。
 - 默认 `FLYRAT_BUILD_SLAM=OFF`；开启后链接的程序整体按 GPLv3 分发。
 
@@ -96,7 +96,10 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - `bringup.launch.py` / `.script/bringup_real.sh`：一条命令拉起 adb forward、
   设备 forwarder、接收节点和 SLAM，可选 Foxglove；退出时自动清理。
   词袋和源码树 settings 自动查找。
-- `IMU.T_b_c1` 使用“相机倒置、光轴正对 IMU 前方、平移为 0”的占位矩阵。
+- `IMU.T_b_c1` 使用 `kalibr_ws/` 标定的相机→IMU 外参：相机倒置安装，
+  相机原点在 IMU 前方 0.0403 m、右侧 0.0446 m、上方 0.0089 m，基线 0.06475 m。
+- IMU 的 scale/misalignment 由 `flyrat_sensors/config/imu_intrinsics.yaml`
+  在发布前修正；IMU 时间戳扣除约 3.8 ms 的相机–IMU 固定时间差。
 - 默认 `IMU.fastInit: 1`，跳过逐帧加速度门限；但 IMU 重力/尺度初始化仍需要
   真实平移或明显晃动。
 
@@ -112,7 +115,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 | 双目 MJPEG 带宽 | 约 3.2 MB/s | 1280x480@60，适合 adb |
 | 双目原始 NV12 | 约 55 MB/s | 不适合当前 adb，不用于转发 |
 | ORB-SLAM3 跟踪 | 90/90 帧 | 开发机，真实录制双目 640x480/眼 |
-| ORB-SLAM3 单帧耗时 | 11.5–12.7 ms | 约 79–87 fps，Release，占位内参 |
+| ORB-SLAM3 单帧耗时 | 11.5–12.7 ms | 约 79–87 fps，Release，标定前内参 |
 | ORB-SLAM3 峰值 RSS | 547 MB | 90 帧回放，含 139 MB 词袋 |
 | ORB-SLAM3 词袋加载 | 约 4 s | `ORBvoc.txt` 文本格式 |
 | ROS 2 IMU 输入 | 200.3–200.8 Hz | 开发机接收节点 |
@@ -134,15 +137,16 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - 双目原生 MJPEG 有损；需要原始画质时要改用 YUYV 或 NV12，但 adb 带宽不足。
 - 双目与 ToF 没有硬件同步，时间戳来自各自采集/接收路径。
 - ROS 节点使用设备时间戳 + 主机滑动偏移；不是硬实时同步。
-- IMU 默认按 `acc_lsb_per_g=2048`、`gyro_lsb_per_dps=16.4` 换算；
-  真实飞控需要按板子确认并校准。
+- IMU 原始计数默认按 `acc_lsb_per_g=2048`、`gyro_lsb_per_dps=16.4` 换算；
+  当前实机已用 Kalibr 标定 scale/misalignment 并在发布前修正，但这两个
+  原始量程常数仍需与飞控实际配置一致。
 - 主飞行程序 `flyrat_pilot` 仍是占位 `main()`；目前实机功能集中在
   `flyrat_sensor_forwarder`。
 - adb 链路约 30 MB/s，不能直接转发 640x480/眼@60 的原始 NV12。
 - ORB-SLAM3 只在开发机验证，未在泰山派 aarch64 构建；泰山派没有 OpenCV，
   内存也只有 2 GB。
-- SLAM 配置模板中的内参、双目外参和 IMU 外参都是占位值，未做真实标定；
-  当前实测只能说明流程跑通，尺度和轨迹精度不可信。
+- SLAM 配置模板的内参、双目外参、IMU 外参和 IMU 噪声已按 `kalibr_ws/`
+  标定；但还没有真实运动下的稳定轨迹，尺度和精度仍待验证。
 - ROS 2 SLAM 节点已直接订阅 `/flyrat/sensors/*`；启用 `IMU.fastInit` 后可以在
   静止桌面进入 `TRACKING`，但会因缺少运动反复重置，世界系尚未完成重力对齐，
   还没有真实运动下的稳定轨迹数据。
@@ -167,8 +171,8 @@ f2ea59b fix(tof): define result-trimming macros in platform header
 
 ## 7. 下一步
 
-1. 标定双目内参、外参和 IMU–相机外参，替换 SLAM 配置模板中的占位值，
-   并补充 ROS `CameraInfo`。
+1. 已应用双目内参、双目外参、IMU–相机外参和 Allan/IMU 噪声；下一步补充 ROS
+   `CameraInfo`，并用真实运动验证标定参数下的尺度和轨迹精度。
 2. 用真实运动和有纹理的场景验证 IMU-stereo 持续 `TRACKING`，在 Foxglove 中
    检查轨迹、TF 和状态，再评估精度和漂移。
 3. 评估 ToF、双目、IMU 的时间对齐策略，必要时增加设备端统一时间戳。

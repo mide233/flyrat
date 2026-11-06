@@ -116,7 +116,27 @@ imu_gyro_axis=none
 `left_frame_id`、`right_frame_id`，直接运行节点时可用 `--ros-args -p 名字:=值`
 传入。
 
-`MSP_RAW_IMU` 的尺度跟飞控板有关，默认值只是常见起点；需要按实际板子校准。
+`MSP_RAW_IMU` 的尺度跟飞控板有关。当前实机的
+`flyrat_sensors/config/imu_intrinsics.yaml` 同时设置了：
+
+```text
+imu_intrinsics_enable: true
+imu_time_offset: 0.0038053510703300744
+imu_acc_M / imu_gyr_M / imu_gyr_A / imu_gyr_C_gyro_i
+```
+
+`sensor_receiver_node` 先用 `acc_lsb_per_g` / `gyro_lsb_per_dps` 把原始计数
+转成 SI 单位、按 `imu_*_axis` 对齐 FLU，再应用 Kalibr 的尺度/轴失准矩阵：
+
+```text
+a_body = inv(M_acc) * a_raw
+a_gyro = C_gyro_i * a_body
+w_body = C_gyro_i^T * inv(M_gyr) * (w_raw - A * a_gyro)
+```
+
+零偏仍由 ORB-SLAM3 在线估计。`imu_time_offset` 会从 IMU 时间戳中减去，
+用来补偿 Kalibr 估计的相机-IMU 时间偏移；关闭 intrinsics 时该偏移不生效。
+`T_i_b` 为单位阵。标定文件和数值来自 `kalibr_ws/calib-imu.yaml`。
 
 `imu_accel_axis` 和 `imu_gyro_axis` 分别控制加速度计和陀螺仪的轴向：
 
@@ -136,8 +156,8 @@ imu_gyro_axis=none
   更完整的坐标链和调试步骤见
   [`../slam/coordinates.md`](../slam/coordinates.md)。
 
-这两个参数只做轴向映射，不包含安装角旋转；飞控板或 IMU 相对机体的安装角需要
-在后续的 `base_link`/`imu_link` 变换或标定中处理。
+这两个参数只做轴向映射，不包含安装角旋转；飞控板或 IMU 相对机体的安装角在
+`IMU.T_b_c1` 中处理，尺度/轴失准在 `imu_intrinsics.yaml` 中处理。
 
 ## 4. 话题
 

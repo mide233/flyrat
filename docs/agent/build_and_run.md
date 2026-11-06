@@ -290,6 +290,12 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 都已是 ROS FLU，实测左偏航 `angular_velocity.z > 0`。只有偏航为顺时针正的
 飞控才需要 `bf_to_flu`（翻 z）；真正的 FRD 数据源用 `frd_to_flu`。
 
+启动时还会加载 `flyrat_sensors/config/imu_intrinsics.yaml`：打开
+`imu_intrinsics_enable` 后，节点按 Kalibr 的 scale/misalignment 模型修正
+加速度和陀螺仪，并从 IMU 时间戳中扣除 `imu_time_offset`（相机到 IMU 的
+固定时间差，约 3.8 ms）。YAML 中 `T_i_b` 为单位阵；零偏不写入配置，由
+ORB-SLAM3 在线估计。关闭该功能后发布的是未修正的原始刻度数据。
+
 ## 6. Gazebo + Betaflight SITL
 
 ### 6.1 准备
@@ -387,8 +393,10 @@ ctest --test-dir libflyrat/build-slam --output-on-failure
 ```
 
 也支持左右拼接视频 `--video FILE` 和实时 V4L2 `--sbs /dev/video0`。
-IMU 模式加 `--mode imu-stereo`。配置模板里的内参、基线、IMU 外参均为占位值，
-正式使用前必须标定。
+IMU 模式加 `--mode imu-stereo`。`uvc_640x480_imu.yaml` 的内参、双目外参、
+`IMU.T_b_c1` 和 IMU 噪声已按 `kalibr_ws/` 的 Aprilgrid/Allan 结果填写；
+IMU 的 scale/misalignment 由 ROS 接收节点按
+`flyrat_sensors/config/imu_intrinsics.yaml` 在发布前修正。
 
 接口与限制见 [`slam/orb_slam3.md`](slam/orb_slam3.md)。
 
@@ -437,8 +445,9 @@ ros2 launch flyrat_slam slam.launch.py mode:=stereo \
 上升 +z。
 
 Foxglove 中建议把固定坐标系设为 `slam_map` 或 `imu_link`。`camera_left_optical_frame`
-是光学系，占位外参是倒置、光轴正对机体前方；直接看它的轴时，机体滚转对应
-光学系的偏航，这是坐标系分解，不是 SLAM 错误。
+是光学系，标定外参是倒置、光轴大致沿机体 +x（相机 +x≈机体 +y，+y≈机体 +z，
++z≈机体 +x）；直接看它的轴时，机体滚转对应光学系的偏航，这是坐标系分解，
+不是 SLAM 错误。
 
 输出：
 
@@ -461,8 +470,12 @@ Foxglove 预览：
 面板显示左右目话题，以及 Diagnostic 面板查看 `/flyrat/slam/status`。布局文件
 不入库，按需在本地保存。
 
-当前配置的内参、双目外参和 `IMU.T_b_c1` 都是占位值；静止桌面场景不足以稳定
-初始化，需要实际运动和有纹理的视场验证跟踪。
+当前 `uvc_640x480_imu.yaml` 的内参、双目外参、`IMU.T_b_c1` 和 IMU 噪声来自
+`kalibr_ws/` 的实机标定；IMU scale/misalignment 在 `sensor_receiver_node`
+发布前按 `flyrat_sensors/config/imu_intrinsics.yaml` 修正，IMU 时间戳扣除
+`imu_time_offset`（约 3.8 ms）。ORB-SLAM3 只按 `float` 读取 YAML 矩阵，两个
+外参矩阵必须保持 `dt: f`，否则会在启动时因零四元数崩溃。静止桌面场景不足以
+稳定初始化，仍需实际运动和有纹理的视场验证跟踪。
 
 ### 7.5 一键 bringup
 

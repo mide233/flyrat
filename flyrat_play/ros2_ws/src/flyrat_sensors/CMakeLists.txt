@@ -34,7 +34,7 @@ target_compile_options(sensor_receiver_node PRIVATE -Wall -Wextra)
 
 install(TARGETS sensor_receiver_node
   RUNTIME DESTINATION lib/${PROJECT_NAME})
-install(DIRECTORY launch
+install(DIRECTORY launch config
   DESTINATION share/${PROJECT_NAME})
 install(PROGRAMS scripts/adb_forward.sh
   DESTINATION share/${PROJECT_NAME}/scripts)

@@ -83,8 +83,27 @@ ORB-SLAM3 的 body 系就是 IMU 系，要求 FLU、重力方向 `(0, 0, -9.81)`
 | `none` | `(x, y, z)` | 原始数据已经是 FLU（当前实机） |
 | `frd_to_flu` | `(x, -y, -z)` | 原始数据是 FRD |
 
-当前实机的判定依据：静止时 `linear_acceleration.z ≈ +9.83`，绕竖直轴向左
-（俯视逆时针）转时原始 `angular_velocity.z` 为负。因此陀螺仪只翻 z。
+当前实机的判定依据：静止时 `linear_acceleration.z ≈ +9.81`，绕竖直轴向左
+（俯视逆时针）转时 `angular_velocity.z` 为正。因此两个数据流都不翻。
+
+### 3.1 IMU 尺度、轴失准与时间偏移
+
+`kalibr_ws/calib-imu.yaml` 的 scale-misalignment 模型由
+`flyrat_play/ros2_ws/src/flyrat_sensors/config/imu_intrinsics.yaml` 加载，
+`sensor_receiver_node` 在发布前补偿：
+
+```text
+a_body = inv(M_acc) * a_raw
+a_gyro = C_gyro_i * a_body
+w_body = C_gyro_i^T * inv(M_gyr) * (w_raw - A * a_gyro)
+```
+
+零偏 `b_acc` / `b_gyr` 没有写入配置（Kalibr 把它建模成时变样条），仍由
+ORB-SLAM3 在线估计。`T_i_b` 为单位阵，即 IMU 芯片系与 `imu_link` 同向。
+
+同一文件还设置 `imu_time_offset`：Kalibr 估计 `t_imu = t_cam + 0.003805 s`
+（cam0），而 ORB-SLAM3 没有时间偏移参数，所以接收节点从 IMU 时间戳中减去
+这个值，让 IMU 与相机对齐。改标定结果时同时更新该文件。
 
 ## 4. `IMU.T_b_c1` 的方向
 
@@ -107,53 +126,52 @@ p_body = T_b_c1 * p_camera
 如果手上拿到的是 body → camera（例如某些 CAD 或标定工具的输出），写入
 YAML 前必须求逆。
 
-## 5. 当前占位外参
+## 5. 当前标定外参
 
-`libflyrat/configs/orb_slam3/uvc_640x480_imu.yaml`：
+`libflyrat/configs/orb_slam3/uvc_640x480_imu.yaml` 中的外参来自
+`kalibr_ws/`（Aprilgrid 双目 + IMU-相机联合标定），不是占位值：
 
 ```yaml
 IMU.T_b_c1: !!opencv-matrix
   rows: 4
   cols: 4
   dt: f
-  data: [0.0, 0.0, 1.0, 0.0,
-         1.0, 0.0, 0.0, 0.0,
-         0.0, 1.0, 0.0, 0.0,
+  data: [0.007113, -0.020471, 0.999765, 0.040312,
+         0.999929, -0.009399, -0.007306, -0.044603,
+         0.009547, 0.999746, 0.020403, 0.008920,
          0.0, 0.0, 0.0, 1.0]
 ```
 
-它表示“相机倒置、光轴正对 body 前方、平移为 0”：
+相机仍然是倒置安装，光轴大致朝 body 前方，但相对 body 有小角度偏差：
 
 | 相机轴 | 在 body 中的方向 |
 |---|---|
-| 相机 x（图像右） | body +y（左） |
-| 相机 y（图像下） | body +z（上） |
-| 相机 z（光轴） | body +x（前） |
+| 相机 x（图像右） | 约 body +y（左） |
+| 相机 y（图像下） | 约 body +z（上） |
+| 相机 z（光轴） | 约 body +x（前） |
 
-矩阵的列就是上表。平移为 0 只是占位，真实相机和 IMU 不共点；需要实测后填入
-`data` 的第 4 列。
+平移是相机光心在 body 中的位置：前 +0.0403 m、左 -0.0446 m（即 IMU
+右侧 0.0446 m）、上 +0.0089 m。
 
-如果实际安装是“倒置、光轴朝 body 前方左侧 45°”，把绕 body z 的 45° 旋转
-乘到当前矩阵左侧（body 系中的旋转）：
-
-```text
-T_b_c1(45°) = R_z(+45°) * T_b_c1(0°)
-```
-
-展开后的矩阵是：
+`Stereo.T_c1_c2` 同样来自 `kalibr_ws/calib-camchain.yaml`，是 Kalibr
+`cam1.T_cn_cnm1` 的逆（左目 ← 右目）：
 
 ```yaml
-IMU.T_b_c1: !!opencv-matrix
+Stereo.T_c1_c2: !!opencv-matrix
   rows: 4
   cols: 4
   dt: f
-  data: [-0.707107, 0.0, 0.707107, 0.0,
-          0.707107, 0.0, 0.707107, 0.0,
-          0.0,      1.0, 0.0,      0.0,
-          0.0,      0.0, 0.0,      1.0]
+  data: [0.999949, -0.000045, 0.010089, 0.064749,
+         0.000046, 0.999999, -0.000065, 0.000017,
+         -0.010089, 0.000065, 0.999949, -0.000311,
+         0.0, 0.0, 0.0, 1.0]
 ```
 
-注意旋转方向要和“左侧 45°”一致；改完后用第 7 节的动作验证。
+基线 0.06475 m，右目相对左目绕 y 轴约 0.578°。
+
+矩阵的 `dt` 必须是 `f`。ORB-SLAM3 的
+`Converter::toMatrix3d()` 固定按 `float` 读取 OpenCV 矩阵，写成 `dt: d`
+会被读成全零，随后 `Sophus::SO3` 因四元数为零直接终止进程。
 
 ## 6. 如何调整
 
@@ -191,7 +209,8 @@ ros2 run tf2_ros tf2_echo camera_left_optical_frame camera_right_optical_frame
 
 第二条应输出 `T_body_camera`，即 `IMU.T_b_c1` 本身（`tf2_echo` 打印的是把
 target 的数据变换到 source 的矩阵）。若结果是它的逆，说明静态 TF 方向写反。
-第三条应输出 `Stereo.T_c1_c2`，当前占位值是平移 `(+0.06, 0, 0)`、旋转单位。
+第三条应输出 `Stereo.T_c1_c2`，标定值为平移约 `(+0.06475, +0.0000175,
+-0.00031)`、绕 y 轴约 0.578°。
 
 ## 7. 验证动作
 

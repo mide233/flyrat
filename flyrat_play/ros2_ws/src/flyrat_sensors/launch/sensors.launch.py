@@ -4,9 +4,10 @@
 # next to this launch file) so 127.0.0.1:5000 reaches the RK3566.
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
@@ -17,6 +18,9 @@ def generate_launch_description():
     gyro_lsb_per_dps = LaunchConfiguration('gyro_lsb_per_dps')
     imu_accel_axis = LaunchConfiguration('imu_accel_axis')
     imu_gyro_axis = LaunchConfiguration('imu_gyro_axis')
+
+    intrinsics_file = PathJoinSubstitution(
+        [FindPackageShare('flyrat_sensors'), 'config', 'imu_intrinsics.yaml'])
 
     return LaunchDescription([
         DeclareLaunchArgument('host', default_value='127.0.0.1'),
@@ -43,7 +47,7 @@ def generate_launch_description():
             executable='sensor_receiver_node',
             name='sensor_receiver',
             output='screen',
-            parameters=[{
+            parameters=[intrinsics_file, {
                 'host': host,
                 'port': ParameterValue(port, value_type=int),
                 'stereo_color': ParameterValue(stereo_color, value_type=bool),

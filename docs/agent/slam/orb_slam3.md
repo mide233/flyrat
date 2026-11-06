@@ -51,35 +51,43 @@ SLAM 默认关闭，因为它依赖 OpenCV、Boost.Serialization、OpenSSL，并
 - `libflyrat/configs/orb_slam3/uvc_640x480.yaml`：双目；
 - `libflyrat/configs/orb_slam3/uvc_640x480_imu.yaml`：双目 + IMU。
 
-里面的内参、基线、`IMU.T_b_c1`、噪声参数都是**占位值**。直接用可以跑通，
-但尺度、深度和轨迹精度不可信。正式使用前必须标定：
+里面的双目内参、基线、`Stereo.T_c1_c2`、`IMU.T_b_c1`、IMU 噪声参数已经
+用 `kalibr_ws/` 的 Aprilgrid/Kalibr 标定和 3 小时 Allan 方差结果替换。
+IMU 的 scale/misalignment 和相机-IMU 时间偏移由
+`flyrat_sensors/config/imu_intrinsics.yaml` 在接收节点里补偿。
 
-- 左右目内参和畸变；
-- `Stereo.T_c1_c2`（右目在左目坐标系）；
-- `IMU.T_b_c1`（左目在 IMU/body 坐标系）；
-- IMU 噪声密度和随机游走。
+标定来源：
+
+- 左右目内参与畸变：`kalibr_ws/calib-camchain.yaml`；
+- `Stereo.T_c1_c2`：Kalibr `cam1.T_cn_cnm1` 的逆（右目在左目坐标系）；
+- `IMU.T_b_c1`：Kalibr `T_cam_imu` 的逆（左目在 IMU/body 坐标系）；
+- IMU 噪声密度、随机游走、尺度/轴失准：`kalibr_ws/calib-imu.yaml`；
+- 相机-IMU 时间偏移：`calib-results-imucam.txt` 的 cam0 timeshift。
 
 注意 `Stereo.T_c1_c2` 的方向与 `cv::stereoCalibrate` 返回的
 `X2 = R * X1 + T` 相反，写入前要取逆。
 
-当前 ROS 2 节点使用的 `IMU.T_b_c1` 是占位值，按“相机倒置、光轴正对 IMU 前方、
-平移为 0”构造，body 轴为 FLU：
+当前 ROS 2 节点使用的 `IMU.T_b_c1` 已标定，body 轴为 FLU：
 
 ```yaml
 IMU.T_b_c1: !!opencv-matrix
   rows: 4
   cols: 4
   dt: f
-  data: [0.0, 0.0, 1.0, 0.0,
-         1.0, 0.0, 0.0, 0.0,
-         0.0, 1.0, 0.0, 0.0,
+  data: [0.007113, -0.020471, 0.999765, 0.040312,
+         0.999929, -0.009399, -0.007306, -0.044603,
+         0.009547, 0.999746, 0.020403, 0.008920,
          0.0, 0.0, 0.0, 1.0]
 ```
 
 它表示 `T_b_c1`：把左目相机光学坐标变换到 IMU body 坐标（相机 → body）。
-相机绕光轴倒置，光轴与 body 的 x 轴（前方）平行。平移和安装角都没有实测标定，
-不能用于精度评估。矩阵方向、列的含义和调整方法见
-[`coordinates.md`](coordinates.md)。
+相机倒置，光轴大致沿 body +x；相机光心在 IMU 前方 0.0403 m、右侧 0.0446 m、
+上方 0.0089 m。
+
+`Stereo.T_c1_c2` 的平移约 `(+0.06475, +0.0000175, -0.00031)`，基线
+0.06475 m。所有 OpenCV 矩阵必须保持 `dt: f`：ORB-SLAM3 固定按 `float`
+读取，写成 `dt: d` 会得到全零矩阵并触发 Sophus 崩溃。矩阵方向、列的含义和
+调整方法见 [`coordinates.md`](coordinates.md)。
 
 ## 5. C++ API
 
@@ -171,10 +179,10 @@ IMU 缓存默认 1 s。图像回调只保留最新待处理帧，跟踪线程忙
 - TF：动态 `slam_map -> imu_link`，静态 `imu_link -> camera_left_optical_frame`
   （直接使用 `IMU.T_b_c1`，即相机在机体中的位姿；机体位姿组合时才用它的逆）。
 
-`camera_left_optical_frame` 是标准光学系（x 右、y 下、z 前）。当前占位外参是
-“相机倒置、光轴正对机体前方”，所以相机光学系的 z 轴与机体 x 轴平行；机体绕 x
-轴滚转时，在光学系里就是绕光轴 z 的偏航。这是坐标系分解，不是 SLAM 把滚转算成
-了偏航。Foxglove 里应把固定坐标系设为 `imu_link` 或 `slam_map`，观察机体轨迹，
+`camera_left_optical_frame` 是标准光学系（x 右、y 下、z 前）。标定外参是
+“相机倒置、光轴大致沿机体前方”，所以相机光学系的 z 轴接近机体 x 轴；机体绕 x
+轴滚转时，在光学系里主要表现为绕光轴 z 的偏航。这是坐标系分解，不是 SLAM 把
+滚转算成了偏航。Foxglove 里应把固定坐标系设为 `imu_link` 或 `slam_map`，观察机体轨迹，
 而不是直接看 `camera_left_optical_frame` 的轴。
 
 参数在 `config/slam.yaml`，启动时可用 `-p` 覆盖。`vocabulary_path` 必填；
@@ -203,7 +211,7 @@ FLU。若原始约定不同，按
 [`sensor_forwarding.md`](../hardware/sensor_forwarding.md) 调整，否则
 `IMU.T_b_c1`、重力方向和 IMU 预积分都会不一致。
 
-坐标链、`T_b_c1` 的方向、当前占位矩阵和逐步调试方法见
+坐标链、`T_b_c1` 的方向、当前标定矩阵和逐步调试方法见
 [`coordinates.md`](coordinates.md)。
 
 构建和启动命令见 [`build_and_run.md`](../build_and_run.md) 的“ROS 2 SLAM 节点”
@@ -225,7 +233,7 @@ FLU。若原始约定不同，按
 
 ## 8. 实测
 
-开发机（x86_64，OpenCV 4.6，Release，占位内参）：
+开发机（x86_64，OpenCV 4.6，Release，标定前内参）：
 
 ```text
 90 帧真实双目序列（1280x480 MJPEG，拆成 2×640x480）
@@ -270,7 +278,8 @@ slam_node RSS        约 557 MB（含词袋和 ORB 地图）
 
 - 当前只在开发机验证，没有在泰山派 aarch64 上构建；泰山派没有 OpenCV，
   且内存只有 2 GB。
-- 内参、外参和 IMU 参数是占位值；需要完整标定。
+- 内参、双目外参、IMU 外参和噪声已按 `kalibr_ws/` 标定；仍需真实运动验证
+  长时间 `TRACKING` 和轨迹精度。
 - 实机节点已经直接订阅 `/flyrat/sensors/*`，但桌面静止场景无法稳定初始化；
   需要真实运动、有纹理的视场验证 `TRACKING`。
 - 双目和 IMU 没有硬件同步；`sensor_receiver_node` 只用 1 Hz 的 `TIME` 帧估计

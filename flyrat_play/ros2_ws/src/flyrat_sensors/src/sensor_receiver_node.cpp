@@ -106,8 +106,53 @@ public:
         gyro_lsb_per_dps_ = declare_parameter<double>("gyro_lsb_per_dps", 16.4);
         imu_accel_axis_ = declare_parameter<std::string>("imu_accel_axis", "none");
         imu_gyro_axis_ = declare_parameter<std::string>("imu_gyro_axis", "none");
+        imu_intrinsics_enable_ = declare_parameter<bool>(
+            "imu_intrinsics_enable", false);
+        imu_time_offset_ = declare_parameter<double>("imu_time_offset", 0.0);
+        const auto identity9 = std::vector<double> {
+            1.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, 1.0};
+        const auto zero9 = std::vector<double>(9, 0.0);
+        const auto acc_m = declare_parameter<std::vector<double>>(
+            "imu_acc_M", identity9);
+        const auto gyr_m = declare_parameter<std::vector<double>>(
+            "imu_gyr_M", identity9);
+        const auto gyr_a = declare_parameter<std::vector<double>>(
+            "imu_gyr_A", zero9);
+        const auto gyr_c = declare_parameter<std::vector<double>>(
+            "imu_gyr_C_gyro_i", identity9);
         stereo_color_ = declare_parameter<bool>("stereo_color", false);
         const int tof_count = declare_parameter<int>("tof_count", 4);
+
+        if (imu_intrinsics_enable_) {
+            const auto to_mat = [](const std::vector<double>& v,
+                                    const char* name) {
+                if (v.size() != 9) {
+                    throw std::runtime_error(
+                        std::string(name) + " must contain 9 row-major values");
+                }
+                return cv::Matx33d(v[0], v[1], v[2],
+                    v[3], v[4], v[5], v[6], v[7], v[8]);
+            };
+            acc_M_ = to_mat(acc_m, "imu_acc_M");
+            gyr_M_ = to_mat(gyr_m, "imu_gyr_M");
+            gyr_A_ = to_mat(gyr_a, "imu_gyr_A");
+            gyr_C_ = to_mat(gyr_c, "imu_gyr_C_gyro_i");
+            if (std::abs(cv::determinant(acc_M_)) < 1e-9 ||
+                std::abs(cv::determinant(gyr_M_)) < 1e-9) {
+                throw std::runtime_error(
+                    "imu_acc_M and imu_gyr_M must be invertible");
+            }
+            acc_M_inv_ = acc_M_.inv();
+            gyr_M_inv_ = gyr_M_.inv();
+            RCLCPP_INFO(get_logger(),
+                "IMU intrinsics: scale/misalignment enabled, stamp offset %+.6f s",
+                imu_time_offset_);
+        } else if (imu_time_offset_ != 0.0) {
+            RCLCPP_WARN(get_logger(),
+                "scale/misalignment is disabled; imu_time_offset is still applied");
+        }
 
         if (acc_lsb_per_g_ <= 0.0 || gyro_lsb_per_dps_ <= 0.0) {
             throw std::runtime_error("acc_lsb_per_g and gyro_lsb_per_dps must be positive");
@@ -320,22 +365,39 @@ private:
             return;
         }
 
+        cv::Vec3d accel(
+            static_cast<double>(raw.acc[0]) / acc_lsb_per_g_ * kGravity,
+            static_cast<double>(raw.acc[1]) / acc_lsb_per_g_ * kGravity * accel_y_sign_,
+            static_cast<double>(raw.acc[2]) / acc_lsb_per_g_ * kGravity * accel_z_sign_);
+        cv::Vec3d gyro(
+            static_cast<double>(raw.gyro[0]) / gyro_lsb_per_dps_ * kPi / 180.0,
+            static_cast<double>(raw.gyro[1]) / gyro_lsb_per_dps_ * kPi / 180.0 * gyro_y_sign_,
+            static_cast<double>(raw.gyro[2]) / gyro_lsb_per_dps_ * kPi / 180.0 * gyro_z_sign_);
+
+        if (imu_intrinsics_enable_) {
+            // Kalibr scale-misalignment model, biases left to ORB-SLAM3:
+            //   a_body = inv(M_acc) * a_raw
+            //   w_body = C^T * inv(M_gyr) * (w_raw - A * C * a_body)
+            const cv::Vec3d a_raw = accel;
+            const cv::Vec3d accel_body = acc_M_inv_ * a_raw;
+            const cv::Vec3d gyro_in_accel_frame = gyr_C_ * accel_body;
+            gyro = gyr_C_.t() * (gyr_M_inv_ *
+                (gyro - gyr_A_ * gyro_in_accel_frame));
+            accel = accel_body;
+        }
+
         sensor_msgs::msg::Imu msg;
-        msg.header.stamp = stamp_for(header.device_time_ns);
+        const rclcpp::Time stamp = stamp_for(header.device_time_ns);
+        msg.header.stamp = imu_time_offset_ != 0.0 ?
+            stamp - rclcpp::Duration::from_seconds(imu_time_offset_) : stamp;
         msg.header.frame_id = imu_frame_id_;
 
-        msg.linear_acceleration.x =
-            static_cast<double>(raw.acc[0]) / acc_lsb_per_g_ * kGravity;
-        msg.linear_acceleration.y =
-            static_cast<double>(raw.acc[1]) / acc_lsb_per_g_ * kGravity * accel_y_sign_;
-        msg.linear_acceleration.z =
-            static_cast<double>(raw.acc[2]) / acc_lsb_per_g_ * kGravity * accel_z_sign_;
-        msg.angular_velocity.x =
-            static_cast<double>(raw.gyro[0]) / gyro_lsb_per_dps_ * kPi / 180.0;
-        msg.angular_velocity.y =
-            static_cast<double>(raw.gyro[1]) / gyro_lsb_per_dps_ * kPi / 180.0 * gyro_y_sign_;
-        msg.angular_velocity.z =
-            static_cast<double>(raw.gyro[2]) / gyro_lsb_per_dps_ * kPi / 180.0 * gyro_z_sign_;
+        msg.linear_acceleration.x = accel[0];
+        msg.linear_acceleration.y = accel[1];
+        msg.linear_acceleration.z = accel[2];
+        msg.angular_velocity.x = gyro[0];
+        msg.angular_velocity.y = gyro[1];
+        msg.angular_velocity.z = gyro[2];
         // No orientation estimate is available from MSP_RAW_IMU.
         msg.orientation_covariance[0] = -1.0;
         imu_pub_->publish(msg);
@@ -426,6 +488,14 @@ private:
     double accel_z_sign_ = 1.0;
     double gyro_y_sign_ = 1.0;
     double gyro_z_sign_ = 1.0;
+    bool imu_intrinsics_enable_ = false;
+    double imu_time_offset_ = 0.0;
+    cv::Matx33d acc_M_ = cv::Matx33d::eye();
+    cv::Matx33d acc_M_inv_ = cv::Matx33d::eye();
+    cv::Matx33d gyr_M_ = cv::Matx33d::eye();
+    cv::Matx33d gyr_M_inv_ = cv::Matx33d::eye();
+    cv::Matx33d gyr_A_ = cv::Matx33d::zeros();
+    cv::Matx33d gyr_C_ = cv::Matx33d::eye();
     bool stereo_color_ = false;
 
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
