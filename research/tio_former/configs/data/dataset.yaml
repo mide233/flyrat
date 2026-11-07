@@ -1,0 +1,22 @@
+dataset:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  trajectory_dir: data/trajectories
+  index_path: data/index.csv
+  format: npz
+  tof_views: [front, left, right, down]
+  tof_shape: [4, 8, 8]
+  imu_samples_per_tof: 16
+  dtype:
+    tof: float32
+    tof_status: uint8
+    gt_pose: float32
+    imu: float32
+  compression: true
+
+split:
+  seed: 0
+  train: 0.70
+  val: 0.15
+  test: 0.15
+  leave_one_scene_out: true

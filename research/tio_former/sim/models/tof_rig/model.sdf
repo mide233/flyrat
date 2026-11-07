@@ -1,0 +1,104 @@
+<?xml version="1.0" ?>
+<sdf version="1.9">
+  <model name="tof_rig">
+    <!-- Static ray-casting rig.  The trajectory_player plugin moves this
+         model directly; there is no dynamics in the loop. -->
+    <static>true</static>
+    <link name="base_link">
+      <pose>0 0 0 0 0 0</pose>
+      <visual name="body_visual">
+        <geometry><box><size>0.12 0.12 0.06</size></box></geometry>
+        <material>
+          <ambient>0.15 0.15 0.18 1</ambient>
+          <diffuse>0.15 0.15 0.18 1</diffuse>
+        </material>
+      </visual>
+    </link>
+
+    <link name="tof_front_link">
+      <pose>0.06 0 0 0 0 0</pose>
+      <gravity>false</gravity>
+      <sensor name="tof_front" type="depth_camera">
+        <always_on>true</always_on>
+        <update_rate>15</update_rate>
+        <visualize>false</visualize>
+        <topic>/tio/tof_front</topic>
+        <camera>
+          <horizontal_fov>0.7853981633974483</horizontal_fov>
+          <image><width>64</width><height>64</height><format>R_FLOAT32</format></image>
+          <clip><near>0.015</near><far>4.0</far></clip>
+          <noise><type>none</type></noise>
+        </camera>
+      </sensor>
+    </link>
+
+    <link name="tof_left_link">
+      <pose>0 0.06 0 0 0 1.5707963267948966</pose>
+      <gravity>false</gravity>
+      <sensor name="tof_left" type="depth_camera">
+        <always_on>true</always_on>
+        <update_rate>15</update_rate>
+        <visualize>false</visualize>
+        <topic>/tio/tof_left</topic>
+        <camera>
+          <horizontal_fov>0.7853981633974483</horizontal_fov>
+          <image><width>64</width><height>64</height><format>R_FLOAT32</format></image>
+          <clip><near>0.015</near><far>4.0</far></clip>
+          <noise><type>none</type></noise>
+        </camera>
+      </sensor>
+    </link>
+
+    <link name="tof_right_link">
+      <pose>0 -0.06 0 0 0 -1.5707963267948966</pose>
+      <gravity>false</gravity>
+      <sensor name="tof_right" type="depth_camera">
+        <always_on>true</always_on>
+        <update_rate>15</update_rate>
+        <visualize>false</visualize>
+        <topic>/tio/tof_right</topic>
+        <camera>
+          <horizontal_fov>0.7853981633974483</horizontal_fov>
+          <image><width>64</width><height>64</height><format>R_FLOAT32</format></image>
+          <clip><near>0.015</near><far>4.0</far></clip>
+          <noise><type>none</type></noise>
+        </camera>
+      </sensor>
+    </link>
+
+    <link name="tof_down_link">
+      <pose>0 0 -0.06 0 1.5707963267948966 0</pose>
+      <gravity>false</gravity>
+      <sensor name="tof_down" type="depth_camera">
+        <always_on>true</always_on>
+        <update_rate>15</update_rate>
+        <visualize>false</visualize>
+        <topic>/tio/tof_down</topic>
+        <camera>
+          <horizontal_fov>0.7853981633974483</horizontal_fov>
+          <image><width>64</width><height>64</height><format>R_FLOAT32</format></image>
+          <clip><near>0.015</near><far>4.0</far></clip>
+          <noise><type>none</type></noise>
+        </camera>
+      </sensor>
+    </link>
+
+    <joint name="front_joint" type="fixed">
+      <parent>base_link</parent><child>tof_front_link</child>
+    </joint>
+    <joint name="left_joint" type="fixed">
+      <parent>base_link</parent><child>tof_left_link</child>
+    </joint>
+    <joint name="right_joint" type="fixed">
+      <parent>base_link</parent><child>tof_right_link</child>
+    </joint>
+    <joint name="down_joint" type="fixed">
+      <parent>base_link</parent><child>tof_down_link</child>
+    </joint>
+
+    <plugin filename="libTrajectoryPlayer.so" name="tio::TrajectoryPlayer">
+      <gt_topic>/tio/gt</gt_topic>
+      <publish_rate>15.0</publish_rate>
+    </plugin>
+  </model>
+</sdf>

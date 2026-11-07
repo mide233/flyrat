@@ -1,0 +1,10 @@
+/data/
+/assets/
+/runs/
+/checkpoints/
+/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+sim/gz_plugins/**/build/
+sim/worlds/generated/

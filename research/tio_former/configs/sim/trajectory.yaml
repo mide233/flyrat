@@ -1,0 +1,20 @@
+trajectory:
+  sample_rate_hz: 100.0
+  speed_mps: 0.8
+  altitude_m: 1.0
+  min_clearance_m: 0.3
+  canonical_ratio: 0.2
+  train_length_s: [20.0, 60.0]
+  test_length_s: [8.0, 20.0]
+  test_path_length_m: [4.0, 7.0]
+
+canonical:
+  shapes: [circle, figure_eight, square, straight]
+  radius_m: [1.0, 2.0]
+  speed_mps: [0.4, 1.2]
+
+random:
+  waypoint_count: [4, 10]
+  speed_mps: [0.5, 2.0]
+  accel_mps2: [1.0, 3.0]
+  yaw_mode: velocity

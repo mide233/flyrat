@@ -1,0 +1,11 @@
+variants:
+  - full
+  - imu_only
+  - tof_only
+  - naive_concat
+  - memoryless
+  - gru_memory
+  - kv_only_no_fifo
+
+seeds: [0, 1, 2]
+output_dir: runs/ablations

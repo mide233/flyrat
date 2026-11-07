@@ -1,0 +1,276 @@
+# TIO-Former 仿真复现计划
+
+- 论文：TIO-Former: Ultra-Lightweight 6-Directional ToF-Inertial Odometry for
+  Nano-UAVs via a Streaming Causal Transformer（arXiv:2609.17198）
+- 代码目录：`research/tio_former/`
+- 状态：M0–M1 完成，M2 待开始
+- 最后更新：2026-11-07
+
+## 1. 目标与边界
+
+### 1.1 目标
+
+在仿真中 clean-room 复现 TIO-Former 的核心方法，验证 4 向 ToF + 200 Hz IMU
+的 6-DoF 里程计性能趋势、消融关系和实时性。
+
+### 1.2 不做的事情
+
+- 不追求复现论文 6 向 TOFSense-M 的绝对数值。
+- 不实现 TLIO、AirIO、Crazyflie Flow 作为基线。
+- 不在本阶段做 C++/边缘部署；先完成 PyTorch 原型。
+- 不修改 `libflyrat`、`flyrat_odometry` 或飞控代码；验证通过后再接入。
+
+### 1.3 与论文的关键差异
+
+| 项目 | 论文 | 本复现 |
+|---|---|---|
+| ToF 数量与布局 | 6 向正交 TOFSense-M | 4 向 VL53L5CX：前/左/右/下 |
+| ToF 分辨率/频率 | 8×8 @ 15 Hz | 8×8 @ 15 Hz（高分辨率渲染后聚合） |
+| IMU | 200 Hz | 200 Hz，仿真解析生成 |
+| 数据来源 | 实飞 + 动捕 | Gazebo 场景 ray-cast + 完美 GT |
+| 平台 | Crazyflie + SG2002 | 离线 Python 原型 |
+| 主表对比 | 6 向结果 | 仅作趋势参考，标注布局差异 |
+
+论文 Table III 中“four lateral views”为 0.129 m，可作为四向的近似参照，但本复现
+包含下视、没有后视，不能直接等同。
+
+## 2. 研究目录
+
+```text
+research/tio_former/
+├── README.md
+├── pyproject.toml
+├── requirements.txt
+├── configs/
+│   ├── sim/{sensors,scenes,trajectory}.yaml
+│   ├── data/dataset.yaml
+│   ├── model/base.yaml
+│   ├── train/default.yaml
+│   └── eval/{main,ablation,robustness}.yaml
+├── sim/
+│   ├── worlds/                 # 由脚本生成
+│   ├── models/tof_rig/         # 4 向 ToF 机体
+│   └── gz_plugins/trajectory_player/
+├── scripts/
+│   ├── generate_worlds.py
+│   ├── generate_trajectories.py
+│   ├── record_sequence.py
+│   ├── postprocess_sequence.py
+│   ├── inspect_sequence.py
+│   ├── build_gz_plugin.sh
+│   ├── download_assets.sh      # M2 资产下载占位
+│   ├── train.py
+│   ├── evaluate.py
+│   └── run_ablations.py
+├── tio_former/
+│   ├── data/{dataset,transforms,imu}.py
+│   ├── models/{tof_encoder,imu_encoder,fusion,streaming,pose_head,model}.py
+│   ├── sim/{scene,trajectory,tof}.py
+│   ├── losses.py
+│   ├── metrics.py
+│   ├── integrate.py
+│   └── utils/{config,se3,logging,seed}.py
+├── tests/
+└── report/
+```
+
+- 代码、配置、脚本、世界生成器、测试和报告纳入 git。
+- `data/`、`assets/`、`runs/`、`checkpoints/` 不提交。
+- 真实 mesh 从 Gazebo Fuel / Replica 下载，记录来源和 license，资产不提交。
+
+## 3. 仿真与数据生成
+
+### 3.1 场景
+
+四个场景对应论文的典型环境：
+
+| 场景 | 构造 | 目的 |
+|---|---|---|
+| `corridor` | 30×2.4×2.6 m 长走廊，重复墙面与立柱 | 纵向退化 |
+| `office` | 10×8×3 m，隔断、桌椅、柜子 | 密集非凸遮挡 |
+| `pantry` | 6×5×3 m，台面、桌子、瓷砖材质 | 反射/失效 |
+| `meeting_room` | 8×6×3 m，长桌、椅子、屏幕 | 家具遮挡 |
+
+M1 先用 primitive geometry 建立四个场景；Replica/Gazebo Fuel mesh 在 M2 接入，
+通过 `download_assets.sh` 下载到本地 `assets/`，world 生成器按配置决定是否引用。
+
+### 3.2 机体与传感器
+
+- 机体坐标系：FLU（+x 前，+y 左，+z 上）。
+- 4 个 ToF 朝向：`+x`、`+y`、`-y`、`-z`。
+- 每个 ToF：
+  - 视场 45°×45°；
+  - 量程 0.015–4.0 m；
+  - 输出 8×8，15 Hz。
+- Gazebo 侧每向渲染 64×64 depth，再聚合到 8×8，避免低分辨率渲染限制。
+- 每个序列同时记录 GT 位姿和传感器时间戳。
+
+### 3.3 轨迹
+
+- 20% canonical：圆、8 字、方形、直线，变化半径、速度、高度。
+- 80% random：自由空间随机 waypoint + min-jerk / 三次样条，限制速度
+  0.5–2 m/s、加速度 1–3 m/s²，离障碍 ≥0.3 m。
+- 训练序列 20–60 s；测试序列 4–7 m。
+- 目标规模约 9,500 s / 2,200 m；按场景和序列分片并行生成，可断点续跑。
+
+### 3.4 IMU
+
+从解析轨迹计算：
+
+```text
+ω_body = vee(Rᵀ Ṙ)
+f_body = Rᵀ (a_world - g_world),  g_world = [0, 0, -9.81]
+```
+
+- 200 Hz 采样；
+- 白噪声使用配置中的噪声密度；
+- 随机游走 bias；
+- 可选 scale/misalignment 和初始化 bias；
+- 默认无时间偏移，保留 `imu_time_offset_s` 配置，用 3.8 ms 做鲁棒性测试；
+- 每个 ToF 间隔内重采样为 K=16；K=6 作为消融，对应论文 `R^{8×6}` 的表述差异。
+
+### 3.5 ToF 噪声与失效
+
+- 基础：AR(1) 噪声，γ=0.9，σ=0.01 m。
+- 失效：随机 dropout、量程外、无回波、反射率丢失、空间 patch / 时间 burst。
+- 状态映射到 VL53L5CX：
+  - `target_status ∈ {5, 9}`：有效，权重 1.0；
+  - 新捕获/低置信：模拟论文 `s=10`，权重 0.5，不作为插值 donor；
+  - 其他：无效，权重 0；
+  - 状态机模拟连续跟踪：无效→有效先给一帧 0.5，再给 1.0。
+- 训练时在线施加 `ρ∈{0.1,0.3,0.5}` 缺失扰动；测试集固定生成 10/30/50%
+  缺失和不同噪声等级。
+
+### 3.6 数据格式
+
+每个序列一个容器（M1 使用 `.npz`，M2 起优先 HDF5）：
+
+```text
+tof            [T,4,8,8] float32   # 米
+tof_status     [T,4,8,8] uint8
+tof_ideal      [T,4,8,8] float32   # 可选
+gt_pose        [T,4,4] float32     # T_world_body @ 15 Hz
+gt_twist       [T,6] float32       # 可选
+imu            [T,K,6] float32     # accel, gyro @ 200 Hz
+t_tof          [T] float64
+t_imu          [T,K] float64
+scene_id, seq_id, traj_type, split
+```
+
+另生成 `index.csv`、训练集统计、场景/轨迹分布报告。
+
+## 4. 模型
+
+### 4.1 ToF 前端
+
+- 可靠性 mask `A_t`。
+- 因果插补：无效像素用空间邻域 + 历史有效值填充，插补像素权重保持 0。
+- 双边门控差分：
+  `ΔD = A_{t-1} ⊙ A_t ⊙ (D̃_t - D̃_{t-1})`。
+- 输入 `X_t = Cat(D̃_{t-1}, D̃_t, ΔD_t) ∈ R^{3×8×8}`。
+
+### 4.2 网络
+
+- 共享 2D CNN：3 个 conv block，通道 32/64/128，全局池化到 `d_f=128`；
+  加可学习 view embedding。
+- 4-token view Transformer：默认 2 层、4 heads、FFN 256、pre-LN。
+- IMU encoder：3 层 1D CNN（6→64→128→128），时间池化到 `d_f`。
+- IMU-guided cross-attention：IMU 特征作 query，4 个 view token 作 K/V；
+  4 heads，残差 + LayerNorm。
+- Streaming Transformer：
+  - Local KV cache `C=8`；
+  - 每 `G=4` 个被驱逐 token 均值池化 + MLP `φ_m`，压入 Chunk-FIFO `S=4`；
+  - 每步最多 attend 12 个 token，严格 causal mask；
+  - 默认 2 层 streaming layer。
+- Pose head：2 层 MLP → `Δp̂_t`、轴角 `Δφ̂_t`。
+- 递归积分：
+  - `ΔR̂_t = exp([Δφ̂_t]×)`
+  - `R̂_t = R̂_{t-1} ΔR̂_t`
+  - `p̂_t = p̂_{t-1} + R̂_{t-1} Δp̂_t`
+
+论文未给出的维度、层数、学习率等全部写入配置，并在报告中说明来源和敏感性。
+
+### 4.3 损失
+
+严格按论文：
+
+- `L_step`：Smooth L1，平移 β=0.05，旋转 β=0.02；
+- 多 horizon：`H_p={4,8,16,32}`，`H_R={4,8,16}`；
+- `L_scale`：β=0.10；
+- `L_res`：β=0.02；
+- 总损失：
+  `L = L_step + 0.02 L_mh^p + 0.005(L_mh^R + L_scale + L_res)`。
+
+## 5. 训练与评估
+
+### 5.1 训练
+
+- 窗口 64 帧（约 4.3 s），batch 32/GPU，梯度累积 2。
+- AdamW，lr 1e-3，weight decay 1e-4，5% warmup + cosine，100 epochs，
+  early stopping。
+- 3 个种子（0/1/2），DDP + BF16 AMP，梯度裁剪 1.0。
+- 先在 1 条序列上过拟合到接近零损失，再全量训练。
+- 增强：缺失扰动、AR(1) 噪声、随机 view dropout（1–3 向）。
+
+### 5.2 指标
+
+- ATEp：SE(3) 对齐，不做尺度修正。
+- RPEp / RPER：66.7 ms 间隔。
+- EDR：终点位移 / GT 轨迹长度。
+- 每序列 RMSE，再对测试集平均；3 seeds 报 mean±std。
+
+### 5.3 实验
+
+- 随机 70/15/15：整体 + 每场景表。
+- 留一场景（LOSO）：4 个场景分别留出。
+- 核心消融：
+  1. IMU-only
+  2. ToF-only
+  3. Naive channel concat
+  4. Memoryless
+  5. GRU memory
+  6. KV-only（无 FIFO）
+  7. Full model
+- 鲁棒性：缺失 1/2/3 向、噪声 0/0.01/0.02/0.05 m、
+  状态 dropout 10/30/50%、反射率丢失。
+- 实时性：batch=1 流式推理 p50/p95 latency、参数量、峰值 RSS，
+  GPU 与 CPU 各测一次，目标 <66.7 ms/step。
+
+## 6. 阶段与验收
+
+| 阶段 | 内容 | 验收 |
+|---|---|---|
+| M0 | 目录、环境、配置、测试骨架 | `pytest` 通过，能加载配置 |
+| M1 | 4 场景 + rig + 轨迹插件 | 单序列渲染成功，4×8×8@15 Hz，GT 对齐 |
+| M2 | 全量数据生成 | ~9500 s / ~2200 m，场景与轨迹分布合理 |
+| M3 | 模型 + 单元测试 | 流式 cache 与全因果注意力一致；单序列过拟合 |
+| M4 | 3 seeds 主训练 + 消融 | Full 优于 Naive/核心消融，趋势稳定 |
+| M5 | 鲁棒性 + LOSO + 实时性 + 报告 | 完整研究包 |
+
+## 7. 风险与处理
+
+- **4 向 vs 6 向**：无后视，主表不可直接对比；报告明确标注。
+- **Gazebo 低分辨率 depth**：64×64 渲染后聚合到 8×8，必要时提高分辨率。
+- **渲染吞吐**：headless、无 GUI、按场景并行、分片可续跑。
+- **mesh 资产/license**：下载脚本 + 来源记录，资产不入库。
+- **论文未公开细节**：clean-room 假设集中记录，关键项做敏感性/消融。
+- **仿真到实机差异**：本阶段只验证方法和趋势；实机部署、真实状态分布、
+  时间同步留到后续。
+
+## 8. 交付物
+
+- 完整代码、仿真世界、轨迹/数据生成脚本、训练/评估配置。
+- 3 seeds checkpoint 与复现实验命令。
+- 中文技术报告：方法、假设、数据、主结果、消融、鲁棒性、LOSO、
+  实时性、局限。
+- 论文式表格与图，包含失败/负结果。
+
+## 9. 当前进度
+
+- M0 完成：目录、配置、SE(3)/ToF/轨迹/IMU 工具、NPZ 数据容器和测试。
+  `python3 -m pytest -q` 共 24 项通过。
+- M1 完成：四个 primitive 场景生成器、4 向 ToF rig、Gazebo 轨迹播放插件、
+  单序列 headless 录制与 8×8 后处理。
+- M1 实测（`corridor_demo`）：182 帧、12.07 s、1.80 m；4×8×8 @ 15 Hz；
+  GT 时间对齐；有效 ToF zone 比例约 89%；范围 0.91–4.00 m。
+- 运行说明见 `research/tio_former/README.md`。

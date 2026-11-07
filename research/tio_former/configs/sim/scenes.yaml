@@ -1,0 +1,44 @@
+# Scene definitions for the TIO-Former simulation.
+# bounds are the free-flight interior used by the trajectory generator.
+# mesh_asset is optional; set it after running sim/scripts/download_assets.sh.
+
+scenes:
+  corridor:
+    world_name: tio_corridor
+    style: corridor
+    bounds:
+      x: [-15.0, 15.0]
+      y: [-1.2, 1.2]
+      z: [0.15, 2.45]
+    spawn: [0.0, 0.0, 1.0]
+    mesh_asset: null
+
+  office:
+    world_name: tio_office
+    style: office
+    bounds:
+      x: [-4.5, 4.5]
+      y: [-3.5, 3.5]
+      z: [0.15, 2.7]
+    spawn: [0.0, 0.0, 1.0]
+    mesh_asset: null
+
+  pantry:
+    world_name: tio_pantry
+    style: pantry
+    bounds:
+      x: [-2.5, 2.5]
+      y: [-2.0, 2.0]
+      z: [0.15, 2.6]
+    spawn: [0.0, 0.0, 1.0]
+    mesh_asset: null
+
+  meeting_room:
+    world_name: tio_meeting_room
+    style: meeting_room
+    bounds:
+      x: [-3.5, 3.5]
+      y: [-2.5, 2.5]
+      z: [0.15, 2.6]
+    spawn: [0.0, 0.0, 1.0]
+    mesh_asset: null

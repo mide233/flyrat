@@ -1,0 +1,17 @@
+seed: 0
+checkpoint: null
+split: test
+align: se3_no_scale
+rpe_delta_s: 0.0666666667
+
+metrics:
+  - ate_position
+  - rpe_position
+  - rpe_rotation
+  - end_drift
+
+report:
+  per_scene: true
+  per_trajectory_type: true
+  save_trajectories: true
+  output_dir: runs/eval

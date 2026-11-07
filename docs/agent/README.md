@@ -14,6 +14,7 @@
    - 仿真 → [`simulation/betaflight_sitl_gazebo.md`](simulation/betaflight_sitl_gazebo.md)
    - 里程计 → [`odometry/overview.md`](odometry/overview.md)
    - 坐标系与变换 → [`odometry/coordinates.md`](odometry/coordinates.md)
+   - 研究计划 → [`research/tio_former.md`](research/tio_former.md)
 
 ## 目录
 
@@ -50,6 +51,12 @@
 
 - [`reports/arming_and_msp_link.md`](reports/arming_and_msp_link.md)
   关于解锁流程与 MSP 链路的专题报告，保留原始分析。
+
+### 研究
+
+- [`research/tio_former.md`](research/tio_former.md)
+  TIO-Former 仿真复现的目标、边界、数据生成、模型、实验和验收计划。
+  实际代码位于仓库根目录 `research/tio_former/`。
 
 ### 开发环境
 

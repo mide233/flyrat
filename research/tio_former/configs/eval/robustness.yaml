@@ -1,0 +1,25 @@
+conditions:
+  nominal:
+    missing_views: 0
+    noise_sigma_m: 0.01
+    status_dropout: 0.0
+  missing_1_view:
+    missing_views: 1
+  missing_2_views:
+    missing_views: 2
+  missing_3_views:
+    missing_views: 3
+  noise_0:
+    noise_sigma_m: 0.0
+  noise_0p02:
+    noise_sigma_m: 0.02
+  noise_0p05:
+    noise_sigma_m: 0.05
+  status_dropout_10:
+    status_dropout: 0.1
+  status_dropout_30:
+    status_dropout: 0.3
+  status_dropout_50:
+    status_dropout: 0.5
+
+output_dir: runs/robustness

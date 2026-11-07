@@ -1,0 +1,44 @@
+model:
+  name: tio_former
+  tof:
+    input_channels: 3
+    conv_channels: [32, 64, 128]
+    feature_dim: 128
+    view_layers: 2
+    view_heads: 4
+    view_ffn_dim: 256
+    view_dropout: 0.1
+    view_embedding: true
+  imu:
+    input_channels: 6
+    conv_channels: [64, 128, 128]
+    kernel_size: 5
+    feature_dim: 128
+  fusion:
+    type: cross_attention
+    heads: 4
+    dropout: 0.1
+  streaming:
+    layers: 2
+    heads: 4
+    ffn_dim: 256
+    dropout: 0.1
+    local_capacity: 8
+    chunk_size: 4
+    fifo_capacity: 4
+    summary_hidden_dim: 256
+  pose_head:
+    hidden_dim: 128
+    dropout: 0.0
+  integration:
+    rotation: so3
+
+# Clean-room defaults that the paper does not specify.
+assumptions:
+  feature_dim_source: chosen
+  layer_count_source: chosen
+  imu_samples_source: chosen
+  notes: >
+    The paper omits feature width, transformer layer count, IMU window count
+    and several optimizer details. These are explicit clean-room choices and
+    must be covered by a sensitivity study in the report.
