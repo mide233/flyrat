@@ -42,8 +42,17 @@ max_solver_time: 0.04
 max_num_iterations: 8
 keyframe_parallax: 10.0
 
-acc_n: 0.0029907713760960264
-gyr_n: 8.814974125038311e-05
+# Continuous-time IMU measurement noise densities.  The Allan-variance values
+# measured on a stationary bench (acc_n 0.00299, gyr_n 8.8e-05) are the sensor
+# noise floor only; in flight, motor vibration and unmodelled dynamics make the
+# IMU far noisier than that.  Feeding the bench values to VINS makes the IMU
+# factor ~30x overconfident, so the optimizer trusts dead-reckoning
+# over stereo and the solution can diverge after a few seconds of motion.
+# Use the documented VINS-Fusion EuRoC baseline as a flight margin instead.
+acc_n: 0.08
+gyr_n: 0.004
+# Random walks stay at the measured Allan values; they describe slow bias
+# wander and do not need the same vibration margin as the white noise terms.
 acc_w: 0.00015441665140112607
 gyr_w: 4.09314724371554e-06
 g_norm: 9.81

@@ -100,12 +100,22 @@ adapter 强制 `multiple_thread=0`，在调用 `track()` 的线程内同步完�
 | `multiple_thread` | adapter 强制为 0 |
 | `max_cnt` / `min_dist` | 特征数量和最小间距 |
 | `max_solver_time` / `max_num_iterations` | 滑窗优化预算 |
-| `acc_n` / `gyr_n` / `acc_w` / `gyr_w` | IMU 噪声和随机游走 |
+| `acc_n` / `gyr_n` | IMU 白噪声密度；必须包含飞行振动余量，不能直接用静止 Allan 底噪 |
+| `acc_w` / `gyr_w` | IMU 零偏随机游走；可使用 Allan 标定值 |
 | `g_norm` | 重力模长，默认 9.81 |
 | `estimate_td` / `td` | 时间偏移；当前接收节点已补偿，设为 0 |
 
 `body_T_cam1 = body_T_cam0 * Stereo.T_c1_c2`。外参和标定细节见
 [`coordinates.md`](coordinates.md)。
+
+`acc_n` / `gyr_n` 是预积分协方差里的连续时间白噪声密度，不是“静止时越安静
+越好”。本机静止 Allan 底噪约为 `0.003` m/s²/√Hz 和 `8.8e-05` rad/s/√Hz；
+如果直接写入这两个值，VINS 会把 IMU 因子当成几乎无误差，运动一开始就压低
+视觉残差、让 `ba` 长到 0.5 m/s² 以上，随后轨迹会沿惯性方向飞走。当前配置
+使用 VINS-Fusion EuRoC 基线 `0.08` / `0.004` 留出电机振动和未建模动态的
+余量；`acc_w` / `gyr_w` 仍保留实测 Allan 随机游走。调试时设置
+`FLYRAT_VINS_TRACE=1` 可以打印每帧特征数、滑窗速度和零偏，正常情况下
+`ba` 应保持在 0.1 m/s² 以内。
 
 ## 5. slam_bench
 

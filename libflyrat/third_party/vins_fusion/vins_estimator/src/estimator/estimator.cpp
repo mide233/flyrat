@@ -9,6 +9,16 @@
 
 #include "estimator.h"
 
+#include <cstdlib>
+
+namespace {
+bool vinsTraceEnabled()
+{
+    static const bool enabled = std::getenv("FLYRAT_VINS_TRACE") != nullptr;
+    return enabled;
+}
+} // namespace
+
 Estimator::Estimator(): f_manager{Rs}
 {
     ROS_INFO("init begins");
@@ -435,6 +445,19 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
         //printf("non-keyframe\n");
     }
 
+    if (vinsTraceEnabled())
+    {
+        ROS_INFO("frame=%d t=%.6f feats=%zu total=%d tracked=%d key=%d "
+                 "state=%d p=(%.3f,%.3f,%.3f) v=(%.3f,%.3f,%.3f) "
+                 "ba=(%.3f,%.3f,%.3f) bg=(%.4f,%.4f,%.4f)",
+            frame_count, header, image.size(), f_manager.getFeatureCount(),
+            f_manager.last_track_num, static_cast<int>(marginalization_flag),
+            static_cast<int>(solver_flag),
+            Ps[frame_count].x(), Ps[frame_count].y(), Ps[frame_count].z(),
+            Vs[frame_count].x(), Vs[frame_count].y(), Vs[frame_count].z(),
+            Bas[frame_count].x(), Bas[frame_count].y(), Bas[frame_count].z(),
+            Bgs[frame_count].x(), Bgs[frame_count].y(), Bgs[frame_count].z());
+    }
     ROS_DEBUG("%s", marginalization_flag ? "Non-keyframe" : "Keyframe");
     ROS_DEBUG("Solving %d", frame_count);
     ROS_DEBUG("number of feature: %d", f_manager.getFeatureCount());

@@ -40,5 +40,8 @@ library with OpenCV 4 and Ceres 2.2:
   `ceres::QuaternionManifold` in the SFM initializer.
 - Removed the unused `EigenQuaternionParameterization` source from the build.
 - Removed per-frame ROS visualization calls and noisy per-frame prints.
+- Added an opt-in `FLYRAT_VINS_TRACE` diagnostic in `processImage()` that prints
+  feature counts, solver state, window velocity and IMU biases.  It has no
+  effect unless the environment variable is set.
 
 Algorithmic code is otherwise kept as close to upstream as possible.

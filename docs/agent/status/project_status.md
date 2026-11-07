@@ -146,8 +146,10 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - adb 链路约 30 MB/s，不能直接转发 640x480/眼@60 的原始 NV12。
 - VINS-Fusion 只在开发机验证，未在泰山派 aarch64 构建；泰山派没有
   OpenCV/Ceres，内存也只有 2 GB。
-- SLAM 配置的内参、双目外参、IMU 外参和 IMU 噪声已按 `kalibr_ws/`
-  标定；但还没有真实运动下的稳定轨迹，尺度和精度仍待验证。
+- SLAM 配置的内参、双目外参、IMU 外参和 IMU 随机游走已按 `kalibr_ws/`
+  标定；白噪声密度使用飞行振动余量（见 `slam/vins_fusion.md`），不能用
+  静止 Allan 底噪。真实运动回放已能保持有界轨迹，但长距离尺度和精度仍待
+  进一步验证。
 - VINS-Fusion 需要约 10 帧窗口和足够的运动/IMU 激励才能初始化；静止桌面
   通常停留在 `NOT_INITIALIZED`。
 - VINS 核心不含回环/位姿图，长距离会漂移。
@@ -170,10 +172,11 @@ f2ea59b fix(tof): define result-trimming macros in platform header
 
 ## 7. 下一步
 
-1. 已应用双目内参、双目外参、IMU–相机外参和 Allan/IMU 噪声；下一步补充 ROS
-   `CameraInfo`，并用真实运动验证标定参数下的尺度和轨迹精度。
-2. 用真实运动和有纹理的场景验证 VINS-Fusion 持续 `TRACKING`，在 Foxglove 中
-   检查轨迹、TF 和状态，再评估精度和漂移。
+1. 已应用双目内参、双目外参、IMU–相机外参和 IMU 随机游走；白噪声密度已
+   加入飞行振动余量，真实运动回放不再发散。下一步补充 ROS `CameraInfo`，
+   并继续评估长距离尺度和轨迹精度。
+2. 用更长、更剧烈的真实飞行验证 VINS-Fusion 持续 `TRACKING`，在 Foxglove
+   中检查轨迹、TF、`ba` 和状态，再评估精度和漂移。
 3. 评估 ToF、双目、IMU 的时间对齐策略，必要时增加设备端统一时间戳。
 4. 将传感器转发和 SLAM 整合进正式 `flyrat_pilot` 运行时，加入失效保护与
    链路健康状态。

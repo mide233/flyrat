@@ -450,8 +450,10 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 窗口决定，不再沿用首帧相机系。Foxglove 中建议把固定坐标系设为
 `slam_map` 或 `imu_link`。
 
-当前 `uvc_640x480_imu.yaml` 的内参、双目外参和 IMU 噪声来自 `kalibr_ws/` 的
-实机标定；`sensor_receiver_node` 在发布前按
+当前 `uvc_640x480_imu.yaml` 的内参、双目外参和 IMU 随机游走来自
+`kalibr_ws/` 的实机标定；`acc_n` / `gyr_n` 额外加入了飞行振动余量，不能直接
+使用静止 Allan 底噪（否则 IMU 因子会压过视觉、运动后容易飞走）。
+`sensor_receiver_node` 在发布前按
 `flyrat_sensors/config/imu_intrinsics.yaml` 补偿 scale/misalignment，并从 IMU
 时间戳中扣除 `imu_time_offset`（约 3.8 ms），因此 VINS 配置使用 `td=0`。
 VINS 需要约 10 帧窗口并需要足够的运动/IMU 激励才能初始化，静止桌面场景通常
