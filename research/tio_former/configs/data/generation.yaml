@@ -1,0 +1,39 @@
+# Full-scale M2 dataset generation plan.
+#
+# The paper reports 9,492 s / 2,195 m.  We target the same order of magnitude
+# with the four-view FlyRat sensor layout.  Duration is the primary budget;
+# path length is reported after generation and is allowed to differ because
+# this reproduction uses a different view count and trajectory sampler.
+
+generation:
+  target_seconds: 9500.0
+  workers: 3
+  resume: true
+  keep_raw: false
+  # Balanced so that the long corridor does not dominate the sequence count.
+  scene_weights:
+    corridor: 0.35
+    office: 0.30
+    pantry: 0.15
+    meeting_room: 0.20
+  canonical_ratio: 0.20
+  split_fractions:
+    train: 0.70
+    val: 0.15
+    test: 0.15
+  # Sequence duration ranges (seconds).
+  duration_s:
+    train: [20.0, 60.0]
+    val: [15.0, 40.0]
+    test: [8.0, 20.0]
+  # Paper test sequences are 4-7 m.  Retry the sampler until this holds.
+  test_path_m: [4.0, 7.0]
+  test_waypoint_count: [5, 9]
+  test_waypoint_step_m: [0.6, 1.1]
+  attempts_per_sequence: 80
+  raw_dir: data/raw
+  processed_dir: data/processed
+  trajectory_dir: data/trajectories
+  index_path: data/index.csv
+  report_path: data/report.md
+  seed: 20261107

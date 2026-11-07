@@ -106,6 +106,7 @@ def canonical_trajectory(
     radius_m: float,
     center_xy: Iterable[float] | None = None,
     duration_s: float | None = None,
+    obstacles: list[dict[str, Any]] | None = None,
 ) -> Trajectory:
     """Generate one of the four canonical shapes used in the paper."""
     if sample_rate_hz <= 0.0:
@@ -175,6 +176,8 @@ def canonical_trajectory(
 
     quat = _positions_to_yaw_quat(position)
     _check_bounds(position, low, high, clearance)
+    if obstacles:
+        _check_obstacles(position, obstacles, clearance)
     return Trajectory(t, position, quat)
 
 
@@ -189,6 +192,9 @@ def random_trajectory(
     waypoint_count: int,
     speed_mps: float,
     waypoint_xy: Iterable[Iterable[float]] | None = None,
+    vertical_jitter_m: float = 0.12,
+    waypoint_step_m: Iterable[float] | None = None,
+    obstacles: list[dict[str, Any]] | None = None,
 ) -> Trajectory:
     """Generate a smooth random 3-D trajectory through 4-10 waypoints.
 
@@ -215,23 +221,31 @@ def random_trajectory(
             raise ValueError("waypoint_xy must be a sequence of 2-D points")
     else:
         xy = np.empty((count, 2), dtype=np.float64)
-        xy[0] = 0.5 * (inner_low[:2] + inner_high[:2])
+        # Start somewhere in the free volume and take bounded random steps.
+        # This produces local, drone-like motion instead of long chords across
+        # the whole room, which keeps the average speed near the paper's dataset.
+        xy[0] = rng.uniform(inner_low[:2], inner_high[:2])
+        steps = waypoint_step_m if waypoint_step_m is not None else (0.6, 2.0)
+        step_low, step_high = (float(v) for v in steps)
         for i in range(1, count):
-            # Rejection-sample a waypoint that is not too close to the previous one.
-            for _ in range(100):
-                candidate = rng.uniform(inner_low[:2], inner_high[:2])
-                if np.linalg.norm(candidate - xy[i - 1]) >= 0.5:
+            for _ in range(200):
+                angle = float(rng.uniform(0.0, _TWO_PI))
+                step = float(rng.uniform(step_low, step_high))
+                candidate = xy[i - 1] + step * np.array([np.cos(angle), np.sin(angle)])
+                if np.all(candidate >= inner_low[:2]) and np.all(candidate <= inner_high[:2]):
                     xy[i] = candidate
                     break
             else:
-                xy[i] = candidate
+                # Fall back to a clipped step when the walk reaches a corner.
+                xy[i] = np.clip(xy[i - 1] + step * np.array([np.cos(angle), np.sin(angle)]),
+                                inner_low[:2], inner_high[:2])
     count = xy.shape[0]
     if count < 2:
         raise ValueError("at least two waypoints are required")
 
     # Give every waypoint a small vertical offset while staying inside bounds.
     z = np.clip(
-        altitude + rng.normal(0.0, 0.12, size=count),
+        altitude + rng.normal(0.0, max(0.0, float(vertical_jitter_m)), size=count),
         inner_low[2],
         inner_high[2],
     )
@@ -253,6 +267,8 @@ def random_trajectory(
     # altitude inside bounds after spline overshoot.
     position[:, 2] = np.clip(position[:, 2], inner_low[2], inner_high[2])
     _check_bounds(position, low, high, clearance)
+    if obstacles:
+        _check_obstacles(position, obstacles, clearance)
     quat = _positions_to_yaw_quat(position)
     return Trajectory(t, position, quat)
 
@@ -288,6 +304,22 @@ def _check_bounds(position: np.ndarray, low: np.ndarray, high: np.ndarray, clear
         raise ValueError("trajectory leaves the free-flight bounds")
 
 
+def _check_obstacles(
+    position: np.ndarray,
+    obstacles: list[dict[str, Any]],
+    clearance: float,
+) -> None:
+    """Reject a trajectory that enters a conservative obstacle AABB."""
+    margin = max(0.0, float(clearance))
+    for obstacle in obstacles:
+        center = np.asarray(obstacle["center"], dtype=np.float64)
+        half = 0.5 * np.asarray(obstacle["size"], dtype=np.float64) + margin
+        if center.shape != (3,) or half.shape != (3,):
+            raise ValueError("obstacle center/size must be 3-D")
+        if np.any(np.all(np.abs(position - center) <= half, axis=1)):
+            raise ValueError(f"trajectory intersects obstacle {obstacle.get('name', '?')}")
+
+
 def generate_sequence(
     rng: np.random.Generator,
     scene_bounds: dict[str, Iterable[float]],
@@ -296,48 +328,93 @@ def generate_sequence(
     kind: str,
     duration_s: float | None = None,
     shape: str | None = None,
+    obstacles: list[dict[str, Any]] | None = None,
+    radius_range: Iterable[float] | None = None,
+    speed_range: Iterable[float] | None = None,
+    altitude_m: float | None = None,
+    vertical_jitter_m: float | None = None,
+    waypoint_step_m: Iterable[float] | None = None,
+    waypoint_count: Iterable[int] | None = None,
+    attempts: int = 80,
 ) -> Trajectory:
-    """Generate either a canonical or a random trajectory from YAML config."""
+    """Generate either a canonical or a random trajectory from YAML config.
+
+    ``obstacles`` is a list of conservative AABBs (``center``/``size``) from
+    :func:`tio_former.sim.scene.scene_obstacles`.  Generation retries with new
+    random parameters until the sampled path clears every obstacle.
+    """
     cfg = trajectory_config.get("trajectory", trajectory_config)
     canonical_cfg = trajectory_config.get("canonical", {})
     random_cfg = trajectory_config.get("random", {})
     sample_rate = float(cfg.get("sample_rate_hz", 100.0))
     clearance = float(cfg.get("min_clearance_m", 0.3))
-    altitude = float(cfg.get("altitude_m", 1.0))
-    speed = float(cfg.get("speed_mps", 0.8))
+    altitude = float(altitude_m if altitude_m is not None else cfg.get("altitude_m", 1.0))
+    jitter = float(
+        vertical_jitter_m
+        if vertical_jitter_m is not None
+        else random_cfg.get("vertical_jitter_m", 0.12)
+    )
 
-    if kind == "canonical":
-        shapes = canonical_cfg.get("shapes", ["circle", "figure_eight", "square", "straight"])
-        chosen = shape or str(rng.choice(shapes))
-        radius_range = canonical_cfg.get("radius_m", [1.0, 2.0])
-        speed_range = canonical_cfg.get("speed_mps", [0.4, 1.2])
-        radius = float(rng.uniform(*radius_range))
-        canonical_speed = float(rng.uniform(*speed_range))
-        return canonical_trajectory(
-            chosen,
-            scene_bounds,
-            sample_rate_hz=sample_rate,
-            speed_mps=canonical_speed,
-            altitude_m=altitude,
-            clearance_m=clearance,
-            radius_m=radius,
-        )
+    if kind not in {"canonical", "random"}:
+        raise ValueError(f"unknown trajectory kind: {kind!r}")
 
-    if kind == "random":
-        if duration_s is None:
-            length_range = cfg.get("test_length_s", [8.0, 20.0])
-            duration_s = float(rng.uniform(*length_range))
-        waypoint_range = random_cfg.get("waypoint_count", [4, 10])
-        speed_range = random_cfg.get("speed_mps", [0.5, 2.0])
-        return random_trajectory(
-            scene_bounds,
-            rng=rng,
-            sample_rate_hz=sample_rate,
-            duration_s=float(duration_s),
-            altitude_m=altitude,
-            clearance_m=clearance,
-            waypoint_count=int(rng.integers(waypoint_range[0], waypoint_range[1] + 1)),
-            speed_mps=float(rng.uniform(*speed_range)),
-        )
+    last_error: Exception | None = None
+    for _attempt in range(max(1, int(attempts))):
+        try:
+            attempt_altitude = altitude + float(rng.uniform(-0.15, 0.15))
+            if kind == "canonical":
+                shapes = canonical_cfg.get(
+                    "shapes", ["circle", "figure_eight", "square", "straight"]
+                )
+                chosen = shape or str(rng.choice(shapes))
+                radii = radius_range or canonical_cfg.get("radius_m", [1.0, 2.0])
+                speeds = speed_range or canonical_cfg.get("speed_mps", [0.4, 1.2])
+                radius = float(rng.uniform(*radii))
+                canonical_speed = float(rng.uniform(*speeds))
+                low, high = _bounds(scene_bounds)
+                margin = clearance + radius
+                if np.any(high[:2] - low[:2] <= 2.0 * margin):
+                    center_xy = 0.5 * (low[:2] + high[:2])
+                else:
+                    center_xy = rng.uniform(low[:2] + margin, high[:2] - margin)
+                return canonical_trajectory(
+                    chosen,
+                    scene_bounds,
+                    sample_rate_hz=sample_rate,
+                    speed_mps=canonical_speed,
+                    altitude_m=attempt_altitude,
+                    clearance_m=clearance,
+                    radius_m=radius,
+                    center_xy=center_xy,
+                    duration_s=duration_s,
+                    obstacles=obstacles,
+                )
 
-    raise ValueError(f"unknown trajectory kind: {kind!r}")
+            if duration_s is None:
+                test_lengths = cfg.get("test_length_s", [8.0, 20.0])
+                # Callers generating training data pass duration explicitly;
+                # the default follows the test-length distribution.
+                duration = float(rng.uniform(*test_lengths))
+            else:
+                duration = float(duration_s)
+            waypoint_range = waypoint_count or random_cfg.get("waypoint_count", [4, 10])
+            speeds = speed_range or random_cfg.get("speed_mps", [0.5, 2.0])
+            return random_trajectory(
+                scene_bounds,
+                rng=rng,
+                sample_rate_hz=sample_rate,
+                duration_s=duration,
+                altitude_m=attempt_altitude,
+                clearance_m=clearance,
+                waypoint_count=int(rng.integers(waypoint_range[0], waypoint_range[1] + 1)),
+                speed_mps=float(rng.uniform(*speeds)),
+                vertical_jitter_m=jitter,
+                waypoint_step_m=waypoint_step_m,
+                obstacles=obstacles,
+            )
+        except ValueError as exc:
+            last_error = exc
+
+    raise ValueError(
+        f"failed to generate a collision-free {kind} trajectory after {attempts} attempts: {last_error}"
+    )

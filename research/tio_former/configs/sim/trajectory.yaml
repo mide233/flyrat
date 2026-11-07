@@ -1,7 +1,14 @@
+# Trajectory definitions for the TIO-Former simulation.
+#
+# The paper reports 2,195 m over 9,492 s (about 0.23 m/s average).  Rather than
+# using that as a hard speed, the generator produces slow local waypoint walks
+# (0.6-2.0 m steps) at 1.6 m altitude; the batch generator measures the actual
+# path length and reports the resulting average speed.
+
 trajectory:
   sample_rate_hz: 100.0
-  speed_mps: 0.8
-  altitude_m: 1.0
+  speed_mps: 0.3
+  altitude_m: 1.6
   min_clearance_m: 0.3
   canonical_ratio: 0.2
   train_length_s: [20.0, 60.0]
@@ -11,10 +18,12 @@ trajectory:
 canonical:
   shapes: [circle, figure_eight, square, straight]
   radius_m: [1.0, 2.0]
-  speed_mps: [0.4, 1.2]
+  speed_mps: [0.2, 0.4]
 
 random:
   waypoint_count: [4, 10]
-  speed_mps: [0.5, 2.0]
+  waypoint_step_m: [0.4, 1.4]
+  speed_mps: [0.15, 0.35]
   accel_mps2: [1.0, 3.0]
+  vertical_jitter_m: 0.15
   yaw_mode: velocity

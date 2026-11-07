@@ -8,11 +8,15 @@ The method uses 4× VL53L5CX 8×8 ToF arrays (front / left / right / down) and a
 
 ## 状态
 
-- **M0 完成**：目录、配置、SE(3)/ToF/轨迹/IMU 工具、数据容器，24 项测试通过。
-- **M1 完成**：四个 primitive 场景、4 向 ToF rig、Gazebo 轨迹播放插件、
+- **M0 完成**：目录、配置、SE(3)/ToF/轨迹/IMU 工具、数据容器，26 项测试通过。
+- **M1 完成**：四个场景、4 向 ToF rig、Gazebo 轨迹播放插件、
   单序列 headless 录制与 8×8 后处理。已跑通 `corridor_demo`：182 帧 /
   12.07 s / 1.80 m，4×8×8 @ 15 Hz，GT 对齐，有效率约 89%。
-- M2–M5（全量数据、模型、训练、报告）尚未开始。
+- **M2 完成**：Gazebo Fuel 家具 mesh + 程序化几何的四个场景、障碍物感知轨迹、
+  全量数据生成与索引。实际 **324 序列 / 9,728.9 s / 2,081.6 m /
+  146,265 帧**；四场景有效 zone 比例 75.2%–97.0%（总体 85.7%）；
+  随机划分 train/val/test = 165/56/103 序列。
+- M3–M5（模型、训练、报告）尚未开始。
 
 ## 依赖
 
@@ -81,6 +85,33 @@ python3 scripts/postprocess_sequence.py \
 ```bash
 python3 scripts/inspect_sequence.py data/processed/corridor_demo.npz
 ```
+
+## 全量数据生成（M2）
+
+Gazebo Fuel 家具 mesh 是可选的：不下载时世界仍使用程序化几何，轨迹与录制流程不变。
+下载后把 `assets/models/` 加入 Gazebo 资源路径（录制脚本已自动加入）。
+
+```bash
+# 下载 8 个 CC-BY/CC0 家具模型到 assets/models/，并写入 assets/LICENSES.md
+bash scripts/download_assets.sh
+
+# 重新生成包含 mesh 的四个世界
+python3 scripts/generate_worlds.py
+
+# 试跑 4 个短序列，检查录制/后处理链路
+python3 scripts/generate_dataset.py --smoke --overwrite --workers 2
+
+# 生成完整数据集（目标 9500 s；可中断后重新运行以续跑）
+python3 scripts/generate_dataset.py --workers 3
+
+# 建立索引、随机划分与留一场景划分
+python3 scripts/build_dataset_index.py
+```
+
+结果写入 `data/processed/`、`data/index.csv`、`data/splits.json`、
+`data/stats.json`、`data/report.md`。数据目录不提交。
+
+数据集容器当前为 NPZ；HDF5 因训练环境未安装 h5py 而推迟到后续阶段。
 
 ## 测试
 

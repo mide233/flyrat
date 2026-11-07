@@ -15,6 +15,7 @@ def test_required_configs_exist() -> None:
         "sim/scenes.yaml",
         "sim/trajectory.yaml",
         "data/dataset.yaml",
+        "data/generation.yaml",
         "model/base.yaml",
         "train/default.yaml",
         "eval/main.yaml",
@@ -41,3 +42,15 @@ def test_scene_bounds_are_valid() -> None:
         for axis in ("x", "y", "z"):
             low, high = scene["bounds"][axis]
             assert high > low
+
+
+def test_scene_layout_has_obstacles_and_meshes() -> None:
+    from tio_former.sim.scene import scene_layout
+
+    scenes = load_yaml(ROOT / "configs/sim/scenes.yaml")["scenes"]
+    sdf, obstacles = scene_layout("office", scenes["office"])
+    assert "model://Desk" in sdf
+    assert "model://tof_rig" in sdf
+    assert obstacles
+    assert all({"center", "size"} <= set(item) for item in obstacles)
+    assert all(len(item["size"]) == 3 for item in obstacles)

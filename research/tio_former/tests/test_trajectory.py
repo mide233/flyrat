@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from tio_former.sim.trajectory import (
     canonical_trajectory,
@@ -73,3 +74,23 @@ def test_random_trajectory_reproducible() -> None:
     )
     np.testing.assert_allclose(first.position, second.position)
     assert first.duration == second.duration == 4.0
+
+
+def test_trajectory_rejects_obstacle() -> None:
+    obstacle = {
+        "name": "block",
+        "center": [0.0, 0.0, 1.0],
+        "size": [0.5, 0.5, 0.5],
+    }
+    with pytest.raises(ValueError, match="obstacle"):
+        canonical_trajectory(
+            "straight",
+            BOUNDS,
+            sample_rate_hz=20.0,
+            speed_mps=0.8,
+            altitude_m=1.0,
+            clearance_m=0.3,
+            radius_m=1.0,
+            duration_s=3.0,
+            obstacles=[obstacle],
+        )

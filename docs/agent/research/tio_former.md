@@ -3,8 +3,8 @@
 - 论文：TIO-Former: Ultra-Lightweight 6-Directional ToF-Inertial Odometry for
   Nano-UAVs via a Streaming Causal Transformer（arXiv:2609.17198）
 - 代码目录：`research/tio_former/`
-- 状态：M0–M1 完成，M2 待开始
-- 最后更新：2026-11-07
+- 状态：M0–M2 完成，M3 待开始
+- 最后更新：2026-11-08
 
 ## 1. 目标与边界
 
@@ -43,40 +43,36 @@ research/tio_former/
 ├── requirements.txt
 ├── configs/
 │   ├── sim/{sensors,scenes,trajectory}.yaml
-│   ├── data/dataset.yaml
+│   ├── data/{dataset,generation}.yaml
 │   ├── model/base.yaml
 │   ├── train/default.yaml
 │   └── eval/{main,ablation,robustness}.yaml
 ├── sim/
-│   ├── worlds/                 # 由脚本生成
+│   ├── worlds/                 # 由 generate_worlds.py 生成（gitignore）
 │   ├── models/tof_rig/         # 4 向 ToF 机体
 │   └── gz_plugins/trajectory_player/
 ├── scripts/
 │   ├── generate_worlds.py
 │   ├── generate_trajectories.py
+│   ├── generate_dataset.py     # 批量轨迹 + 录制 + 后处理
+│   ├── build_dataset_index.py  # index/splits/stats/report
 │   ├── record_sequence.py
 │   ├── postprocess_sequence.py
 │   ├── inspect_sequence.py
 │   ├── build_gz_plugin.sh
-│   ├── download_assets.sh      # M2 资产下载占位
-│   ├── train.py
-│   ├── evaluate.py
-│   └── run_ablations.py
+│   └── download_assets.sh
 ├── tio_former/
-│   ├── data/{dataset,transforms,imu}.py
-│   ├── models/{tof_encoder,imu_encoder,fusion,streaming,pose_head,model}.py
+│   ├── data/{dataset,imu}.py
 │   ├── sim/{scene,trajectory,tof}.py
-│   ├── losses.py
-│   ├── metrics.py
-│   ├── integrate.py
 │   └── utils/{config,se3,logging,seed}.py
 ├── tests/
 └── report/
 ```
 
+- `configs/model`、`configs/train`、`configs/eval` 已为 M3 预留。
 - 代码、配置、脚本、世界生成器、测试和报告纳入 git。
 - `data/`、`assets/`、`runs/`、`checkpoints/` 不提交。
-- 真实 mesh 从 Gazebo Fuel / Replica 下载，记录来源和 license，资产不提交。
+- 真实 mesh 从 Gazebo Fuel 下载，记录来源和 license，资产不提交。
 
 ## 3. 仿真与数据生成
 
@@ -91,8 +87,11 @@ research/tio_former/
 | `pantry` | 6×5×3 m，台面、桌子、瓷砖材质 | 反射/失效 |
 | `meeting_room` | 8×6×3 m，长桌、椅子、屏幕 | 家具遮挡 |
 
-M1 先用 primitive geometry 建立四个场景；Replica/Gazebo Fuel mesh 在 M2 接入，
-通过 `download_assets.sh` 下载到本地 `assets/`，world 生成器按配置决定是否引用。
+场景采用程序化几何 + Gazebo Fuel 家具 mesh。M2 实际接入 8 个模型：
+`Desk`、`OfficeChairGrey`、`Cabinet`、`Fridge`、`Table`、`SquareShelf`、
+`MonitorAndKeyboard`、`Sofa`，均为 CC-BY/CC0，由 `download_assets.sh` 下载到
+本地 `assets/models/`（不提交），并写入 `assets/LICENSES.md`。Replica 作为
+可选的真实场景来源保留在脚本说明中，本阶段未下载、未使用。
 
 ### 3.2 机体与传感器
 
@@ -143,7 +142,7 @@ f_body = Rᵀ (a_world - g_world),  g_world = [0, 0, -9.81]
 
 ### 3.6 数据格式
 
-每个序列一个容器（M1 使用 `.npz`，M2 起优先 HDF5）：
+每个序列一个容器（当前阶段使用 `.npz`；HDF5 因训练环境未安装 h5py 而推迟）：
 
 ```text
 tof            [T,4,8,8] float32   # 米
@@ -268,9 +267,14 @@ scene_id, seq_id, traj_type, split
 ## 9. 当前进度
 
 - M0 完成：目录、配置、SE(3)/ToF/轨迹/IMU 工具、NPZ 数据容器和测试。
-  `python3 -m pytest -q` 共 24 项通过。
-- M1 完成：四个 primitive 场景生成器、4 向 ToF rig、Gazebo 轨迹播放插件、
+  `python3 -m pytest -q` 共 26 项通过。
+- M1 完成：四个场景生成器、4 向 ToF rig、Gazebo 轨迹播放插件、
   单序列 headless 录制与 8×8 后处理。
 - M1 实测（`corridor_demo`）：182 帧、12.07 s、1.80 m；4×8×8 @ 15 Hz；
   GT 时间对齐；有效 ToF zone 比例约 89%；范围 0.91–4.00 m。
+- M2 完成：Gazebo Fuel mesh + 程序化几何、障碍物感知轨迹、批量并行录制、
+  数据索引与随机/LOSO 划分。实测 **324 序列、9,728.9 s、2,081.6 m、
+  146,265 帧**。随机划分 train/val/test = 165/56/103 序列；四场景有效
+  zone 比例 75.2%–97.0%（总体 85.7%）。索引输出 `data/index.csv`、
+  `data/splits.json`、`data/stats.json`、`data/report.md`。
 - 运行说明见 `research/tio_former/README.md`。

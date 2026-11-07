@@ -6,39 +6,61 @@ scenes:
   corridor:
     world_name: tio_corridor
     style: corridor
+    real_time_factor: 10.0
     bounds:
       x: [-15.0, 15.0]
       y: [-1.2, 1.2]
       z: [0.15, 2.45]
     spawn: [0.0, 0.0, 1.0]
     mesh_asset: null
+    meshes:
+      - {model: Cabinet, pose: [7.2, -1.0, 0.0, 0.0], bbox: [0.8, 0.4, 1.6]}
+      - {model: Sofa, pose: [22.0, 1.0, 0.0, 3.14159], bbox: [2.0, 0.9, 0.8]}
+      - {model: SquareShelf, pose: [-8.0, 1.0, 0.0, 0.0], bbox: [0.4, 0.4, 1.6]}
 
   office:
     world_name: tio_office
     style: office
+    real_time_factor: 10.0
     bounds:
       x: [-4.5, 4.5]
       y: [-3.5, 3.5]
       z: [0.15, 2.7]
     spawn: [0.0, 0.0, 1.0]
     mesh_asset: null
+    meshes:
+      - {model: Desk, pose: [-3.6, -2.7, 0.0, 0.0], bbox: [1.2, 0.6, 0.75]}
+      - {model: MonitorAndKeyboard, pose: [-3.6, -3.0, 0.75, 0.0], bbox: [0.5, 0.3, 0.4]}
+      - {model: OfficeChairGrey, pose: [-3.0, -2.2, 0.0, 0.0], bbox: [0.6, 0.6, 1.0]}
+      - {model: Cabinet, pose: [4.0, 3.0, 0.0, 0.0], bbox: [0.8, 0.4, 1.6]}
 
   pantry:
     world_name: tio_pantry
     style: pantry
+    real_time_factor: 10.0
     bounds:
       x: [-2.5, 2.5]
       y: [-2.0, 2.0]
       z: [0.15, 2.6]
     spawn: [0.0, 0.0, 1.0]
     mesh_asset: null
+    meshes:
+      - {model: Fridge, pose: [2.0, -1.5, 0.0, 0.0], bbox: [0.7, 0.7, 1.8]}
+      - {model: Table, pose: [0.0, -1.2, 0.0, 0.0], bbox: [1.6, 0.9, 0.75]}
+      - {model: SquareShelf, pose: [-2.0, 1.5, 0.0, 0.0], bbox: [0.4, 0.4, 1.6]}
 
   meeting_room:
     world_name: tio_meeting_room
     style: meeting_room
+    real_time_factor: 10.0
     bounds:
       x: [-3.5, 3.5]
       y: [-2.5, 2.5]
       z: [0.15, 2.6]
     spawn: [0.0, 0.0, 1.0]
     mesh_asset: null
+    meshes:
+      - {model: Table, pose: [2.4, 1.6, 0.0, 0.3], bbox: [1.8, 0.9, 0.75]}
+      - {model: OfficeChairGrey, pose: [2.0, 1.1, 0.0, 0.0], bbox: [0.6, 0.6, 1.0]}
+      - {model: OfficeChairGrey, pose: [2.8, 1.1, 0.0, 0.0], bbox: [0.6, 0.6, 1.0]}
+      - {model: Sofa, pose: [-2.6, 0.8, 0.0, 1.5708], bbox: [2.0, 0.9, 0.8]}

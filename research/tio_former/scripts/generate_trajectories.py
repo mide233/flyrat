@@ -16,6 +16,7 @@ from tio_former.sim.trajectory import (  # noqa: E402
     generate_sequence,
     random_trajectory,
 )
+from tio_former.sim.scene import scene_obstacles  # noqa: E402
 from tio_former.utils.config import load_yaml  # noqa: E402
 from tio_former.utils.logging import get_logger  # noqa: E402
 from tio_former.utils.seed import set_seed  # noqa: E402
@@ -34,6 +35,7 @@ def _generate_one(
     count: int,
 ) -> list[dict]:
     records = []
+    obstacles = scene_obstacles(scene_name, scene)
     for index in range(count):
         if kind == "demo":
             trajectory = canonical_trajectory(
@@ -48,6 +50,7 @@ def _generate_one(
                     scene["bounds"]["y"][1] - scene["bounds"]["y"][0],
                 ) / 2.0),
                 duration_s=duration or 12.0,
+                obstacles=obstacles,
             )
             seq_name = name
         else:
@@ -58,6 +61,7 @@ def _generate_one(
                 kind=kind,
                 duration_s=duration,
                 shape=shape,
+                obstacles=obstacles,
             )
             seq_name = f"{name}_{index:03d}"
         path = Path(traj_cfg.get("_out", ROOT / "data/trajectories")) / f"{seq_name}.csv"

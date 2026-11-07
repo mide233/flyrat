@@ -39,6 +39,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--out", required=True, help="Output dataset .npz")
     parser.add_argument("--scene", required=True)
     parser.add_argument("--kind", default="demo")
+    parser.add_argument("--split", default="demo")
+    parser.add_argument("--seq-id", default=None)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--sensors-config",
@@ -186,6 +188,8 @@ def main() -> int:
     metadata = {
         "scene": args.scene,
         "kind": args.kind,
+        "split": args.split,
+        "seq_id": args.seq_id or Path(args.out).stem,
         "seed": args.seed,
         "source_raw": str(Path(args.raw).resolve()),
         "views": views,

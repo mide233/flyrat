@@ -49,6 +49,12 @@ def main() -> int:
     import gz.msgs10.pose_v_pb2 as pose_v_pb
     import gz.transport13 as transport
 
+    # Keep concurrent recorders isolated: Gazebo transport partitions are
+    # shared by default, which would mix /tio/* topics across processes.  The
+    # environment must be set before the Node is created so the subscription
+    # and the Gazebo subprocess join the same partition.
+    partition = f"tio_{Path(args.out).stem}"
+    os.environ["GZ_PARTITION"] = partition
     node = transport.Node()
     depth: dict[str, list[np.ndarray]] = {view: [] for view in VIEWS}
     depth_t: dict[str, list[float]] = {view: [] for view in VIEWS}
@@ -98,7 +104,11 @@ def main() -> int:
     env.pop("GZ_CONFIG_PATH", None)
     env["PATH"] = "/usr/bin:/bin:" + env.get("PATH", "")
     env["GZ_SIM_RESOURCE_PATH"] = os.pathsep.join(
-        [str(ROOT / "sim/models"), str(ROOT / "sim/worlds/generated")]
+        [
+            str(ROOT / "assets/models"),
+            str(ROOT / "sim/models"),
+            str(ROOT / "sim/worlds/generated"),
+        ]
     )
     env["GZ_SIM_SYSTEM_PLUGIN_PATH"] = str(ROOT / "sim/gz_plugins/install/lib")
     env["TIO_TRAJECTORY_FILE"] = str(Path(args.trajectory).resolve())
