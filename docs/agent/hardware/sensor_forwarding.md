@@ -89,15 +89,15 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
   ros2 launch flyrat_sensors sensors.launch.py'
 ```
 
-如果还要启动 SLAM，不需要手动执行上面的 `adb forward`、设备 forwarder 和接收
-节点；用一键启动即可：
+如果还要启动里程计节点，不需要手动执行上面的 `adb forward`、设备 forwarder 和
+接收节点；用一键启动即可：
 
 ```sh
 .script/bringup_real.sh
 ```
 
-它会把 adb forward、设备端 forwarder、`sensor_receiver_node` 和 `slam_node`
-一起拉起，详见
+它会把 adb forward、设备端 forwarder、`sensor_receiver_node` 和
+`odometry_node` 一起拉起，详见
 [`../build_and_run.md`](../build_and_run.md) 的“一键 bringup”。
 
 `sensors.launch.py` 暴露的参数：
@@ -134,7 +134,7 @@ a_gyro = C_gyro_i * a_body
 w_body = C_gyro_i^T * inv(M_gyr) * (w_raw - A * a_gyro)
 ```
 
-零偏仍由 ORB-SLAM3 在线估计。`imu_time_offset` 会从 IMU 时间戳中减去，
+零偏仍由里程计后端在线估计（待实现）。`imu_time_offset` 会从 IMU 时间戳中减去，
 用来补偿 Kalibr 估计的相机-IMU 时间偏移；关闭 intrinsics 时该偏移不生效。
 `T_i_b` 为单位阵。标定文件和数值来自 `kalibr_ws/calib-imu.yaml`。
 

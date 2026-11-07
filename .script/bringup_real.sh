@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# One-command bring-up for the real-vehicle sensor + SLAM stack:
+# One-command bring-up for the real-vehicle sensor + odometry stack:
 #
 #   adb push -> adb forward -> device forwarder
-#            -> sensor_receiver_node -> slam_node
+#            -> sensor_receiver_node -> odometry_node
 #
 # Usage:
 #   .script/bringup_real.sh [launch arguments...]
@@ -11,15 +11,14 @@
 # Examples:
 #   .script/bringup_real.sh
 #   .script/bringup_real.sh start_foxglove:=true
-#   .script/bringup_real.sh start_slam:=false
+#   .script/bringup_real.sh start_odometry:=false
 #   .script/bringup_real.sh record:=true record_imu_only:=true record_duration:=3h
-#   .script/bringup_real.sh vocabulary_path:=/path/to/ORBvoc.txt
+#   .script/bringup_real.sh camera_config_path:=/path/to/calibration.yaml
 #
 # Environment:
 #   ROS_DISTRO                ROS 2 distribution (default: jazzy)
 #   FLYRAT_ROS_WS             ROS 2 workspace (default: <repo>/flyrat_play/ros2_ws)
 #   ADB_SERIAL                Device serial when several devices are connected
-#   FLYRAT_ORB_VOCAB          ORBvoc.txt path when it is not in playground/ORB_SLAM3
 #   FLYRAT_SENSOR_FORWARDER   Host aarch64 binary (default: <repo>/build-arm/...)
 #   FLYRAT_DEVICE_BINARY      Device path (default: /tmp/flyrat_sensor_forwarder)
 #   FLYRAT_PUSH_FORWARDER     Set to 0 to skip the push step
@@ -213,4 +212,4 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-ros2 launch flyrat_slam bringup.launch.py "${LAUNCH_ARGS[@]}"
+ros2 launch flyrat_odometry bringup.launch.py "${LAUNCH_ARGS[@]}"

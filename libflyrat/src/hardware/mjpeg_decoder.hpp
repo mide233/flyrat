@@ -6,7 +6,7 @@
 // VPU. The target image has the runtime libraries but no GStreamer development
 // headers, so the handful of stable C entry points we need are resolved with
 // dlopen(). NV12 is requested from the decoder and only its Y plane is kept;
-// the Y plane is exactly the GRAY8 image OpenCV/ORB-SLAM3 wants, without the
+// the Y plane is exactly the GRAY8 image the odometry pipeline wants, without the
 // expensive videoconvert -> GRAY8 step.
 #pragma once
 

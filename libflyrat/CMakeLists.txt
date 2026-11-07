@@ -56,6 +56,17 @@ else()
 endif()
 target_compile_options(flyrat PRIVATE -Wall -Wextra)
 
+# Odometry interface. The backend is a stub for now: it validates the camera
+# calibration and reports NOT_INITIALIZED so the ROS pipeline can be developed
+# independently of the estimator.
+add_library(flyrat_odometry src/odometry/odometry.cpp)
+add_library(flyrat::odometry ALIAS flyrat_odometry)
+target_include_directories(flyrat_odometry PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_link_libraries(flyrat_odometry PUBLIC Threads::Threads Eigen3::Eigen)
+target_compile_options(flyrat_odometry PRIVATE -Wall -Wextra)
+
 # ST VL53L5CX user-space driver (ULD). The output is trimmed to the blocks the
 # flight stack needs: distance, target status, target count and temperature.
 # Four sensors on one 750 kHz bus cannot afford the full 532-byte result block.
@@ -107,7 +118,7 @@ target_compile_options(flyrat_msp_interact PRIVATE -Wall -Wextra)
 # protocol layer (not the other way around).
 target_link_libraries(flyrat_hardware PUBLIC flyrat_msp_interact)
 
-install(TARGETS flyrat flyrat_hardware flyrat_msp_interact flyrat_vl53l5cx
+install(TARGETS flyrat flyrat_odometry flyrat_hardware flyrat_msp_interact flyrat_vl53l5cx
   EXPORT flyrat_targets
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib)
@@ -130,24 +141,6 @@ else()
   option(FLYRAT_BUILD_TOOLS "Build libflyrat command line tools" OFF)
 endif()
 
-# ORB-SLAM3 stereo / stereo-inertial SLAM. Off by default because it pulls in
-# OpenCV, Boost.Serialization, OpenSSL and a 139 MB vocabulary file.
-option(FLYRAT_BUILD_SLAM "Build the ORB-SLAM3 stereo SLAM module" OFF)
-# The ORB-SLAM3 text vocabulary is 139 MB and is not vendored. Point this at a
-# copy of ORBvoc.txt to make test_slam_api load a real vocabulary and config.
-set(FLYRAT_ORB_VOCAB "" CACHE FILEPATH "Path to the ORB-SLAM3 ORBvoc.txt vocabulary")
-if(FLYRAT_BUILD_SLAM)
-  add_subdirectory(third_party/orb_slam3)
-
-  add_library(flyrat_slam src/slam/stereo_slam.cpp)
-  add_library(flyrat::slam ALIAS flyrat_slam)
-  target_include_directories(flyrat_slam PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>)
-  target_link_libraries(flyrat_slam PUBLIC flyrat::orb_slam3 Threads::Threads)
-  target_compile_options(flyrat_slam PRIVATE -Wall -Wextra)
-endif()
-
 if(FLYRAT_BUILD_TOOLS)
   add_executable(msp_interact_bench tools/msp_interact_bench.cpp)
   target_link_libraries(msp_interact_bench PRIVATE flyrat_msp_interact flyrat_hardware)
@@ -160,12 +153,6 @@ if(FLYRAT_BUILD_TOOLS)
   add_executable(stereo_bench tools/stereo_bench.cpp)
   target_link_libraries(stereo_bench PRIVATE flyrat_hardware)
   target_compile_options(stereo_bench PRIVATE -Wall -Wextra)
-
-  if(FLYRAT_BUILD_SLAM)
-    add_executable(slam_bench tools/slam_bench.cpp)
-    target_link_libraries(slam_bench PRIVATE flyrat_slam)
-    target_compile_options(slam_bench PRIVATE -Wall -Wextra)
-  endif()
 endif()
 
 if(FLYRAT_BUILD_TESTS)
@@ -215,15 +202,10 @@ if(FLYRAT_BUILD_TESTS)
   target_compile_options(test_sensor_protocol PRIVATE -Wall -Wextra)
   add_test(NAME test_sensor_protocol COMMAND test_sensor_protocol)
 
-  if(FLYRAT_BUILD_SLAM)
-    add_executable(test_slam_api tests/test_slam_api.cpp)
-    target_link_libraries(test_slam_api PRIVATE flyrat_slam)
-    target_compile_options(test_slam_api PRIVATE -Wall -Wextra)
-    if(FLYRAT_ORB_VOCAB)
-      target_compile_definitions(test_slam_api PRIVATE
-        FLYRAT_TEST_ORB_VOCAB="${FLYRAT_ORB_VOCAB}"
-        FLYRAT_TEST_ORB_SETTINGS="${CMAKE_CURRENT_SOURCE_DIR}/configs/orb_slam3/uvc_640x480.yaml")
-    endif()
-    add_test(NAME test_slam_api COMMAND test_slam_api)
-  endif()
+  add_executable(test_odometry_api tests/test_odometry_api.cpp)
+  target_link_libraries(test_odometry_api PRIVATE flyrat_odometry)
+  target_compile_options(test_odometry_api PRIVATE -Wall -Wextra)
+  target_compile_definitions(test_odometry_api PRIVATE
+    FLYRAT_TEST_CAMERA_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/configs/camera/uvc_640x480.yaml")
+  add_test(NAME test_odometry_api COMMAND test_odometry_api)
 endif()

@@ -1,6 +1,6 @@
 # 项目状态
 
-最后更新：2026-11-04
+最后更新：2026-11-07
 
 ## 1. 项目目标
 
@@ -22,7 +22,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - MSP v1 异步客户端 `flyrat::MspInteract`：TCP/串口、轮询、重连、回调与最新快照。
 - `flyrat::hardware::Transport`：串口和 TCP 字节流抽象，单测可注入假传输。
 - 姿态保持 `AttitudeHold`、on-manifold MPC `Ommpc`、`LocalEstimator`、`RcReceiver`。
-- 单元测试 8 个；启用 SLAM 后另有 `test_slam_api`，共 9 个。
+- 单元测试 9 个，其中 `test_odometry_api` 覆盖里程计骨架接口和桩行为。
 
 ### 2.2 实机硬件
 
@@ -62,48 +62,46 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   - `/flyrat/sensors/stereo/left/image_raw`
   - `/flyrat/sensors/stereo/right/image_raw`
 
-### 2.4 ORB-SLAM3 双目模块
+### 2.4 里程计骨架
 
-完整构建、配置和 API 说明见 [`slam/orb_slam3.md`](../slam/orb_slam3.md)。
+完整接口、配置和接入方式见
+[`odometry/overview.md`](../odometry/overview.md)。
 
-- `libflyrat/third_party/orb_slam3/`：vendored ORB-SLAM3 核心（GPLv3），
-  保留 DBoW2、g2o、Sophus，删除 Viewer、MapDrawer 和 Pangolin 依赖。
-- `flyrat::slam::StereoSlam`：门面 API，支持 `kStereo` 和 `kImuStereo`。
-  输出 `T_world_camera`，状态映射为 `kNotInitialized/kTracking/kRecentlyLost/kLost`。
-- `slam_bench`：支持左右图像序列、左右拼接视频和实时 UVC 三种输入，
-  输出每帧耗时、平均/最大耗时和峰值 RSS。
-- 配置模板：`configs/orb_slam3/uvc_640x480.yaml`、
-  `configs/orb_slam3/uvc_640x480_imu.yaml`（后者已按 `kalibr_ws/` 实机标定）。
-- 词袋不入库，通过 `FLYRAT_ORB_VOCAB` 或 `Options::vocabulary_path` 指定。
-- 默认 `FLYRAT_BUILD_SLAM=OFF`；开启后链接的程序整体按 GPLv3 分发。
+- `flyrat::odometry::Odometry`：ROS 无关的 C++17 接口，支持 `kStereo` 和
+  `kImuStereo` 两种模式，状态为 `kNotInitialized/kTracking/kRecentlyLost/kLost`。
+- 输入使用非拥有型 `ImageView`（8 位灰度）和 `ImuSample` 序列，因此核心库
+  不依赖 OpenCV。
+- 当前为桩实现：构造时校验标定文件，`track()` 校验图像尺寸和关闭状态后返回
+  `kNotInitialized`，不输出有效位姿；`saveTrajectory()` 明确抛出“未实现”。
+- 标定文件 `libflyrat/configs/camera/uvc_640x480.yaml` 保留实机 Kalibr 数值
+  （双目内参/畸变、`camera.T_left_right`、`imu.T_body_camera`、IMU 噪声）。
+- `flyrat_odometry` 目标默认随 libflyrat 构建，无需额外的视觉算法、Boost 或
+  OpenSSL 依赖；`test_odometry_api` 覆盖接口与桩行为。
 
-### 2.5 ROS 2 SLAM 节点
+### 2.5 ROS 2 里程计节点
 
-完整构建、参数和 Foxglove 预览见 [`slam/orb_slam3.md`](../slam/orb_slam3.md)；
-坐标链和变换调整见 [`slam/coordinates.md`](../slam/coordinates.md)。
+坐标链和标定调整见 [`odometry/coordinates.md`](../odometry/coordinates.md)。
 
-- `flyrat_play/ros2_ws/src/flyrat_slam/`：新的 ROS 2 包，支持
-  `flyrat::slam::StereoSlam` 的 `kImuStereo`（默认）和 `kStereo` 模式；
-  `mode:=stereo` 时只订阅双目，不订阅 IMU。
+- `flyrat_play/ros2_ws/src/flyrat_odometry/`：保留原节点的双目/IMU 同步、
+  IMU 缓冲、worker 线程、TF、轨迹和状态基础设施，移除词袋和旧算法后端。
 - 订阅实机转发的左右目和 IMU，双目用 `ApproximateTime` 同步，IMU 缓存约 1 s，
   跟踪线程忙时丢旧帧。
-- 发布 `/flyrat/slam/odometry`、`/flyrat/slam/path`、`/flyrat/slam/status`、
-  `/flyrat/slam/reset`；动态 TF `slam_map -> imu_link`，静态 TF
-  `imu_link -> camera_left_optical_frame`。
-- 参数 `vocabulary_path` 必填，词袋不入库；`settings_path` 默认使用
-  `uvc_640x480_imu.yaml`；`body_frame` 默认 `imu_link`；可选
-  `trajectory_path` 退出时保存 TUM 轨迹。
+- 发布 `/flyrat/odometry/odometry`、`/flyrat/odometry/path`、
+  `/flyrat/odometry/status`、`/flyrat/odometry/reset`；静态 TF
+  `imu_link -> camera_left_optical_frame` 和
+  `camera_left_optical_frame -> camera_right_optical_frame`。后端输出有效位姿后
+  再发布动态 `odometry_map -> imu_link`。
+- 参数 `camera_config_path` 指向标定文件，默认使用源码树
+  `libflyrat/configs/camera/uvc_640x480.yaml` 或包内安装副本；`body_frame`
+  默认 `imu_link`，`world_frame` 默认 `odometry_map`。
 - `bringup.launch.py` / `.script/bringup_real.sh`：一条命令拉起 adb forward、
-  设备 forwarder、接收节点和 SLAM，可选 Foxglove；退出时自动清理。
-  词袋和源码树 settings 自动查找。
-- `IMU.T_b_c1` 使用 `kalibr_ws/` 标定的相机→IMU 外参：相机倒置安装，
-  相机原点在 IMU 前方 0.0403 m、右侧 0.0446 m、上方 0.0089 m，基线 0.06475 m。
-- IMU 的 scale/misalignment 由 `flyrat_sensors/config/imu_intrinsics.yaml`
+  设备 forwarder、接收节点和 `odometry_node`，可选 Foxglove；退出时自动清理。
+- 当前节点启动后发布 `NOT_INITIALIZED` 状态并提示后端尚未实现，没有有效位姿
+  或轨迹输出。
+- IMU 的 scale/misalignment 仍由 `flyrat_sensors/config/imu_intrinsics.yaml`
   在发布前修正；IMU 时间戳扣除约 3.8 ms 的相机–IMU 固定时间差。
-- 默认 `IMU.fastInit: 1`，跳过逐帧加速度门限；但 IMU 重力/尺度初始化仍需要
-  真实平移或明显晃动。实机已验证：连续平稳运动约 20 s 完成 VIBA 1，约 40 s
-  完成 VIBA 2，之后 IMU-stereo 可持续跟踪且不再重置；启动阶段的重置属于
-  ORB-SLAM3 初始化条件，不是标定问题。
+- `imu.T_body_camera` 使用 `kalibr_ws/` 标定的相机→IMU 外参：相机倒置安装，
+  相机原点在 IMU 前方 0.0403 m、右侧 0.0446 m、上方 0.0089 m，基线 0.06475 m。
 
 ## 3. 实测指标
 
@@ -116,15 +114,10 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 | adb 吞吐 | 约 30 MB/s | USB2 链路，`adb exec-out` 实测 |
 | 双目 MJPEG 带宽 | 约 3.2 MB/s | 1280x480@60，适合 adb |
 | 双目原始 NV12 | 约 55 MB/s | 不适合当前 adb，不用于转发 |
-| ORB-SLAM3 跟踪 | 90/90 帧 | 开发机，真实录制双目 640x480/眼 |
-| ORB-SLAM3 单帧耗时 | 11.5–12.7 ms | 约 79–87 fps，Release，标定前内参 |
-| ORB-SLAM3 峰值 RSS | 547 MB | 90 帧回放，含 139 MB 词袋 |
-| ORB-SLAM3 词袋加载 | 约 4 s | `ORBvoc.txt` 文本格式 |
+| 里程计骨架状态 | `NOT_INITIALIZED` | 节点可启动，后端尚未实现 |
 | ROS 2 IMU 输入 | 200.3–200.8 Hz | 开发机接收节点 |
 | ROS 2 双目输入 | 60.0 Hz | 左右各 640x480 mono8 |
-| ROS 2 SLAM 输入/处理 | 60.0 Hz | 输入按 60 Hz 持续，交互查询时少量丢帧 |
-| ROS 2 SLAM 状态发布 | 1 Hz | `diagnostic_msgs` |
-| ROS 2 SLAM RSS | 约 557 MB | 含词袋和 ORB 地图 |
+| ROS 2 里程计状态发布 | 1 Hz | `diagnostic_msgs` |
 
 ## 4. 构建与运行
 
@@ -138,6 +131,8 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - ToF 地址扫描会遍历 0x08–0x77；如果总线上还有其他 I2C 器件，应避免地址冲突。
 - 双目原生 MJPEG 有损；需要原始画质时要改用 YUYV 或 NV12，但 adb 带宽不足。
 - 双目与 ToF 没有硬件同步，时间戳来自各自采集/接收路径。
+- 双目与 IMU 没有硬件同步；ROS 节点只用 1 Hz `TIME` 帧估计设备/主机偏移，
+  避免把 JPEG 解码时间算进图像时间戳。
 - ROS 节点使用设备时间戳 + 主机滑动偏移；不是硬实时同步。
 - IMU 原始计数默认按 `acc_lsb_per_g=2048`、`gyro_lsb_per_dps=16.4` 换算；
   当前实机已用 Kalibr 标定 scale/misalignment 并在发布前修正，但这两个
@@ -145,21 +140,17 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - 主飞行程序 `flyrat_pilot` 仍是占位 `main()`；目前实机功能集中在
   `flyrat_sensor_forwarder`。
 - adb 链路约 30 MB/s，不能直接转发 640x480/眼@60 的原始 NV12。
-- ORB-SLAM3 只在开发机验证，未在泰山派 aarch64 构建；泰山派没有 OpenCV，
-  内存也只有 2 GB。
-- SLAM 配置模板的内参、双目外参、IMU 外参和 IMU 噪声已按 `kalibr_ws/`
-  标定；但还没有真实运动下的稳定轨迹，尺度和精度仍待验证。
-- ROS 2 SLAM 节点已直接订阅 `/flyrat/sensors/*`；启用 `IMU.fastInit` 后可以在
-  静止桌面进入 `TRACKING`，但会因缺少运动反复重置，世界系尚未完成重力对齐，
-  还没有真实运动下的稳定轨迹数据。
-- 双目与 IMU 没有硬件同步；ROS 节点只用 1 Hz `TIME` 帧估计设备/主机偏移，
-  避免把 JPEG 解码时间算进图像时间戳。
-- 词袋文件 139 MB，加载约 4 秒，且 `ORBvoc.txt` 未入库。
-- SLAM 模块为 GPLv3，链接后整体程序需按 GPLv3 分发。
+- 里程计后端尚未实现：`flyrat::odometry` 和 ROS 2 节点只提供接口、同步、
+  TF 和状态，不输出有效位姿或轨迹。
+- 实机标定数值已保留并迁移到 `configs/camera/`，但尚未在新后端上验证尺度、
+  漂移和长期稳定性。
+- 里程计 ROS 节点依赖 OpenCV，目前在开发机运行；泰山派没有 OpenCV，内存也
+  只有 2 GB，能否上机仍需评估。
 
 ## 6. 最近提交
 
 ```text
+23b7974 refactor: remove ORB-SLAM3 and add odometry scaffold
 9f09ae4 docs: move all project documentation under docs/agent
 3f24857 docs: reorganize by topic and centralize build instructions
 60a8483 docs: describe ORB-SLAM3 module and measurements
@@ -173,12 +164,14 @@ f2ea59b fix(tof): define result-trimming macros in platform header
 
 ## 7. 下一步
 
-1. 已应用双目内参、双目外参、IMU–相机外参和 Allan/IMU 噪声；下一步补充 ROS
-   `CameraInfo`，并用真实运动验证标定参数下的尺度和轨迹精度。
-2. 用真实运动和有纹理的场景验证 IMU-stereo 持续 `TRACKING`，在 Foxglove 中
-   检查轨迹、TF 和状态，再评估精度和漂移。
+1. 实现 `flyrat::odometry` 后端（例如特征点法或直接法视觉惯性里程计），先用
+   已录制的双目/IMU 数据回放验证，再接入 `odometry_node`。
+2. 用真实运动验证双目内参、双目外参、IMU–相机外参和 Allan 噪声，检查轨迹
+   尺度、漂移和长期稳定性，并补充 ROS `CameraInfo`。
 3. 评估 ToF、双目、IMU 的时间对齐策略，必要时增加设备端统一时间戳。
-4. 将传感器转发和 SLAM 整合进正式 `flyrat_pilot` 运行时，加入失效保护与
+4. 将传感器转发和里程计整合进正式 `flyrat_pilot` 运行时，加入失效保护与
    链路健康状态。
 5. 视 adb 带宽和算法需求，评估双目降到 30 Hz 或使用硬件编码的长期方案。
-6. 评估 SLAM 在泰山派上的可行性（需要 OpenCV 和更大内存），或维持开发机运算。
+6. 评估里程计在泰山派上的可行性（需要 OpenCV 和更大内存），或维持开发机运算。
+7. 后端输出稳定位姿后，补充跟踪耗时、RSS、漂移等实测指标，并替换当前
+   “里程计骨架”占位状态。

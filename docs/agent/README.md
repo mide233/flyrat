@@ -12,8 +12,8 @@
 3. 按任务选择主题文档：
    - 实机传感器 → [`hardware/sensor_forwarding.md`](hardware/sensor_forwarding.md)
    - 仿真 → [`simulation/betaflight_sitl_gazebo.md`](simulation/betaflight_sitl_gazebo.md)
-   - SLAM → [`slam/orb_slam3.md`](slam/orb_slam3.md)
-   - 坐标系与变换 → [`slam/coordinates.md`](slam/coordinates.md)
+   - 里程计 → [`odometry/overview.md`](odometry/overview.md)
+   - 坐标系与变换 → [`odometry/coordinates.md`](odometry/coordinates.md)
 
 ## 目录
 
@@ -21,7 +21,7 @@
 
 - [`build_and_run.md`](build_and_run.md)
   环境依赖、一键构建脚本、核心库与工具、实机程序、交叉编译、ROS 2、SITL、
-  ORB-SLAM3、Docker/CI、清理和常见问题。
+  里程计、Docker/CI、清理和常见问题。
 
 ### 状态
 
@@ -39,13 +39,12 @@
 - [`simulation/betaflight_sitl_gazebo.md`](simulation/betaflight_sitl_gazebo.md)
   Betaflight SITL、Gazebo、ROS 2 控制、Foxglove、相机桥和定位链路。
 
-### SLAM
+### 里程计
 
-- [`slam/orb_slam3.md`](slam/orb_slam3.md)
-  vendored ORB-SLAM3 的许可证、无界面改造、双目/双目惯性 C++ API、配置、
-  `slam_bench`、ROS 2 IMU-stereo 节点和实测结果。
-- [`slam/coordinates.md`](slam/coordinates.md)
-  IMU/相机坐标系、`IMU.T_b_c1` 方向、TF 链、当前占位外参和逐步调试方法。
+- [`odometry/overview.md`](odometry/overview.md)
+  里程计骨架的 C++ 接口、ROS 2 节点、话题、参数、构建运行方式和后端接入点。
+- [`odometry/coordinates.md`](odometry/coordinates.md)
+  IMU/相机坐标系、`imu.T_body_camera` 方向、TF 链、当前标定外参和逐步调试方法。
 
 ### 报告
 
@@ -71,5 +70,5 @@
 - 新增文档按主题放入对应子目录；一次性材料可以放在本目录或单独子目录，并在文末
   说明生成依据和清理方式。
 - 长期维护的内容应整理为正式主题文档，放入 `hardware/`、`simulation/`、
-  `slam/` 等目录。
+  `odometry/` 等目录。
 - `docs/drone/` 是用户资料，不移动、不修改、不提交。

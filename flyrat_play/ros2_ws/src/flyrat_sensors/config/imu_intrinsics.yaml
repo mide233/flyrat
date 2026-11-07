@@ -8,7 +8,7 @@
 #            (w_raw - imu_gyr_A * (imu_gyr_C_gyro_i * a_body))
 #
 # Biases are not included: Kalibr estimated them as time-varying splines and
-# ORB-SLAM3 estimates its own bias states. Matrices are row-major.
+# the odometry backend estimates its own bias states. Matrices are row-major.
 #
 # imu_time_offset shifts the IMU header stamp back by the Kalibr cam0 time
 # shift (t_imu = t_cam + shift), so the IMU sample is aligned with the camera

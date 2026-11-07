@@ -375,7 +375,7 @@ private:
             static_cast<double>(raw.gyro[2]) / gyro_lsb_per_dps_ * kPi / 180.0 * gyro_z_sign_);
 
         if (imu_intrinsics_enable_) {
-            // Kalibr scale-misalignment model, biases left to ORB-SLAM3:
+            // Kalibr scale-misalignment model, biases left to the odometry backend:
             //   a_body = inv(M_acc) * a_raw
             //   w_body = C^T * inv(M_gyr) * (w_raw - A * C * a_body)
             const cv::Vec3d a_raw = accel;

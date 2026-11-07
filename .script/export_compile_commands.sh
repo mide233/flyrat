@@ -56,7 +56,7 @@ databases = [
     root / "flyrat_play/ros2_ws/build/flyrat_sensors/compile_commands.json",
     root / "flyrat_play/ros2_ws/build/flyrat_msp/compile_commands.json",
     root / "flyrat_play/ros2_ws/build/flyrat_control/compile_commands.json",
-    root / "flyrat_play/ros2_ws/build/flyrat_slam/compile_commands.json",
+    root / "flyrat_play/ros2_ws/build/flyrat_odometry/compile_commands.json",
     root / "flyrat_pilot/build/compile_commands.json",
     root / "libflyrat/build/compile_commands.json",
 ]
@@ -71,30 +71,5 @@ for database in databases:
 
 output = root / "compile_commands.json"
 output.write_text(json.dumps(list(merged.values()), indent=2) + "\n")
-orb_entries = sum(
-    1 for entry in merged.values() if "/third_party/orb_slam3/" in entry["file"])
-print(f"[compile_commands] wrote {output} ({len(merged)} entries, "
-      f"{orb_entries} ORB-SLAM3)")
-if orb_entries == 0:
-    print("[compile_commands] warning: no ORB-SLAM3 entries; build "
-          "flyrat_slam with FLYRAT_BUILD_SLAM=ON to index it", file=sys.stderr)
-
-# The standalone libflyrat build is configured with FLYRAT_BUILD_SLAM=OFF, so
-# its database lacks stereo_slam.cpp and every ORB-SLAM3 source. Tools that
-# point directly at libflyrat/build would then report missing ORB headers.
-# Augment that database with the SLAM entries from flyrat_slam.
-standalone = root / "libflyrat/build/compile_commands.json"
-slam_db = root / "flyrat_play/ros2_ws/build/flyrat_slam/compile_commands.json"
-if standalone.is_file() and slam_db.is_file():
-    entries = {entry["file"]: entry
-               for entry in json.loads(standalone.read_text())}
-    for entry in json.loads(slam_db.read_text()):
-        entries.setdefault(entry["file"], entry)
-    standalone.write_text(
-        json.dumps(list(entries.values()), indent=2) + "\n")
-    standalone_orb = sum(
-        1 for entry in entries.values()
-        if "/third_party/orb_slam3/" in entry["file"])
-    print(f"[compile_commands] updated {standalone} "
-          f"({len(entries)} entries, {standalone_orb} ORB-SLAM3)")
+print(f"[compile_commands] wrote {output} ({len(merged)} entries)")
 PY
