@@ -1,0 +1,486 @@
+"""Clean-room TIO-Former model.
+
+The paper does not release code, so this module follows the text: a shared 2D
+range CNN, a view transformer, an IMU encoder, IMU-guided directional
+cross-attention, a bounded streaming causal Transformer and an incremental
+pose head.  All choices that the paper leaves open are exposed through the
+configuration file and flagged in ``configs/model/base.yaml``.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+import torch
+from torch import nn
+import torch.nn.functional as F
+
+
+def _as_int(value: Any, default: int) -> int:
+    return int(default if value is None else value)
+
+
+@dataclass
+class ModelConfig:
+    views: int = 4
+    tof_channels: int = 3
+    tof_conv_channels: tuple[int, ...] = (32, 64, 128)
+    feature_dim: int = 128
+    view_layers: int = 2
+    view_heads: int = 4
+    view_ffn_dim: int = 256
+    view_dropout: float = 0.1
+    view_embedding: bool = True
+    imu_channels: int = 6
+    imu_conv_channels: tuple[int, ...] = (64, 128, 128)
+    imu_kernel_size: int = 5
+    fusion_heads: int = 4
+    fusion_dropout: float = 0.1
+    streaming_layers: int = 2
+    streaming_heads: int = 4
+    streaming_ffn_dim: int = 256
+    streaming_dropout: float = 0.1
+    local_capacity: int = 8
+    chunk_size: int = 4
+    fifo_capacity: int = 4
+    summary_hidden_dim: int = 256
+    pose_hidden_dim: int = 128
+    pose_dropout: float = 0.0
+
+    @classmethod
+    def from_dict(cls, config: dict[str, Any]) -> "ModelConfig":
+        model = config.get("model", config)
+        tof = model.get("tof", {})
+        imu = model.get("imu", {})
+        fusion = model.get("fusion", {})
+        streaming = model.get("streaming", {})
+        pose = model.get("pose_head", {})
+        return cls(
+            tof_channels=_as_int(tof.get("input_channels"), 3),
+            tof_conv_channels=tuple(tof.get("conv_channels", (32, 64, 128))),
+            feature_dim=_as_int(tof.get("feature_dim"), 128),
+            view_layers=_as_int(tof.get("view_layers"), 2),
+            view_heads=_as_int(tof.get("view_heads"), 4),
+            view_ffn_dim=_as_int(tof.get("view_ffn_dim"), 256),
+            view_dropout=float(tof.get("view_dropout", 0.1)),
+            view_embedding=bool(tof.get("view_embedding", True)),
+            imu_channels=_as_int(imu.get("input_channels"), 6),
+            imu_conv_channels=tuple(imu.get("conv_channels", (64, 128, 128))),
+            imu_kernel_size=_as_int(imu.get("kernel_size"), 5),
+            fusion_heads=_as_int(fusion.get("heads"), 4),
+            fusion_dropout=float(fusion.get("dropout", 0.1)),
+            streaming_layers=_as_int(streaming.get("layers"), 2),
+            streaming_heads=_as_int(streaming.get("heads"), 4),
+            streaming_ffn_dim=_as_int(streaming.get("ffn_dim"), 256),
+            streaming_dropout=float(streaming.get("dropout", 0.1)),
+            local_capacity=_as_int(streaming.get("local_capacity"), 8),
+            chunk_size=_as_int(streaming.get("chunk_size"), 4),
+            fifo_capacity=_as_int(streaming.get("fifo_capacity"), 4),
+            summary_hidden_dim=_as_int(streaming.get("summary_hidden_dim"), 256),
+            pose_hidden_dim=_as_int(pose.get("hidden_dim"), 128),
+            pose_dropout=float(pose.get("dropout", 0.0)),
+        )
+
+
+class RangeEncoder(nn.Module):
+    """Shared 2D CNN applied to every directional range image."""
+
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__()
+        layers: list[nn.Module] = []
+        in_channels = config.tof_channels
+        for out_channels in config.tof_conv_channels:
+            layers.extend(
+                [
+                    nn.Conv2d(in_channels, out_channels, 3, padding=1),
+                    nn.GroupNorm(min(8, out_channels), out_channels),
+                    nn.GELU(),
+                ]
+            )
+            in_channels = out_channels
+        self.cnn = nn.Sequential(*layers)
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.out = nn.Linear(in_channels, config.feature_dim)
+
+    def forward(self, images: torch.Tensor) -> torch.Tensor:
+        # images: [N, C, H, W]
+        features = self.cnn(images)
+        return self.out(self.pool(features).flatten(1))
+
+
+class ImuEncoder(nn.Module):
+    """Three-layer 1D CNN over a fixed IMU window."""
+
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__()
+        layers: list[nn.Module] = []
+        in_channels = config.imu_channels
+        kernel = config.imu_kernel_size
+        for out_channels in config.imu_conv_channels:
+            layers.extend(
+                [
+                    nn.Conv1d(in_channels, out_channels, kernel, padding=kernel // 2),
+                    nn.GELU(),
+                ]
+            )
+            in_channels = out_channels
+        self.cnn = nn.Sequential(*layers)
+        self.out = nn.Linear(in_channels, config.feature_dim)
+
+    def forward(self, imu: torch.Tensor) -> torch.Tensor:
+        # imu: [N, 6, K]
+        features = self.cnn(imu)
+        return self.out(features.mean(dim=-1))
+
+
+class ViewTransformer(nn.Module):
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__()
+        layer = nn.TransformerEncoderLayer(
+            d_model=config.feature_dim,
+            nhead=config.view_heads,
+            dim_feedforward=config.view_ffn_dim,
+            dropout=config.view_dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.encoder = nn.TransformerEncoder(layer, num_layers=config.view_layers)
+        self.norm = nn.LayerNorm(config.feature_dim)
+
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        return self.norm(self.encoder(tokens))
+
+
+class CrossViewFusion(nn.Module):
+    """IMU query attends to the directional range tokens."""
+
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__()
+        self.attention = nn.MultiheadAttention(
+            embed_dim=config.feature_dim,
+            num_heads=config.fusion_heads,
+            dropout=config.fusion_dropout,
+            batch_first=True,
+        )
+        self.norm = nn.LayerNorm(config.feature_dim)
+
+    def forward(self, imu_token: torch.Tensor, view_tokens: torch.Tensor) -> torch.Tensor:
+        query = imu_token.unsqueeze(1)
+        fused, _ = self.attention(query, view_tokens, view_tokens, need_weights=False)
+        return self.norm(query + fused).squeeze(1)
+
+
+@dataclass
+class LayerState:
+    """Inference cache for one streaming layer."""
+
+    local_k: torch.Tensor
+    local_v: torch.Tensor
+    summary_k: torch.Tensor
+    summary_v: torch.Tensor
+
+    @classmethod
+    def empty(
+        cls, batch: int, dim: int, device: torch.device, dtype: torch.dtype, heads: int = 1
+    ) -> "LayerState":
+        if dim % heads != 0:
+            raise ValueError("dim must be divisible by heads")
+        empty = torch.empty(batch, 0, heads, dim // heads, device=device, dtype=dtype)
+        return cls(empty, empty.clone(), empty.clone(), empty.clone())
+
+
+class BoundedCausalLayer(nn.Module):
+    """Causal self-attention with a local KV cache and a chunk FIFO.
+
+    ``forward`` processes a whole sequence with the same eviction schedule as
+    the streaming path.  ``forward_step`` updates an explicit cache one frame
+    at a time.  Both must produce identical outputs for identical weights.
+    """
+
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__()
+        self.dim = config.feature_dim
+        self.heads = config.streaming_heads
+        if self.dim % self.heads != 0:
+            raise ValueError("feature_dim must be divisible by streaming_heads")
+        self.head_dim = self.dim // self.heads
+        self.local_capacity = config.local_capacity
+        self.chunk_size = config.chunk_size
+        self.fifo_capacity = config.fifo_capacity
+        self.qkv = nn.Linear(self.dim, 3 * self.dim)
+        self.out = nn.Linear(self.dim, self.dim)
+        self.phi = nn.Sequential(
+            nn.Linear(2 * self.dim, config.summary_hidden_dim),
+            nn.GELU(),
+            nn.Linear(config.summary_hidden_dim, 2 * self.dim),
+        )
+        self.norm1 = nn.LayerNorm(self.dim)
+        self.norm2 = nn.LayerNorm(self.dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(self.dim, config.streaming_ffn_dim),
+            nn.GELU(),
+            nn.Dropout(config.streaming_dropout),
+            nn.Linear(config.streaming_ffn_dim, self.dim),
+        )
+        self.dropout = nn.Dropout(config.streaming_dropout)
+
+    def _split_qkv(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # x: [B, N, D] -> [B, N, H, Dh]
+        batch, length, _ = x.shape
+        qkv = self.qkv(x).reshape(batch, length, 3, self.heads, self.head_dim)
+        q, k, v = qkv.unbind(dim=2)
+        return q, k, v
+
+    def _attend(
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+    ) -> torch.Tensor:
+        # q: [B, 1, H, Dh]; k/v: [B, L, H, Dh]
+        q = q.transpose(1, 2)  # [B, H, 1, Dh]
+        k = k.transpose(1, 2)  # [B, H, L, Dh]
+        v = v.transpose(1, 2)
+        scores = torch.matmul(q, k.transpose(-2, -1)) / (self.head_dim**0.5)
+        attention = torch.softmax(scores, dim=-1)
+        return torch.matmul(attention, v).transpose(1, 2).reshape(q.shape[0], 1, self.dim)
+
+    def _summary(self, k: torch.Tensor, v: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        # k/v: [B, G, H, Dh] -> pooled over the chunk in the full feature space.
+        batch = k.shape[0]
+        pooled = torch.cat(
+            [k.reshape(batch, k.shape[1], -1).mean(dim=1), v.reshape(batch, v.shape[1], -1).mean(dim=1)],
+            dim=-1,
+        )
+        summary_k, summary_v = self.phi(pooled).chunk(2, dim=-1)
+        return (
+            summary_k.reshape(batch, 1, self.heads, self.head_dim),
+            summary_v.reshape(batch, 1, self.heads, self.head_dim),
+        )
+
+    def _finish(self, x: torch.Tensor, attention: torch.Tensor) -> torch.Tensor:
+        x = x + self.dropout(self.out(attention))
+        x = x + self.dropout(self.mlp(self.norm2(x)))
+        return x
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Process a full sequence with the streaming eviction schedule."""
+        batch, length, _ = x.shape
+        q, k, v = self._split_qkv(self.norm1(x))
+        outputs = []
+        c = self.local_capacity
+        g = self.chunk_size
+        for t in range(length):
+            if t < c:
+                start = 0
+            else:
+                start = g * (1 + (t - c) // g)
+            num_chunks = start // g
+            first_chunk = max(0, num_chunks - self.fifo_capacity)
+            keys: list[torch.Tensor] = []
+            values: list[torch.Tensor] = []
+            for chunk in range(first_chunk, num_chunks):
+                sk, sv = self._summary(k[:, chunk * g : (chunk + 1) * g], v[:, chunk * g : (chunk + 1) * g])
+                keys.append(sk)
+                values.append(sv)
+            keys.append(k[:, start : t + 1])
+            values.append(v[:, start : t + 1])
+            context_k = torch.cat(keys, dim=1)
+            context_v = torch.cat(values, dim=1)
+            outputs.append(self._attend(q[:, t : t + 1], context_k, context_v))
+        return self._finish(x, torch.cat(outputs, dim=1))
+
+    def forward_step(
+        self, x: torch.Tensor, state: LayerState
+    ) -> tuple[torch.Tensor, LayerState]:
+        """One causal step; updates and returns the cache."""
+        if x.shape[1] != 1:
+            raise ValueError("forward_step expects exactly one frame")
+        q, k, v = self._split_qkv(self.norm1(x))
+        local_k = torch.cat([state.local_k, k], dim=1)
+        local_v = torch.cat([state.local_v, v], dim=1)
+        summary_k = state.summary_k
+        summary_v = state.summary_v
+        if local_k.shape[1] > self.local_capacity:
+            sk, sv = self._summary(
+                local_k[:, : self.chunk_size], local_v[:, : self.chunk_size]
+            )
+            local_k = local_k[:, self.chunk_size :]
+            local_v = local_v[:, self.chunk_size :]
+            summary_k = torch.cat([summary_k, sk], dim=1)
+            summary_v = torch.cat([summary_v, sv], dim=1)
+            if summary_k.shape[1] > self.fifo_capacity:
+                summary_k = summary_k[:, -self.fifo_capacity :]
+                summary_v = summary_v[:, -self.fifo_capacity :]
+        context_k = torch.cat([summary_k, local_k], dim=1)
+        context_v = torch.cat([summary_v, local_v], dim=1)
+        attention = self._attend(q, context_k, context_v)
+        out = self._finish(x, attention)
+        return out, LayerState(local_k, local_v, summary_k, summary_v)
+
+
+class StreamingTransformer(nn.Module):
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__()
+        self.heads = config.streaming_heads
+        self.layers = nn.ModuleList([BoundedCausalLayer(config) for _ in range(config.streaming_layers)])
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+    def init_state(
+        self, batch: int, dim: int, device: torch.device, dtype: torch.dtype
+    ) -> list[LayerState]:
+        return [LayerState.empty(batch, dim, device, dtype, heads=self.heads) for _ in self.layers]
+
+    def forward_step(
+        self, x: torch.Tensor, states: list[LayerState]
+    ) -> tuple[torch.Tensor, list[LayerState]]:
+        outputs = []
+        for layer, state in zip(self.layers, states):
+            x, state = layer.forward_step(x, state)
+            outputs.append(state)
+        return x, outputs
+
+
+class PoseHead(nn.Module):
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.LayerNorm(config.feature_dim),
+            nn.Linear(config.feature_dim, config.pose_hidden_dim),
+            nn.GELU(),
+            nn.Dropout(config.pose_dropout),
+            nn.Linear(config.pose_hidden_dim, 6),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+class TioFormer(nn.Module):
+    """End-to-end model producing body-frame incremental motion."""
+
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__()
+        self.config = config
+        self.range_encoder = RangeEncoder(config)
+        self.view_embedding = (
+            nn.Parameter(torch.zeros(1, config.views, config.feature_dim))
+            if config.view_embedding
+            else None
+        )
+        if self.view_embedding is not None:
+            nn.init.normal_(self.view_embedding, std=0.02)
+        self.view_transformer = ViewTransformer(config)
+        self.imu_encoder = ImuEncoder(config)
+        self.fusion = CrossViewFusion(config)
+        self.streaming = StreamingTransformer(config)
+        self.pose_head = PoseHead(config)
+
+    @classmethod
+    def from_dict(cls, config: dict[str, Any]) -> "TioFormer":
+        return cls(ModelConfig.from_dict(config))
+
+    def init_state(
+        self, batch_size: int, device: torch.device, dtype: torch.dtype
+    ) -> list[LayerState]:
+        return self.streaming.init_state(batch_size, self.config.feature_dim, device, dtype)
+
+    def count_parameters(self) -> int:
+        return sum(parameter.numel() for parameter in self.parameters() if parameter.requires_grad)
+
+    def _range_channels(
+        self,
+        tof: torch.Tensor,
+        weight: torch.Tensor | None,
+        previous: torch.Tensor | None = None,
+        previous_weight: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        # tof: [B, T, V, H, W]; returns [B, T, V, 3, H, W].
+        batch, length, views, height, width = tof.shape
+        if previous is None:
+            previous = torch.cat([tof[:, :1], tof[:, :-1]], dim=1)
+        if weight is None:
+            current_mask = torch.ones_like(tof)
+            if previous_weight is None:
+                previous_mask = torch.ones_like(tof)
+            else:
+                previous_mask = (previous_weight > 0).to(tof.dtype)
+        else:
+            current_mask = (weight > 0).to(tof.dtype)
+            if previous_weight is None:
+                previous_mask = torch.cat([current_mask[:, :1], current_mask[:, :-1]], dim=1)
+            else:
+                previous_mask = (previous_weight > 0).to(tof.dtype)
+        current = tof * current_mask
+        previous = previous * previous_mask
+        delta = (current - previous) * current_mask * previous_mask
+        return torch.stack([current, previous, delta], dim=3)
+
+    def forward(
+        self,
+        tof: torch.Tensor,
+        imu: torch.Tensor,
+        weight: torch.Tensor | None = None,
+        previous_tof: torch.Tensor | None = None,
+        previous_weight: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Run a full sequence.
+
+        Args:
+            tof: ``[B, T, V, H, W]`` ranges in metres.
+            imu: ``[B, T, K, 6]`` IMU windows.
+            weight: optional ``[B, T, V, H, W]`` reliability weights.
+            previous_tof: optional previous ranges aligned with ``tof``.
+            previous_weight: optional reliability weights for ``previous_tof``.
+        """
+        batch, length, views, _, _ = tof.shape
+        channels = self._range_channels(tof, weight, previous_tof, previous_weight)
+        flat = channels.reshape(batch * length * views, 3, tof.shape[-2], tof.shape[-1])
+        view_tokens = self.range_encoder(flat).reshape(batch * length, views, -1)
+        if self.view_embedding is not None:
+            view_tokens = view_tokens + self.view_embedding[:, :views]
+        view_tokens = self.view_transformer(view_tokens)
+
+        imu_tokens = self.imu_encoder(
+            imu.reshape(batch * length, imu.shape[-2], imu.shape[-1]).transpose(1, 2)
+        )
+        fused = self.fusion(imu_tokens, view_tokens)
+        hidden = self.streaming(fused.reshape(batch, length, -1))
+        motion = self.pose_head(hidden)
+        return {"delta_p": motion[..., :3], "delta_phi": motion[..., 3:]}
+
+    def forward_stream(
+        self,
+        tof: torch.Tensor,
+        imu: torch.Tensor,
+        states: list[LayerState] | None = None,
+        weight: torch.Tensor | None = None,
+        previous_tof: torch.Tensor | None = None,
+        previous_weight: torch.Tensor | None = None,
+    ) -> tuple[dict[str, torch.Tensor], list[LayerState]]:
+        """One-frame streaming forward.  ``tof``/``imu`` have T=1."""
+        if tof.shape[1] != 1:
+            raise ValueError("forward_stream expects T=1")
+        batch = tof.shape[0]
+        channels = self._range_channels(tof, weight, previous_tof, previous_weight)
+        flat = channels.reshape(batch * tof.shape[2], 3, tof.shape[-2], tof.shape[-1])
+        view_tokens = self.range_encoder(flat).reshape(batch, tof.shape[2], -1)
+        if self.view_embedding is not None:
+            view_tokens = view_tokens + self.view_embedding[:, : tof.shape[2]]
+        view_tokens = self.view_transformer(view_tokens)
+        imu_token = self.imu_encoder(
+            imu.reshape(batch, imu.shape[-2], imu.shape[-1]).transpose(1, 2)
+        )
+        fused = self.fusion(imu_token, view_tokens).unsqueeze(1)
+        if states is None:
+            states = self.streaming.init_state(batch, fused.shape[-1], fused.device, fused.dtype)
+        hidden, states = self.streaming.forward_step(fused, states)
+        motion = self.pose_head(hidden)
+        return {"delta_p": motion[..., :3], "delta_phi": motion[..., 3:]}, states
+
+
+def count_parameters(model: nn.Module) -> int:
+    return sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)

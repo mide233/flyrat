@@ -3,7 +3,7 @@
 - 论文：TIO-Former: Ultra-Lightweight 6-Directional ToF-Inertial Odometry for
   Nano-UAVs via a Streaming Causal Transformer（arXiv:2609.17198）
 - 代码目录：`research/tio_former/`
-- 状态：M0–M2 完成，M3 待开始
+- 状态：M0–M3 完成，M4 待开始
 - 最后更新：2026-11-08
 
 ## 1. 目标与边界
@@ -267,7 +267,7 @@ scene_id, seq_id, traj_type, split
 ## 9. 当前进度
 
 - M0 完成：目录、配置、SE(3)/ToF/轨迹/IMU 工具、NPZ 数据容器和测试。
-  `python3 -m pytest -q` 共 26 项通过。
+  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q` 共 31 项通过。
 - M1 完成：四个场景生成器、4 向 ToF rig、Gazebo 轨迹播放插件、
   单序列 headless 录制与 8×8 后处理。
 - M1 实测（`corridor_demo`）：182 帧、12.07 s、1.80 m；4×8×8 @ 15 Hz；
@@ -277,4 +277,11 @@ scene_id, seq_id, traj_type, split
   146,265 帧**。随机划分 train/val/test = 165/56/103 序列；四场景有效
   zone 比例 75.2%–97.0%（总体 85.7%）。索引输出 `data/index.csv`、
   `data/splits.json`、`data/stats.json`、`data/report.md`。
+- M3 完成：`tio_former/models/tio_former.py` 实现论文的 ToF 可靠性编码、
+  4 视角共享 CNN + view embedding、view Transformer、IMU query 的 directional
+  cross-attention、Local KV + Chunk-FIFO 流式 Transformer 和增量位姿头；
+  `losses.py` 实现逐步、多视界、尺度与残差损失；`torch_dataset.py` 提供窗口
+  数据集。模型 **1,129,542 参数**，流式与全序列因果输出一致。
+  单序列 300 步过拟合损失 0.2658 → 0.0045（**−98.3%**），检查点
+  `checkpoints/overfit_sequence.pt`（不提交）。
 - 运行说明见 `research/tio_former/README.md`。

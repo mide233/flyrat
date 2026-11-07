@@ -16,7 +16,11 @@ The method uses 4× VL53L5CX 8×8 ToF arrays (front / left / right / down) and a
   全量数据生成与索引。实际 **324 序列 / 9,728.9 s / 2,081.6 m /
   146,265 帧**；四场景有效 zone 比例 75.2%–97.0%（总体 85.7%）；
   随机划分 train/val/test = 165/56/103 序列。
-- M3–M5（模型、训练、报告）尚未开始。
+- **M3 完成**：PyTorch 模型（ToF 编码、4 视角 Transformer、IMU 引导
+  cross-attention、Local KV + Chunk-FIFO 流式 Transformer、位姿头）、论文全部
+  损失项、流式/全序列因果一致性测试、单序列过拟合。模型 1,129,542 参数；
+  过拟合 300 步损失 0.2658 → 0.0045（−98.3%）。
+- M4–M5（全量训练、评估、消融、报告）尚未开始。
 
 ## 依赖
 
@@ -113,12 +117,30 @@ python3 scripts/build_dataset_index.py
 
 数据集容器当前为 NPZ；HDF5 因训练环境未安装 h5py 而推迟到后续阶段。
 
+## 模型与过拟合检查（M3）
+
+```bash
+# 训练依赖（多卡环境按需安装）
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt -r requirements-train.txt
+
+# 单序列过拟合，验证模型/损失/数据管线
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/overfit_sequence.py \
+  --sequence data/processed/train_corridor_0000.npz --steps 300
+```
+
+检查点写入 `checkpoints/`（不提交）。M3 实测：1,129,542 参数；300 步损失
+0.2658 → 0.0045（−98.3%）。
+
 ## 测试
 
 ```bash
 cd research/tio_former
-python3 -m pytest -q
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
 ```
+
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` 用于避开 ROS Jazzy 注入的 pytest11 插件。
 
 ## 目录
 
