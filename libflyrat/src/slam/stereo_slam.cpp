@@ -1,195 +1,266 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+
 #include "flyrat/slam/stereo_slam.hpp"
 
-#include <cstdio>
+#include <algorithm>
+#include <atomic>
+#include <cmath>
+#include <fstream>
+#include <iomanip>
 #include <mutex>
 #include <utility>
 
-#include <System.h>
-#include <Tracking.h>
+#include <Eigen/StdVector>
+#include <opencv2/imgproc.hpp>
+
+#include "estimator/estimator.h"
+#include "estimator/parameters.h"
 
 namespace flyrat::slam {
 
 namespace {
 
-State map_state(int state)
+std::atomic<bool> g_estimator_in_use { false };
+
+SlamError make_error(const std::string& prefix, const std::exception& error)
 {
-    switch (state) {
-    case ORB_SLAM3::Tracking::OK:
-    case ORB_SLAM3::Tracking::OK_KLT:
-        return State::kTracking;
-    case ORB_SLAM3::Tracking::RECENTLY_LOST:
-        return State::kRecentlyLost;
-    case ORB_SLAM3::Tracking::LOST:
-        return State::kLost;
-    case ORB_SLAM3::Tracking::SYSTEM_NOT_READY:
-    case ORB_SLAM3::Tracking::NO_IMAGES_YET:
-    case ORB_SLAM3::Tracking::NOT_INITIALIZED:
-    default:
-        return State::kNotInitialized;
+    return SlamError(prefix + ": " + error.what());
+}
+
+cv::Mat to_gray(const cv::Mat& image)
+{
+    if (image.empty()) {
+        return {};
     }
+    if (image.type() == CV_8UC1) {
+        // VINS keeps prev_img as a shallow reference for optical flow, so the
+        // adapter owns a copy and callers may safely reuse their buffers.
+        return image.clone();
+    }
+    cv::Mat gray;
+    if (image.type() == CV_8UC3) {
+        cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+    } else if (image.type() == CV_8UC4) {
+        cv::cvtColor(image, gray, cv::COLOR_BGRA2GRAY);
+    } else {
+        throw SlamError("SLAM images must be 8-bit mono, BGR or BGRA");
+    }
+    return gray;
 }
 
 } // namespace
 
-struct StereoSlam::Impl {
-    Options options;
-    std::unique_ptr<ORB_SLAM3::System> system;
-    std::mutex mutex;
-    bool shut_down = false;
-
-    Result track(const cv::Mat& left, const cv::Mat& right, double timestamp_s,
-        const std::vector<ImuSample>* imu)
+class StereoSlam::Impl {
+public:
+    explicit Impl(Options options)
+        : config_path_(std::move(options.config_path))
     {
-        if (shut_down) {
-            throw SlamError("track() called after shutdown()");
+        if (config_path_.empty()) {
+            throw SlamError("VINS config path is empty");
         }
-        if (left.empty() || right.empty()) {
-            throw SlamError("track() received an empty stereo image");
-        }
-        if (left.channels() != 1 && left.channels() != 3 && left.channels() != 4) {
-            throw SlamError("left image must have 1, 3 or 4 channels");
-        }
-        if (right.channels() != 1 && right.channels() != 3 && right.channels() != 4) {
-            throw SlamError("right image must have 1, 3 or 4 channels");
-        }
-        if (left.size() != right.size()) {
-            throw SlamError("left and right image sizes differ");
+        if (g_estimator_in_use.exchange(true)) {
+            throw SlamError(
+                "only one StereoSlam instance may be alive per process "
+                "(VINS-Fusion uses global parameters)");
         }
 
-        std::vector<ORB_SLAM3::IMU::Point> points;
-        if (imu != nullptr && options.mode == Mode::kImuStereo) {
-            points.reserve(imu->size());
-            for (const ImuSample& sample : *imu) {
-                points.emplace_back(
-                    static_cast<float>(sample.accel.x()),
-                    static_cast<float>(sample.accel.y()),
-                    static_cast<float>(sample.accel.z()),
-                    static_cast<float>(sample.gyro.x()),
-                    static_cast<float>(sample.gyro.y()),
-                    static_cast<float>(sample.gyro.z()),
-                    sample.timestamp);
+        try {
+            readParameters(config_path_);
+            if (!USE_IMU) {
+                throw SlamError("VINS config must enable IMU (imu: 1)");
             }
+            if (!STEREO || NUM_OF_CAM != 2) {
+                throw SlamError("VINS config must use two cameras (num_of_cam: 2)");
+            }
+            // The adapter feeds measurements synchronously. Running VINS's
+            // background consumer thread would make shutdown and reset
+            // non-deterministic.
+            MULTIPLE_THREAD = 0;
+            estimator_ = std::make_unique<Estimator>();
+            estimator_->setParameter();
+        } catch (const SlamError&) {
+            g_estimator_in_use.store(false);
+            throw;
+        } catch (const std::exception& error) {
+            g_estimator_in_use.store(false);
+            throw make_error("failed to initialize VINS-Fusion", error);
+        }
+    }
+
+    ~Impl()
+    {
+        shutdown();
+    }
+
+    Result track(const cv::Mat& left, const cv::Mat& right, double timestamp,
+        const std::vector<ImuSample>& imu)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!estimator_) {
+            throw SlamError("StereoSlam has been shut down");
+        }
+        if (!std::isfinite(timestamp)) {
+            throw SlamError("SLAM timestamp is not finite");
+        }
+        if (last_frame_timestamp_ >= 0.0 && timestamp <= last_frame_timestamp_) {
+            throw SlamError("SLAM timestamps must advance");
+        }
+        if (imu.empty()) {
+            throw SlamError("at least one IMU sample is required per frame");
         }
 
-        const Sophus::SE3f Tcw = system->TrackStereo(left, right, timestamp_s, points);
+        const cv::Mat gray_left = to_gray(left);
+        const cv::Mat gray_right = to_gray(right);
+        if (gray_left.empty() || gray_right.empty()) {
+            throw SlamError("SLAM received an empty stereo image");
+        }
+        if (gray_left.size() != gray_right.size()) {
+            throw SlamError("left/right SLAM image sizes do not match");
+        }
+        if (gray_left.cols != COL || gray_left.rows != ROW) {
+            throw SlamError("SLAM image size does not match VINS config");
+        }
 
+        std::vector<ImuSample> samples = imu;
+        std::sort(samples.begin(), samples.end(),
+            [](const ImuSample& a, const ImuSample& b) {
+                return a.timestamp < b.timestamp;
+            });
+        for (const ImuSample& sample : samples) {
+            if (!std::isfinite(sample.timestamp) ||
+                !sample.accel.allFinite() || !sample.gyro.allFinite()) {
+                throw SlamError("SLAM received a non-finite IMU sample");
+            }
+            estimator_->inputIMU(sample.timestamp, sample.accel, sample.gyro);
+        }
+        estimator_->inputImage(timestamp, gray_left, gray_right);
+        last_frame_timestamp_ = timestamp;
+
+        return make_result(timestamp);
+    }
+
+    void reset()
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!estimator_) {
+            throw SlamError("StereoSlam has been shut down");
+        }
+        estimator_->clearState();
+        estimator_->setParameter();
+        was_tracking_ = false;
+        last_frame_timestamp_ = -1.0;
+        trajectory_.clear();
+    }
+
+    void shutdown()
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (estimator_) {
+            estimator_.reset();
+            g_estimator_in_use.store(false);
+        }
+    }
+
+    void saveTrajectory(const std::string& path) const
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (path.empty()) {
+            throw SlamError("trajectory path is empty");
+        }
+        std::ofstream output(path);
+        if (!output) {
+            throw SlamError("cannot open trajectory file: " + path);
+        }
+        output << std::setprecision(12);
+        for (const TrajectorySample& sample : trajectory_) {
+            const Eigen::Quaterniond q(sample.pose.block<3, 3>(0, 0));
+            output << sample.timestamp << ' '
+                   << sample.pose(0, 3) << ' '
+                   << sample.pose(1, 3) << ' '
+                   << sample.pose(2, 3) << ' '
+                   << q.x() << ' ' << q.y() << ' ' << q.z() << ' ' << q.w()
+                   << '\n';
+        }
+    }
+
+private:
+    struct TrajectorySample {
+        double timestamp = 0.0;
+        Eigen::Matrix4d pose = Eigen::Matrix4d::Identity();
+    };
+
+    Result make_result(double timestamp)
+    {
         Result result;
-        result.timestamp = timestamp_s;
-        result.state = map_state(system->GetTrackingState());
-        const bool tracked = result.state == State::kTracking;
-        result.pose.valid = tracked;
+        result.timestamp = timestamp;
 
-        if (tracked) {
-            const Sophus::SE3f Twc = Tcw.inverse();
-            const Eigen::Matrix3f R = Twc.rotationMatrix();
-            const Eigen::Vector3f t = Twc.translation();
-            if (!R.allFinite() || !t.allFinite()) {
-                result.pose.valid = false;
-            } else {
-                result.pose.position = Eigen::Vector3d(
-                    static_cast<double>(t.x()),
-                    static_cast<double>(t.y()),
-                    static_cast<double>(t.z()));
-                const Eigen::Matrix3d Rd = R.cast<double>();
-                result.pose.orientation = Eigen::Quaterniond(Rd).normalized();
+        if (estimator_->solver_flag == Estimator::NON_LINEAR &&
+            estimator_->frame_count >= 0 && estimator_->frame_count <= WINDOW_SIZE) {
+            Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+            estimator_->getPoseInWorldFrame(T);
+            const Eigen::Matrix3d rotation = T.block<3, 3>(0, 0);
+            const Eigen::Vector3d translation = T.block<3, 1>(0, 3);
+            if (rotation.allFinite() && translation.allFinite() &&
+                (rotation.transpose() * rotation - Eigen::Matrix3d::Identity()).norm() < 1e-3) {
+                Eigen::Quaterniond q(rotation);
+                q.normalize();
+                result.state = State::kTracking;
+                result.pose.position = translation;
+                result.pose.orientation = q;
+                result.pose.valid = true;
+                was_tracking_ = true;
+
+                TrajectorySample sample;
+                sample.timestamp = timestamp;
+                sample.pose = T;
+                trajectory_.push_back(sample);
+                return result;
             }
+        }
+
+        if (was_tracking_ && estimator_->solver_flag == Estimator::INITIAL) {
+            result.state = State::kLost;
+            was_tracking_ = false;
+        } else {
+            result.state = State::kNotInitialized;
         }
         return result;
     }
+
+    std::string config_path_;
+    std::unique_ptr<Estimator> estimator_;
+    bool was_tracking_ = false;
+    double last_frame_timestamp_ = -1.0;
+    std::vector<TrajectorySample, Eigen::aligned_allocator<TrajectorySample>> trajectory_;
+    mutable std::mutex mutex_;
 };
 
-StereoSlam::StereoSlam(const Options& options)
-    : impl_(std::make_unique<Impl>())
+StereoSlam::StereoSlam(Options options)
+    : impl_(std::make_unique<Impl>(std::move(options)))
 {
-    if (options.vocabulary_path.empty()) {
-        throw SlamError("SLAM vocabulary path is empty");
-    }
-    if (options.settings_path.empty()) {
-        throw SlamError("SLAM settings path is empty");
-    }
-
-    // The vocabulary loader returns false without saying why; checking the file
-    // up front gives a useful message and avoids a 139 MB load attempt on a
-    // typo. The settings file is a YAML document, not a FileStorage archive, so
-    // only existence is checked here.
-    {
-        FILE* file = std::fopen(options.vocabulary_path.c_str(), "rb");
-        if (file == nullptr) {
-            throw SlamError("cannot open SLAM vocabulary: " + options.vocabulary_path);
-        }
-        std::fclose(file);
-    }
-    {
-        FILE* file = std::fopen(options.settings_path.c_str(), "rb");
-        if (file == nullptr) {
-            throw SlamError("cannot open SLAM settings: " + options.settings_path);
-        }
-        std::fclose(file);
-    }
-
-    impl_->options = options;
-    const ORB_SLAM3::System::eSensor sensor = options.mode == Mode::kImuStereo
-        ? ORB_SLAM3::System::IMU_STEREO
-        : ORB_SLAM3::System::STEREO;
-    try {
-        impl_->system = std::make_unique<ORB_SLAM3::System>(
-            options.vocabulary_path, options.settings_path, sensor, false, 0, "flyrat");
-    } catch (const std::exception& error) {
-        throw SlamError(std::string("failed to initialise ORB-SLAM3: ") + error.what());
-    }
 }
 
-StereoSlam::~StereoSlam()
-{
-    try {
-        shutdown();
-    } catch (...) {
-        // Destructors must not throw.
-    }
-}
+StereoSlam::~StereoSlam() = default;
 
-Result StereoSlam::track(const cv::Mat& left, const cv::Mat& right, double timestamp_s)
+Result StereoSlam::track(const cv::Mat& left, const cv::Mat& right,
+    double timestamp, const std::vector<ImuSample>& imu)
 {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-    return impl_->track(left, right, timestamp_s, nullptr);
-}
-
-Result StereoSlam::track(const cv::Mat& left, const cv::Mat& right, double timestamp_s,
-    const std::vector<ImuSample>& imu)
-{
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-    return impl_->track(left, right, timestamp_s, &imu);
+    return impl_->track(left, right, timestamp, imu);
 }
 
 void StereoSlam::reset()
 {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-    if (impl_->shut_down) {
-        return;
-    }
-    impl_->system->Reset();
+    impl_->reset();
 }
 
 void StereoSlam::shutdown()
 {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-    if (impl_->shut_down) {
-        return;
-    }
-    impl_->shut_down = true;
-    if (impl_->system) {
-        impl_->system->Shutdown();
-    }
+    impl_->shutdown();
 }
 
-void StereoSlam::saveTrajectory(const std::string& path)
+void StereoSlam::saveTrajectory(const std::string& path) const
 {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-    if (!impl_->shut_down) {
-        throw SlamError("saveTrajectory() requires shutdown() first");
-    }
-    impl_->system->SaveTrajectoryTUM(path);
+    impl_->saveTrajectory(path);
 }
 
 } // namespace flyrat::slam

@@ -130,22 +130,31 @@ else()
   option(FLYRAT_BUILD_TOOLS "Build libflyrat command line tools" OFF)
 endif()
 
-# ORB-SLAM3 stereo / stereo-inertial SLAM. Off by default because it pulls in
-# OpenCV, Boost.Serialization, OpenSSL and a 139 MB vocabulary file.
-option(FLYRAT_BUILD_SLAM "Build the ORB-SLAM3 stereo SLAM module" OFF)
-# The ORB-SLAM3 text vocabulary is 139 MB and is not vendored. Point this at a
-# copy of ORBvoc.txt to make test_slam_api load a real vocabulary and config.
-set(FLYRAT_ORB_VOCAB "" CACHE FILEPATH "Path to the ORB-SLAM3 ORBvoc.txt vocabulary")
+# VINS-Fusion stereo-inertial SLAM. Off by default because it pulls in OpenCV,
+# Ceres, Eigen and Boost headers. The vendored core lives under
+# third_party/vins_fusion and is built as a plain, ROS-free static library.
+option(FLYRAT_BUILD_SLAM "Build the VINS-Fusion stereo-inertial SLAM module" OFF)
 if(FLYRAT_BUILD_SLAM)
-  add_subdirectory(third_party/orb_slam3)
+  find_package(OpenCV REQUIRED)
+  find_package(Ceres REQUIRED)
+  add_subdirectory(third_party/vins_fusion)
 
   add_library(flyrat_slam src/slam/stereo_slam.cpp)
   add_library(flyrat::slam ALIAS flyrat_slam)
   target_include_directories(flyrat_slam PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
-  target_link_libraries(flyrat_slam PUBLIC flyrat::orb_slam3 Threads::Threads)
+  target_include_directories(flyrat_slam PUBLIC ${OpenCV_INCLUDE_DIRS})
+  target_link_libraries(flyrat_slam
+    PUBLIC ${OpenCV_LIBS} Eigen3::Eigen
+    PRIVATE flyrat_vins_core Threads::Threads)
   target_compile_options(flyrat_slam PRIVATE -Wall -Wextra)
+
+  install(FILES
+    third_party/vins_fusion/LICENSE
+    third_party/vins_fusion/README.md
+    DESTINATION share/doc/flyrat)
+  install(DIRECTORY configs/vins_fusion DESTINATION share/flyrat/configs)
 endif()
 
 if(FLYRAT_BUILD_TOOLS)
@@ -219,11 +228,8 @@ if(FLYRAT_BUILD_TESTS)
     add_executable(test_slam_api tests/test_slam_api.cpp)
     target_link_libraries(test_slam_api PRIVATE flyrat_slam)
     target_compile_options(test_slam_api PRIVATE -Wall -Wextra)
-    if(FLYRAT_ORB_VOCAB)
-      target_compile_definitions(test_slam_api PRIVATE
-        FLYRAT_TEST_ORB_VOCAB="${FLYRAT_ORB_VOCAB}"
-        FLYRAT_TEST_ORB_SETTINGS="${CMAKE_CURRENT_SOURCE_DIR}/configs/orb_slam3/uvc_640x480.yaml")
-    endif()
+    target_compile_definitions(test_slam_api PRIVATE
+      FLYRAT_TEST_VINS_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/configs/vins_fusion/uvc_640x480_imu.yaml")
     add_test(NAME test_slam_api COMMAND test_slam_api)
   endif()
 endif()

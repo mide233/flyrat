@@ -3,7 +3,7 @@ slam_node:
     left_topic: /flyrat/sensors/stereo/left/image_raw
     right_topic: /flyrat/sensors/stereo/right/image_raw
     imu_topic: /flyrat/sensors/imu
-    mode: imu_stereo
+    vins_config: ""
     world_frame: slam_map
     body_frame: imu_link
     camera_frame: camera_left_optical_frame

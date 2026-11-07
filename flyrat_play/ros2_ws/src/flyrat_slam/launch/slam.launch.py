@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Start headless ORB-SLAM3 IMU-stereo on the forwarded real-vehicle topics.
-# Start flyrat_sensors first, and pass vocabulary_path explicitly because the
-# 139 MB ORB vocabulary is intentionally not stored in this repository.
+# Start headless VINS-Fusion stereo-inertial SLAM on the forwarded real-vehicle
+# topics. Start flyrat_sensors first; the VINS configuration is installed with
+# this package and can be overridden with vins_config:=/path/to/config.yaml.
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -11,12 +11,10 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    vocabulary_path = LaunchConfiguration('vocabulary_path')
-    settings_path = LaunchConfiguration('settings_path')
+    vins_config = LaunchConfiguration('vins_config')
     left_topic = LaunchConfiguration('left_topic')
     right_topic = LaunchConfiguration('right_topic')
     imu_topic = LaunchConfiguration('imu_topic')
-    mode = LaunchConfiguration('mode')
     world_frame = LaunchConfiguration('world_frame')
     body_frame = LaunchConfiguration('body_frame')
     camera_frame = LaunchConfiguration('camera_frame')
@@ -25,16 +23,13 @@ def generate_launch_description():
 
     params_file = PathJoinSubstitution(
         [FindPackageShare('flyrat_slam'), 'config', 'slam.yaml'])
-    default_settings = PathJoinSubstitution(
+    default_vins_config = PathJoinSubstitution(
         [FindPackageShare('flyrat_slam'), 'config', 'uvc_640x480_imu.yaml'])
 
     return LaunchDescription([
         DeclareLaunchArgument(
-            'vocabulary_path', default_value='',
-            description='Path to ORBvoc.txt. Required; not stored in the repository.'),
-        DeclareLaunchArgument(
-            'settings_path', default_value=default_settings,
-            description='ORB-SLAM3 camera/IMU YAML settings file.'),
+            'vins_config', default_value=default_vins_config,
+            description='VINS-Fusion stereo-inertial YAML configuration.'),
         DeclareLaunchArgument(
             'left_topic',
             default_value='/flyrat/sensors/stereo/left/image_raw'),
@@ -42,9 +37,6 @@ def generate_launch_description():
             'right_topic',
             default_value='/flyrat/sensors/stereo/right/image_raw'),
         DeclareLaunchArgument('imu_topic', default_value='/flyrat/sensors/imu'),
-        DeclareLaunchArgument(
-            'mode', default_value='imu_stereo',
-            description="SLAM mode: 'imu_stereo' or 'stereo'."),
         DeclareLaunchArgument('world_frame', default_value='slam_map'),
         DeclareLaunchArgument(
             'body_frame', default_value='imu_link',
@@ -64,12 +56,10 @@ def generate_launch_description():
             parameters=[
                 params_file,
                 {
-                    'vocabulary_path': vocabulary_path,
-                    'settings_path': settings_path,
+                    'vins_config': vins_config,
                     'left_topic': left_topic,
                     'right_topic': right_topic,
                     'imu_topic': imu_topic,
-                    'mode': mode,
                     'world_frame': world_frame,
                     'body_frame': body_frame,
                     'camera_frame': camera_frame,

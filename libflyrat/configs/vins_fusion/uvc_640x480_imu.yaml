@@ -1,0 +1,51 @@
+%YAML:1.0
+---
+# VINS-Fusion stereo-inertial configuration for the Flyrat UVC stereo module.
+# body_T_cam0 and body_T_cam1 map camera coordinates into the IMU/body frame.
+# The camera calibration files are resolved relative to this file.
+
+imu: 1
+num_of_cam: 2
+cam0_calib: "cam0_pinhole.yaml"
+cam1_calib: "cam1_pinhole.yaml"
+image_width: 640
+image_height: 480
+
+estimate_extrinsic: 0
+body_T_cam0: !!opencv-matrix
+   rows: 4
+   cols: 4
+   dt: d
+   data: [0.0071125474, -0.0204711295, 0.9997651447, 0.0403119615,
+          0.9999291336, -0.0093993364, -0.0073061743, -0.0446031890,
+          0.0095466946, 0.9997462605, 0.0204028255, 0.0089198662,
+          0.0, 0.0, 0.0, 1.0]
+
+body_T_cam1: !!opencv-matrix
+   rows: 4
+   cols: 4
+   dt: d
+   data: [-0.0029757757, -0.0204062813, 0.9997873416, 0.0404613143,
+          0.9999515233, -0.0094447409, 0.0027834914, 0.0201429824,
+          0.0093859318, 0.9997471584, 0.0204333975, 0.0095491233,
+          0.0, 0.0, 0.0, 1.0]
+
+multiple_thread: 0
+max_cnt: 150
+min_dist: 30
+freq: 0
+F_threshold: 1.0
+show_track: 0
+flow_back: 1
+
+max_solver_time: 0.04
+max_num_iterations: 8
+keyframe_parallax: 10.0
+
+acc_n: 0.0029907713760960264
+gyr_n: 8.814974125038311e-05
+acc_w: 0.00015441665140112607
+gyr_w: 4.09314724371554e-06
+g_norm: 9.81
+estimate_td: 0
+td: 0.0

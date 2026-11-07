@@ -5,7 +5,7 @@
 
 - 实机传感器转发：[`hardware/sensor_forwarding.md`](hardware/sensor_forwarding.md)
 - Gazebo + Betaflight SITL：[`simulation/betaflight_sitl_gazebo.md`](simulation/betaflight_sitl_gazebo.md)
-- ORB-SLAM3：[`slam/orb_slam3.md`](slam/orb_slam3.md)
+- VINS-Fusion：[`slam/vins_fusion.md`](slam/vins_fusion.md)
 - 开发镜像与 CI：[`development/docker_image.md`](development/docker_image.md)
 - 项目进度与指标：[`status/project_status.md`](status/project_status.md)
 
@@ -21,7 +21,7 @@
 | `libflyrat` | Eigen3、OSQP、pthread |
 | ROS 2 | ROS 2 Jazzy、`colcon`、`ros-dev-tools` |
 | 仿真 | Gazebo Harmonic、`pkg-config gz-sim8`、Python 3 |
-| ORB-SLAM3 | OpenCV 4（core/imgproc/features2d/calib3d/imgcodecs/videoio）、Boost.Serialization、OpenSSL |
+| VINS-Fusion | OpenCV 4（core/imgproc/features2d/calib3d/imgcodecs/videoio）、Ceres 2.2、Eigen3、Boost headers |
 | 实机交叉编译 | `aarch64-linux-gnu-gcc/g++`、目标设备 `adb` |
 | 开发容器 | Docker、Docker Compose、可选 buildx |
 
@@ -35,8 +35,8 @@ sudo apt install build-essential cmake pkg-config libeigen3-dev libosqp-dev
 
 - ROS 2 的 `setup.bash` 必须在 `bash` 中 source。zsh 下直接 source 会因
   `BASH_SOURCE` 未定义而失败；使用 `bash -lc '...'`。
-- 泰山派（RK3566，Buildroot）没有 OpenCV，内存约 2 GB，ORB-SLAM3 只在开发机
-  构建和运行。
+- 泰山派（RK3566，Buildroot）没有 OpenCV/Ceres，内存约 2 GB，VINS-Fusion 只在
+  开发机构建和运行。
 - 仿真和实机使用不同的 DDS/网络环境时，先确认 `ROS_DOMAIN_ID` 一致。
 
 ## 2. 一键构建
@@ -94,8 +94,7 @@ ctest --test-dir libflyrat/build --output-on-failure
 |---|---|---|
 | `FLYRAT_BUILD_TESTS` | 独立构建 ON | 构建单元测试 |
 | `FLYRAT_BUILD_TOOLS` | 独立构建 ON | 构建 bench 工具 |
-| `FLYRAT_BUILD_SLAM` | OFF | 构建 ORB-SLAM3 与 `slam_bench` |
-| `FLYRAT_ORB_VOCAB` | 空 | ORB 词袋路径，供测试使用 |
+| `FLYRAT_BUILD_SLAM` | OFF | 构建 VINS-Fusion 与 `slam_bench` |
 
 找不到 OSQP 时配置会直接报错，需要安装 `libosqp-dev` 或提供
 `osqpConfig.cmake`。
@@ -141,7 +140,7 @@ ctest --test-dir libflyrat/build --output-on-failure
 `--gray` 输出 GRAY8，`--mjpeg` 使用 MPP 硬解，`--save-nv12` 保存原始 NV12，
 `--save DIR` 保存左右图。
 
-`slam_bench`：ORB-SLAM3 回放与实时测试，构建方式见第 7 节。
+`slam_bench`：VINS-Fusion 回放测试，构建方式见第 7 节。
 
 ## 4. flyrat_pilot 与传感器转发
 
@@ -280,7 +279,7 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 |---|---|
 | `flyrat_sensors_interfaces` | `TofZone`、`TofFrame` 自定义消息 |
 | `flyrat_sensors` | TCP 接收、MJPEG 解码、ROS 发布 |
-| `flyrat_slam` | ORB-SLAM3 IMU-stereo 节点、轨迹、TF 和状态 |
+| `flyrat_slam` | VINS-Fusion 双目惯性节点、轨迹、TF 和状态 |
 | `flyrat_msp` | MSP 协议接入 |
 | `flyrat_control` | 控制节点与 SITL launch |
 
@@ -294,7 +293,7 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 `imu_intrinsics_enable` 后，节点按 Kalibr 的 scale/misalignment 模型修正
 加速度和陀螺仪，并从 IMU 时间戳中扣除 `imu_time_offset`（相机到 IMU 的
 固定时间差，约 3.8 ms）。YAML 中 `T_i_b` 为单位阵；零偏不写入配置，由
-ORB-SLAM3 在线估计。关闭该功能后发布的是未修正的原始刻度数据。
+VINS-Fusion 在线估计。关闭该功能后发布的是未修正的原始刻度数据。
 
 ## 6. Gazebo + Betaflight SITL
 
@@ -356,22 +355,22 @@ ros2 launch flyrat_control flyrat_sitl.launch.py \
 仿真细节、端口和话题见
 [`simulation/betaflight_sitl_gazebo.md`](simulation/betaflight_sitl_gazebo.md)。
 
-## 7. ORB-SLAM3
+## 7. VINS-Fusion
 
 ### 7.1 依赖与构建
 
 ```sh
-sudo apt install libopencv-dev libboost-serialization-dev libssl-dev
+sudo apt install libopencv-dev libeigen3-dev libboost-dev libceres-dev
 
 cmake -S libflyrat -B libflyrat/build-slam \
   -DFLYRAT_BUILD_SLAM=ON \
-  -DFLYRAT_ORB_VOCAB=/path/to/ORBvoc.txt \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build libflyrat/build-slam -j
 ```
 
-`FLYRAT_ORB_VOCAB` 可省略，运行时通过 `Options::vocabulary_path` 或
-`slam_bench --vocab` 指定。词袋文件不入库。
+`FLYRAT_BUILD_SLAM` 现在构建 VINS-Fusion 双目惯性 SLAM。核心代码 vendored 在
+`libflyrat/third_party/vins_fusion/`，固定上游 commit `be55a93`，许可证为
+GPL-3.0（见该目录的 `LICENSE` 和 `README.md`）。不再需要视觉词袋。
 
 ### 7.2 测试
 
@@ -379,32 +378,39 @@ cmake --build libflyrat/build-slam -j
 ctest --test-dir libflyrat/build-slam --output-on-failure
 ```
 
-配置了 `FLYRAT_ORB_VOCAB` 时，`test_slam_api` 会实际加载词袋并构造
-`ORB_SLAM3::System`；未配置时只验证参数校验和状态枚举。
+启用 SLAM 后增加 `test_slam_api`，覆盖：空配置、缺失配置、非双目惯性配置、
+空图、尺寸不匹配、关闭后继续调用、空轨迹写入。合法配置指
+`libflyrat/configs/vins_fusion/uvc_640x480_imu.yaml`。
 
 ### 7.3 slam_bench
 
+`slam_bench` 需要 VINS 配置和 IMU CSV。IMU CSV 无表头，列顺序为：
+
+```text
+timestamp,ax,ay,az,gx,gy,gz
+```
+
+时间戳单位为秒，加速度为 m/s²，角速度为 rad/s。图像帧时间戳从第一帧 IMU
+时间戳开始，按 `--fps` 递增。
+
 ```sh
 ./libflyrat/build-slam/slam_bench \
-  --vocab /path/to/ORBvoc.txt \
-  --settings libflyrat/configs/orb_slam3/uvc_640x480.yaml \
+  --config libflyrat/configs/vins_fusion/uvc_640x480_imu.yaml \
+  --imu /path/to/imu.csv \
   --left /path/to/left --right /path/to/right \
   --fps 30 --save-traj /tmp/traj.txt
 ```
 
-也支持左右拼接视频 `--video FILE` 和实时 V4L2 `--sbs /dev/video0`。
-IMU 模式加 `--mode imu-stereo`。`uvc_640x480_imu.yaml` 的内参、双目外参、
-`IMU.T_b_c1` 和 IMU 噪声已按 `kalibr_ws/` 的 Aprilgrid/Allan 结果填写；
-IMU 的 scale/misalignment 由 ROS 接收节点按
-`flyrat_sensors/config/imu_intrinsics.yaml` 在发布前修正。
+左右拼接视频用 `--video FILE`。`--realtime` 按 `--fps` 限速，`--max-frames` 和
+`--seconds` 限制回放长度。实时 UVC 采集请使用 ROS 2 节点，不再提供 `--sbs`
+模式。
 
-接口与限制见 [`slam/orb_slam3.md`](slam/orb_slam3.md)。
+接口与限制见 [`slam/vins_fusion.md`](slam/vins_fusion.md)。
 
 ### 7.4 ROS 2 SLAM 节点
 
-`flyrat_slam` 把实机转发的双目和 IMU 直接接入 `flyrat::slam::StereoSlam`，
-默认使用 IMU-stereo 模式，也可以用 `mode:=stereo` 只跑纯双目。先按第 4.3 节
-启动设备转发和 `flyrat_sensors`。
+`flyrat_slam` 把实机转发的双目和 IMU 接入 `flyrat::slam::StereoSlam`，只支持
+双目 + IMU。先按第 4.3 节启动设备转发和 `flyrat_sensors`。
 
 构建：
 
@@ -420,74 +426,48 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 ```sh
 bash -lc 'source /opt/ros/jazzy/setup.bash && \
   source /workspaces/flyrat/flyrat_play/ros2_ws/install/setup.bash && \
-  ros2 launch flyrat_slam slam.launch.py \
-  vocabulary_path:=/workspaces/flyrat/playground/ORB_SLAM3/Vocabulary/ORBvoc.txt'
+  ros2 launch flyrat_slam slam.launch.py'
 ```
 
-`vocabulary_path` 必填，词袋文件不入库。`settings_path` 默认是包内安装的
-`uvc_640x480_imu.yaml`；`body_frame:=imu_link` 是默认机体坐标系；
-`trajectory_path:=/tmp/traj.txt` 可在退出时保存 TUM 轨迹。节点会发布动态
-`slam_map -> imu_link`、静态 `imu_link -> camera_left_optical_frame`，以及
-`camera_left_optical_frame -> camera_right_optical_frame`（来自
-`Stereo.T_c1_c2`）。其余参数见 `flyrat_slam/config/slam.yaml`。
+`vins_config` 默认是包内安装的 `uvc_640x480_imu.yaml`，可用
+`vins_config:=/path/to/config.yaml` 覆盖。`body_frame:=imu_link` 是默认机体
+坐标系；`trajectory_path:=/tmp/traj.txt` 可在退出时保存 TUM 轨迹。
 
-纯双目启动：
-
-```sh
-ros2 launch flyrat_slam slam.launch.py mode:=stereo \
-  vocabulary_path:=/workspaces/flyrat/playground/ORB_SLAM3/Vocabulary/ORBvoc.txt
-```
-
-`mode:=stereo` 时节点不订阅 IMU，ORB-SLAM3 使用 `Stereo` 模式。默认的
-`uvc_640x480_imu.yaml` 仍可用，IMU 噪声参数会被忽略；`IMU.T_b_c1` 仍用于
-静态 TF 和机体位姿。纯双目下 `slam_map` 会重定基到第一帧的 `imu_link`
-位姿，即 FLU（x 前、y 左、z 上），所以 Foxglove 里前进对应 +x、左移 +y、
-上升 +z。
-
-Foxglove 中建议把固定坐标系设为 `slam_map` 或 `imu_link`。`camera_left_optical_frame`
-是光学系，标定外参是倒置、光轴大致沿机体 +x（相机 +x≈机体 +y，+y≈机体 +z，
-+z≈机体 +x）；直接看它的轴时，机体滚转对应光学系的偏航，这是坐标系分解，
-不是 SLAM 错误。
-
-输出：
+节点发布：
 
 ```text
 /flyrat/slam/odometry   nav_msgs/Odometry，slam_map -> imu_link
 /flyrat/slam/path       nav_msgs/Path，机体轨迹
 /flyrat/slam/status     diagnostic_msgs/DiagnosticStatus，1 Hz
 /flyrat/slam/reset      std_srvs/Trigger
-/tf                     slam_map -> camera_left_optical_frame
+/tf                     slam_map -> imu_link（动态）
+                        imu_link -> camera_left_optical_frame（静态）
+                        imu_link -> camera_right_optical_frame（静态）
 ```
 
-Foxglove 预览：
+静态外参直接来自 VINS 配置的 `body_T_cam0` 和 `body_T_cam1`。
+`slam_map` 的坐标轴由 VINS 初始化定义：重力对齐，但初始 yaw 由第一帧图像/IMU
+窗口决定，不再沿用首帧相机系。Foxglove 中建议把固定坐标系设为
+`slam_map` 或 `imu_link`。
 
-```sh
-.script/foxglove.sh
-```
-
-默认 WebSocket 是 `ws://localhost:8765`。在 Foxglove 中打开该连接，添加 3D 面板
-显示 `/tf`、`/flyrat/slam/path` 和 `/flyrat/slam/odometry`，再添加两个 Image
-面板显示左右目话题，以及 Diagnostic 面板查看 `/flyrat/slam/status`。布局文件
-不入库，按需在本地保存。
-
-当前 `uvc_640x480_imu.yaml` 的内参、双目外参、`IMU.T_b_c1` 和 IMU 噪声来自
-`kalibr_ws/` 的实机标定；IMU scale/misalignment 在 `sensor_receiver_node`
-发布前按 `flyrat_sensors/config/imu_intrinsics.yaml` 修正，IMU 时间戳扣除
-`imu_time_offset`（约 3.8 ms）。ORB-SLAM3 只按 `float` 读取 YAML 矩阵，两个
-外参矩阵必须保持 `dt: f`，否则会在启动时因零四元数崩溃。静止桌面场景不足以
-稳定初始化，仍需实际运动和有纹理的视场验证跟踪。
+当前 `uvc_640x480_imu.yaml` 的内参、双目外参和 IMU 噪声来自 `kalibr_ws/` 的
+实机标定；`sensor_receiver_node` 在发布前按
+`flyrat_sensors/config/imu_intrinsics.yaml` 补偿 scale/misalignment，并从 IMU
+时间戳中扣除 `imu_time_offset`（约 3.8 ms），因此 VINS 配置使用 `td=0`。
+VINS 需要约 10 帧窗口并需要足够的运动/IMU 激励才能初始化，静止桌面场景通常
+会停留在 `NOT_INITIALIZED`。
 
 ### 7.5 一键 bringup
 
 `bringup.launch.py` 把 adb forward、设备端 forwarder、`sensor_receiver_node` 和
-`slam_node` 串成一条启动链，不再需要多个终端：
+`slam_node` 串成一条启动链：
 
 ```sh
 .script/bringup_real.sh                        # 传感器 + SLAM
-.script/bringup_real.sh mode:=stereo            # 纯双目，不订阅 IMU
 .script/bringup_real.sh start_foxglove:=true   # 再加 Foxglove bridge
 .script/bringup_real.sh start_slam:=false      # 只看传感器
 .script/bringup_real.sh start_adb_forward:=false start_device:=false  # 复用已有转发
+.script/bringup_real.sh vins_config:=/path/to/uvc_640x480_imu.yaml
 ```
 
 脚本会 source ROS 2 和 `flyrat_play/ros2_ws/install/setup.bash`，然后执行：
@@ -509,61 +489,10 @@ ros2 launch flyrat_slam bringup.launch.py
 - 使用脚本时，`Ctrl-C` 会停止设备端 forwarder 并删除 adb forward；直接
   `ros2 launch` 不会做这两步清理。
 
-词袋默认从 `FLYRAT_ORB_VOCAB` 或
-`playground/ORB_SLAM3/Vocabulary/ORBvoc.txt` 查找；`settings_path` 默认优先使用
-源码树的 `libflyrat/configs/orb_slam3/uvc_640x480_imu.yaml`，所以改外参后不需要
-重新 `colcon build`。找不到词袋时用 `vocabulary_path:=...` 显式指定。
-
-常用参数：
-
-```text
-adb_serial=            # 多设备时指定；默认用唯一连接的设备
-device_binary=/tmp/flyrat_sensor_forwarder
-local_port=5000
-device_port=5000
-start_device=true
-start_adb_forward=true
-start_sensors=true
-start_slam=true
-mode=imu_stereo        # 纯双目用 mode:=stereo
-camera_fps=60          # 标定录制用 20
-record=false           # true 时用 ros2 bag record 录传感器
-record_path=           # 空则 /tmp/flyrat_bags/<时间戳>
-record_topics=/flyrat/sensors/imu /flyrat/sensors/stereo/left/image_raw /flyrat/sensors/stereo/right/image_raw
-record_imu_only=false  # true 时只录 IMU（Allan 方差）
-record_storage=mcap
-record_duration=0      # 秒数或 30m/3h；>0 时倒计时并自动停止录制
-record_warmup=8        # 先等设备启动，再开始倒计时
-start_foxglove=false
-foxglove_port=8765
-stereo_color=false
-imu_accel_axis=none
-imu_gyro_axis=none
-trajectory_path=
-```
-
-`start_foxglove:=true` 需要安装 `ros-jazzy-foxglove-bridge`；否则保持默认，用
-`.script/foxglove.sh` 单独启动。
-
-录制由 `.script/bringup_real.sh` 启动，和 `ros2 launch` 平级，按 `Ctrl-C` 时
-脚本会给 `ros2 bag record` 发 `SIGTERM` 并等待它写完 MCAP。只录 IMU 做 Allan
-方差：
-
-```sh
-.script/bringup_real.sh start_slam:=false record:=true record_imu_only:=true \
-  record_duration:=3h
-```
-
-录双目 + IMU 做 Kalibr，相机降到 20 Hz：
-
-```sh
-.script/bringup_real.sh start_slam:=false camera_fps:=20 record:=true
-```
-
-默认写到 `/tmp/flyrat_bags/<时间戳>`，用 `record_path:=/path/to/bag` 指定；
-`record_duration` 结束后自动给录制进程发 SIGTERM 并写完 MCAP；录制停止后
-bringup 仍在运行，按 `Ctrl-C` 结束。`ros2 bag info /path/to/bag` 可检查消息数和
-频率。`record:=true` 不会传给 `bringup.launch.py`，它只是脚本参数。
+VINS 配置默认按以下顺序解析：显式 `vins_config:=...`、环境变量
+`FLYRAT_VINS_CONFIG`、源码树
+`libflyrat/configs/vins_fusion/uvc_640x480_imu.yaml`、安装目录。使用源码树路径
+时修改外参后不需要重新 `colcon build`。
 
 ## 8. Docker 与 CI
 
@@ -621,5 +550,5 @@ docker exec -it rat-dev-full bash
 | ROS 收不到数据 | 先确认 `adb forward --list`，再确认设备 forwarder 已监听 5000 |
 | ToF 全部 `distance_mm=0` | 确认 C/C++ 没有单独传 `VL53L5CX_DISABLE_*`，重新完整编译 |
 | ToF 初始化失败 | 确认四颗 LPn/INT 接线和 i2c2，检查地址是否被其他器件占用 |
-| SLAM 报词袋缺失 | 用 `--vocab` 或 `FLYRAT_ORB_VOCAB` 指向 `ORBvoc.txt` |
-| SLAM 配置错误 | 检查 `--settings` 的 YAML，当前实现会抛异常而不是退出进程 |
+| SLAM 报配置缺失 | 检查 `vins_config` / `--config` 指向的 YAML 和相机标定文件 |
+| SLAM 一直 NOT_INITIALIZED | 确认 IMU 在发布、时间戳单调，并给设备足够的运动/纹理激励 |

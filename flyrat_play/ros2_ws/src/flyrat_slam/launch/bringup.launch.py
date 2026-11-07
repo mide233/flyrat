@@ -11,7 +11,7 @@
 #
 # Usage:
 #   ros2 launch flyrat_slam bringup.launch.py \
-#     vocabulary_path:=/path/to/ORBvoc.txt
+#     vins_config:=/path/to/uvc_640x480_imu.yaml
 #
 # All other arguments have usable defaults; see the declared arguments below.
 import os
@@ -59,36 +59,18 @@ def _repo_file(relative_path):
     return None
 
 
-def _resolve_vocabulary(context):
-    explicit = _text(context, 'vocabulary_path')
+def _resolve_vins_config(context):
+    explicit = _text(context, 'vins_config')
     if explicit:
         return explicit
 
     candidates = [
-        os.environ.get('FLYRAT_ORB_VOCAB', '').strip(),
-        _repo_file('playground/ORB_SLAM3/Vocabulary/ORBvoc.txt'),
-        _repo_file('Vocabulary/ORBvoc.txt'),
+        os.environ.get('FLYRAT_VINS_CONFIG', '').strip(),
+        _repo_file('libflyrat/configs/vins_fusion/uvc_640x480_imu.yaml'),
     ]
     for candidate in candidates:
         if candidate and Path(candidate).is_file():
             return candidate
-
-    raise RuntimeError(
-        'ORB vocabulary not found. Pass vocabulary_path:=/path/to/ORBvoc.txt, '
-        'set FLYRAT_ORB_VOCAB, or place it at '
-        'playground/ORB_SLAM3/Vocabulary/ORBvoc.txt.')
-
-
-def _resolve_settings(context):
-    explicit = _text(context, 'settings_path')
-    if explicit:
-        return explicit
-
-    source = _repo_file('libflyrat/configs/orb_slam3/uvc_640x480_imu.yaml')
-    if source:
-        # Prefer the source tree so edits to the extrinsic take effect without
-        # rebuilding the ROS package.
-        return source
 
     return os.path.join(
         get_package_share_directory('flyrat_slam'),
@@ -191,12 +173,9 @@ def _launch_setup(context, *args, **kwargs):
         ))
 
     if start_slam:
-        vocabulary = _resolve_vocabulary(context)
-        settings = _resolve_settings(context)
+        vins_config = _resolve_vins_config(context)
         actions.append(LogInfo(
-            msg=f'[bringup] ORB vocabulary: {vocabulary}'))
-        actions.append(LogInfo(
-            msg=f'[bringup] SLAM settings: {settings}'))
+            msg=f'[bringup] VINS config: {vins_config}'))
         slam_launch = os.path.join(
             get_package_share_directory('flyrat_slam'),
             'launch',
@@ -206,9 +185,7 @@ def _launch_setup(context, *args, **kwargs):
             actions=[IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(slam_launch),
                 launch_arguments={
-                    'vocabulary_path': vocabulary,
-                    'settings_path': settings,
-                    'mode': LaunchConfiguration('mode'),
+                    'vins_config': vins_config,
                     'trajectory_path': LaunchConfiguration('trajectory_path'),
                 }.items(),
             )],
@@ -239,13 +216,10 @@ def _launch_setup(context, *args, **kwargs):
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
-            'vocabulary_path', default_value='',
-            description='ORBvoc.txt path. Defaults to FLYRAT_ORB_VOCAB or the '
-                        'repository copy under playground/ORB_SLAM3.'),
-        DeclareLaunchArgument(
-            'settings_path', default_value='',
-            description='ORB-SLAM3 settings YAML. Defaults to the source-tree '
-                        'uvc_640x480_imu.yaml, then the installed copy.'),
+            'vins_config', default_value='',
+            description='VINS stereo-inertial YAML. Defaults to '
+                        'FLYRAT_VINS_CONFIG, the source-tree config, then the '
+                        'installed copy.'),
         DeclareLaunchArgument(
             'adb_serial', default_value=os.environ.get('ADB_SERIAL', ''),
             description='adb device serial; empty uses the only connected device.'),
@@ -276,9 +250,6 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'start_slam', default_value='true',
             description='Start slam_node.'),
-        DeclareLaunchArgument(
-            'mode', default_value='imu_stereo',
-            description="SLAM mode: 'imu_stereo' or 'stereo'."),
         DeclareLaunchArgument(
             'start_foxglove', default_value='false',
             description='Start foxglove_bridge as well.'),

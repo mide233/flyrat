@@ -23,8 +23,8 @@ find_package(tf2_ros REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc)
 
-# Pull the SLAM facade and the vendored ORB-SLAM3 straight from the source
-# tree. The core library is a plain CMake project and stays ROS-free.
+# Pull the SLAM facade and the vendored VINS-Fusion core straight from the
+# source tree. The core library is a plain CMake project and stays ROS-free.
 set(FLYRAT_BUILD_SLAM ON CACHE BOOL "" FORCE)
 set(FLYRAT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(FLYRAT_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
@@ -49,7 +49,12 @@ target_compile_options(slam_node PRIVATE -Wall -Wextra)
 install(TARGETS slam_node RUNTIME DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch config DESTINATION share/${PROJECT_NAME})
 install(FILES
-  "${CMAKE_CURRENT_SOURCE_DIR}/../../../../libflyrat/configs/orb_slam3/uvc_640x480_imu.yaml"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../../../libflyrat/configs/vins_fusion/uvc_640x480_imu.yaml"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../../../libflyrat/configs/vins_fusion/cam0_pinhole.yaml"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../../../libflyrat/configs/vins_fusion/cam1_pinhole.yaml"
   DESTINATION share/${PROJECT_NAME}/config)
+install(FILES
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../../../libflyrat/third_party/vins_fusion/LICENSE"
+  DESTINATION share/${PROJECT_NAME})
 
 ament_package()

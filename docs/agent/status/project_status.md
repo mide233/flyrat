@@ -62,48 +62,48 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   - `/flyrat/sensors/stereo/left/image_raw`
   - `/flyrat/sensors/stereo/right/image_raw`
 
-### 2.4 ORB-SLAM3 双目模块
+### 2.4 VINS-Fusion 双目惯性模块
 
-完整构建、配置和 API 说明见 [`slam/orb_slam3.md`](../slam/orb_slam3.md)。
+完整构建、配置和 API 说明见 [`slam/vins_fusion.md`](../slam/vins_fusion.md)。
 
-- `libflyrat/third_party/orb_slam3/`：vendored ORB-SLAM3 核心（GPLv3），
-  保留 DBoW2、g2o、Sophus，删除 Viewer、MapDrawer 和 Pangolin 依赖。
-- `flyrat::slam::StereoSlam`：门面 API，支持 `kStereo` 和 `kImuStereo`。
-  输出 `T_world_camera`，状态映射为 `kNotInitialized/kTracking/kRecentlyLost/kLost`。
-- `slam_bench`：支持左右图像序列、左右拼接视频和实时 UVC 三种输入，
-  输出每帧耗时、平均/最大耗时和峰值 RSS。
-- 配置模板：`configs/orb_slam3/uvc_640x480.yaml`、
-  `configs/orb_slam3/uvc_640x480_imu.yaml`（后者已按 `kalibr_ws/` 实机标定）。
-- 词袋不入库，通过 `FLYRAT_ORB_VOCAB` 或 `Options::vocabulary_path` 指定。
-- 默认 `FLYRAT_BUILD_SLAM=OFF`；开启后链接的程序整体按 GPLv3 分发。
+- `libflyrat/third_party/vins_fusion/`：vendored VINS-Fusion 核心（GPLv3），
+  固定上游 commit `be55a93`，只保留 estimator、feature tracker、factor、
+  initial 和 camera_models 运行时。
+- `flyrat::slam::StereoSlam`：VINS-only 门面 API，只支持双目 + IMU。
+  输出 `T_world_body`，状态为 `kNotInitialized/kTracking/kLost`。
+- `slam_bench`：支持左右图像序列和左右拼接视频，需要 IMU CSV；输出每帧
+  耗时、状态统计和峰值 RSS。实时采集由 ROS 2 节点负责。
+- 配置：`configs/vins_fusion/uvc_640x480_imu.yaml`、
+  `cam0_pinhole.yaml`、`cam1_pinhole.yaml`（已按 `kalibr_ws/` 实机标定）。
+- 不再需要视觉词袋；默认 `FLYRAT_BUILD_SLAM=OFF`，开启后链接的程序整体按
+  GPLv3 分发。
 
 ### 2.5 ROS 2 SLAM 节点
 
-完整构建、参数和 Foxglove 预览见 [`slam/orb_slam3.md`](../slam/orb_slam3.md)；
+完整构建、参数和 Foxglove 预览见 [`slam/vins_fusion.md`](../slam/vins_fusion.md)；
 坐标链和变换调整见 [`slam/coordinates.md`](../slam/coordinates.md)。
 
-- `flyrat_play/ros2_ws/src/flyrat_slam/`：新的 ROS 2 包，支持
-  `flyrat::slam::StereoSlam` 的 `kImuStereo`（默认）和 `kStereo` 模式；
-  `mode:=stereo` 时只订阅双目，不订阅 IMU。
+- `flyrat_play/ros2_ws/src/flyrat_slam/`：ROS 2 包，只支持双目 + IMU。
 - 订阅实机转发的左右目和 IMU，双目用 `ApproximateTime` 同步，IMU 缓存约 1 s，
   跟踪线程忙时丢旧帧。
 - 发布 `/flyrat/slam/odometry`、`/flyrat/slam/path`、`/flyrat/slam/status`、
   `/flyrat/slam/reset`；动态 TF `slam_map -> imu_link`，静态 TF
-  `imu_link -> camera_left_optical_frame`。
-- 参数 `vocabulary_path` 必填，词袋不入库；`settings_path` 默认使用
+  `imu_link -> camera_left_optical_frame` 和
+  `imu_link -> camera_right_optical_frame`。
+- 参数 `vins_config` 指向 VINS YAML，默认使用包内
   `uvc_640x480_imu.yaml`；`body_frame` 默认 `imu_link`；可选
   `trajectory_path` 退出时保存 TUM 轨迹。
 - `bringup.launch.py` / `.script/bringup_real.sh`：一条命令拉起 adb forward、
   设备 forwarder、接收节点和 SLAM，可选 Foxglove；退出时自动清理。
-  词袋和源码树 settings 自动查找。
-- `IMU.T_b_c1` 使用 `kalibr_ws/` 标定的相机→IMU 外参：相机倒置安装，
-  相机原点在 IMU 前方 0.0403 m、右侧 0.0446 m、上方 0.0089 m，基线 0.06475 m。
+  VINS 配置默认从 `FLYRAT_VINS_CONFIG`、源码树或安装目录解析。
+- `body_T_cam0` / `body_T_cam1` 来自 `kalibr_ws/` 的相机→IMU 外参：
+  相机倒置安装，左目原点在 IMU 前方 0.0403 m、右侧 0.0446 m、上方 0.0089 m，
+  基线 0.06475 m。
 - IMU 的 scale/misalignment 由 `flyrat_sensors/config/imu_intrinsics.yaml`
-  在发布前修正；IMU 时间戳扣除约 3.8 ms 的相机–IMU 固定时间差。
-- 默认 `IMU.fastInit: 1`，跳过逐帧加速度门限；但 IMU 重力/尺度初始化仍需要
-  真实平移或明显晃动。实机已验证：连续平稳运动约 20 s 完成 VIBA 1，约 40 s
-  完成 VIBA 2，之后 IMU-stereo 可持续跟踪且不再重置；启动阶段的重置属于
-  ORB-SLAM3 初始化条件，不是标定问题。
+  在发布前修正；IMU 时间戳扣除约 3.8 ms 的相机–IMU 固定时间差，因此 VINS
+  配置使用 `td=0`。
+- VINS 需要约 10 帧窗口和足够的运动/IMU 激励才能初始化；静止桌面通常会停留
+  在 `NOT_INITIALIZED`，这不是标定错误。
 
 ## 3. 实测指标
 
@@ -116,15 +116,14 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 | adb 吞吐 | 约 30 MB/s | USB2 链路，`adb exec-out` 实测 |
 | 双目 MJPEG 带宽 | 约 3.2 MB/s | 1280x480@60，适合 adb |
 | 双目原始 NV12 | 约 55 MB/s | 不适合当前 adb，不用于转发 |
-| ORB-SLAM3 跟踪 | 90/90 帧 | 开发机，真实录制双目 640x480/眼 |
-| ORB-SLAM3 单帧耗时 | 11.5–12.7 ms | 约 79–87 fps，Release，标定前内参 |
-| ORB-SLAM3 峰值 RSS | 547 MB | 90 帧回放，含 139 MB 词袋 |
-| ORB-SLAM3 词袋加载 | 约 4 s | `ORBvoc.txt` 文本格式 |
+| VINS-Fusion 编译/构造 | 通过 | 开发机，OpenCV 4.6 + Ceres 2.2 |
+| VINS-Fusion 合成回放 | 初始化后 4/4 帧 TRACKING | 15 帧合成双目 + 200 Hz IMU |
+| VINS-Fusion ROS 2 合成流 | 27 条 odometry | 40 帧合成双目 + 200 Hz IMU |
+| VINS-Fusion 真实数据跟踪 | 待实测 | 需要带 IMU 的实机双目序列 |
+| VINS-Fusion 单帧耗时 | 约 11–18 ms（合成数据） | 开发机，Release |
 | ROS 2 IMU 输入 | 200.3–200.8 Hz | 开发机接收节点 |
 | ROS 2 双目输入 | 60.0 Hz | 左右各 640x480 mono8 |
-| ROS 2 SLAM 输入/处理 | 60.0 Hz | 输入按 60 Hz 持续，交互查询时少量丢帧 |
 | ROS 2 SLAM 状态发布 | 1 Hz | `diagnostic_msgs` |
-| ROS 2 SLAM RSS | 约 557 MB | 含词袋和 ORB 地图 |
 
 ## 4. 构建与运行
 
@@ -145,16 +144,16 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - 主飞行程序 `flyrat_pilot` 仍是占位 `main()`；目前实机功能集中在
   `flyrat_sensor_forwarder`。
 - adb 链路约 30 MB/s，不能直接转发 640x480/眼@60 的原始 NV12。
-- ORB-SLAM3 只在开发机验证，未在泰山派 aarch64 构建；泰山派没有 OpenCV，
-  内存也只有 2 GB。
-- SLAM 配置模板的内参、双目外参、IMU 外参和 IMU 噪声已按 `kalibr_ws/`
+- VINS-Fusion 只在开发机验证，未在泰山派 aarch64 构建；泰山派没有
+  OpenCV/Ceres，内存也只有 2 GB。
+- SLAM 配置的内参、双目外参、IMU 外参和 IMU 噪声已按 `kalibr_ws/`
   标定；但还没有真实运动下的稳定轨迹，尺度和精度仍待验证。
-- ROS 2 SLAM 节点已直接订阅 `/flyrat/sensors/*`；启用 `IMU.fastInit` 后可以在
-  静止桌面进入 `TRACKING`，但会因缺少运动反复重置，世界系尚未完成重力对齐，
-  还没有真实运动下的稳定轨迹数据。
+- VINS-Fusion 需要约 10 帧窗口和足够的运动/IMU 激励才能初始化；静止桌面
+  通常停留在 `NOT_INITIALIZED`。
+- VINS 核心不含回环/位姿图，长距离会漂移。
+- VINS 参数是进程级全局变量，一个进程只能有一个 `StereoSlam` 实例。
 - 双目与 IMU 没有硬件同步；ROS 节点只用 1 Hz `TIME` 帧估计设备/主机偏移，
   避免把 JPEG 解码时间算进图像时间戳。
-- 词袋文件 139 MB，加载约 4 秒，且 `ORBvoc.txt` 未入库。
 - SLAM 模块为 GPLv3，链接后整体程序需按 GPLv3 分发。
 
 ## 6. 最近提交
@@ -162,8 +161,6 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 ```text
 9f09ae4 docs: move all project documentation under docs/agent
 3f24857 docs: reorganize by topic and centralize build instructions
-60a8483 docs: describe ORB-SLAM3 module and measurements
-73a13b1 feat(slam): vendor headless ORB-SLAM3 with stereo facade
 f2ea59b fix(tof): define result-trimming macros in platform header
 39f5406 docs: record sensor forwarding status and ToF recovery
 2420f7e refactor(tof): hardcode the four sensor addresses
@@ -175,10 +172,10 @@ f2ea59b fix(tof): define result-trimming macros in platform header
 
 1. 已应用双目内参、双目外参、IMU–相机外参和 Allan/IMU 噪声；下一步补充 ROS
    `CameraInfo`，并用真实运动验证标定参数下的尺度和轨迹精度。
-2. 用真实运动和有纹理的场景验证 IMU-stereo 持续 `TRACKING`，在 Foxglove 中
+2. 用真实运动和有纹理的场景验证 VINS-Fusion 持续 `TRACKING`，在 Foxglove 中
    检查轨迹、TF 和状态，再评估精度和漂移。
 3. 评估 ToF、双目、IMU 的时间对齐策略，必要时增加设备端统一时间戳。
 4. 将传感器转发和 SLAM 整合进正式 `flyrat_pilot` 运行时，加入失效保护与
    链路健康状态。
 5. 视 adb 带宽和算法需求，评估双目降到 30 Hz 或使用硬件编码的长期方案。
-6. 评估 SLAM 在泰山派上的可行性（需要 OpenCV 和更大内存），或维持开发机运算。
+6. 评估 SLAM 在泰山派上的可行性（需要 OpenCV/Ceres 和更大内存），或维持开发机运算。

@@ -1,9 +1,9 @@
 # 坐标系与变换说明
 
 本文只讨论实机 ROS 2 链路中的坐标系：`sensor_receiver_node` 发布的 IMU/双目，
-`flyrat_slam` 内部使用的 ORB-SLAM3 body 系，以及 `slam_map`、`imu_link`、
+`flyrat_slam` 内部使用的 VINS-Fusion body 系，以及 `slam_map`、`imu_link`、
 `camera_left_optical_frame` 之间的关系。标定流程和精度评估见
-[`orb_slam3.md`](orb_slam3.md)。
+[`vins_fusion.md`](vins_fusion.md)。
 
 ## 1. 约定
 
@@ -21,7 +21,7 @@ ROS 机体系 `imu_link` 使用 FLU：
 | y | 左 |
 | z | 上 |
 
-相机系 `camera_left_optical_frame` 使用标准光学系：
+相机系 `camera_left_optical_frame` / `camera_right_optical_frame` 使用标准光学系：
 
 | 轴 | 方向 |
 |---|---|
@@ -43,18 +43,17 @@ sensor_receiver_node
   │
   ▼
 flyrat_slam / slam_node
-  │  ORB-SLAM3 输出 T_world_camera
-  │  T_world_body = T_world_camera * T_camera_body
+  │  VINS-Fusion 直接输出 T_world_body
   ▼
 /flyrat/slam/odometry          slam_map -> imu_link
 TF  slam_map -> imu_link       （动态）
-TF  imu_link -> camera_left_optical_frame（静态，来自 IMU.T_b_c1）
-TF  camera_left_optical_frame -> camera_right_optical_frame
-                                          （静态，来自 Stereo.T_c1_c2）
+TF  imu_link -> camera_left_optical_frame（静态，来自 body_T_cam0）
+TF  imu_link -> camera_right_optical_frame（静态，来自 body_T_cam1）
 ```
 
-ORB-SLAM3 的 body 系就是 IMU 系，要求 FLU、重力方向 `(0, 0, -9.81)`。
-静止时加速度计应输出 `z ≈ +9.81 m/s²`。
+VINS-Fusion 的 body 系就是 IMU 系，要求 FLU。`slam_map` 的世界系由 VINS
+初始化定义：重力对齐，但初始 yaw 由第一帧图像/IMU 窗口决定，不是固定的
+FLU 朝向。静止时加速度计应输出 `z ≈ +9.81 m/s²`。
 
 ## 3. IMU 轴向映射
 
@@ -98,47 +97,70 @@ a_gyro = C_gyro_i * a_body
 w_body = C_gyro_i^T * inv(M_gyr) * (w_raw - A * a_gyro)
 ```
 
-零偏 `b_acc` / `b_gyr` 没有写入配置（Kalibr 把它建模成时变样条），仍由
-ORB-SLAM3 在线估计。`T_i_b` 为单位阵，即 IMU 芯片系与 `imu_link` 同向。
+零偏 `b_acc` / `b_gyr` 没有写入配置（Kalibr 把它建模成时变样条），由
+VINS-Fusion 在线估计。`T_i_b` 为单位阵，即 IMU 芯片系与 `imu_link` 同向。
 
 同一文件还设置 `imu_time_offset`：Kalibr 估计 `t_imu = t_cam + 0.003805 s`
-（cam0），而 ORB-SLAM3 没有时间偏移参数，所以接收节点从 IMU 时间戳中减去
-这个值，让 IMU 与相机对齐。改标定结果时同时更新该文件。
+（cam0）。接收节点从 IMU 时间戳中减去这个值，让 IMU 与相机对齐；
+`uvc_640x480_imu.yaml` 因此使用 `estimate_td: 0`、`td: 0.0`。改标定结果时
+同时更新该文件。
 
-## 4. `IMU.T_b_c1` 的方向
+## 4. `body_T_cam0` / `body_T_cam1` 的方向
 
-ORB-SLAM3 配置中的 `IMU.T_b_c1` 是**相机 → body**：
+VINS 配置中的 `body_T_cam0` / `body_T_cam1` 是**相机 → body**：
 
 ```text
-p_body = T_b_c1 * p_camera
+p_body = body_T_cam * p_camera
 ```
 
-不是 body → camera。它同时就是相机在 body 中的位姿 `T_body_camera`，所以
-`slam_node` 在启动时读出后：
+不是 body → camera。它同时就是相机在 body 中的位姿，所以 `slam_node` 在启动
+时读出后：
 
-- 静态 TF `imu_link -> camera_left_optical_frame` 直接使用 `T_b_c1`
+- 静态 TF `imu_link -> camera_left_optical_frame` 直接使用 `body_T_cam0`
   （TF 存的是 child 在 parent 中的位姿）；
-- 静态 TF `camera_left_optical_frame -> camera_right_optical_frame` 直接使用
-  `Stereo.T_c1_c2`（它把右目坐标变到左目：`p_left = T * p_right`）；
-- 求逆得到 `T_camera_body`，用于
-  `T_world_body = T_world_camera * T_camera_body`。
+- 静态 TF `imu_link -> camera_right_optical_frame` 直接使用 `body_T_cam1`；
+- 不再需要相机位姿到机体位姿的复合：VINS 的 `getPoseInWorldFrame()` 已经
+  返回 `T_world_body`。
 
 如果手上拿到的是 body → camera（例如某些 CAD 或标定工具的输出），写入
 YAML 前必须求逆。
 
 ## 5. 当前标定外参
 
-`libflyrat/configs/orb_slam3/uvc_640x480_imu.yaml` 中的外参来自
+`libflyrat/configs/vins_fusion/uvc_640x480_imu.yaml` 中的外参来自
 `kalibr_ws/`（Aprilgrid 双目 + IMU-相机联合标定），不是占位值：
 
 ```yaml
-IMU.T_b_c1: !!opencv-matrix
+body_T_cam0: !!opencv-matrix
   rows: 4
   cols: 4
-  dt: f
+  dt: d
   data: [0.007113, -0.020471, 0.999765, 0.040312,
          0.999929, -0.009399, -0.007306, -0.044603,
          0.009547, 0.999746, 0.020403, 0.008920,
+         0.0, 0.0, 0.0, 1.0]
+
+body_T_cam1: !!opencv-matrix
+  rows: 4
+  cols: 4
+  dt: d
+  data: [-0.002976, -0.020406, 0.999787, 0.040461,
+         0.999952, -0.009445, 0.002783, 0.020143,
+         0.009386, 0.999747, 0.020433, 0.009549,
+         0.0, 0.0, 0.0, 1.0]
+```
+
+`body_T_cam1 = body_T_cam0 * Stereo.T_c1_c2`，其中 `Stereo.T_c1_c2` 把右目
+坐标变到左目（`p_left = T * p_right`），来自 `kalibr_ws/calib-camchain.yaml`：
+
+```yaml
+Stereo.T_c1_c2: !!opencv-matrix
+  rows: 4
+  cols: 4
+  dt: d
+  data: [0.999949, -0.000045, 0.010089, 0.064749,
+         0.000046, 0.999999, -0.000065, 0.000017,
+         -0.010089, 0.000065, 0.999949, -0.000311,
          0.0, 0.0, 0.0, 1.0]
 ```
 
@@ -150,28 +172,11 @@ IMU.T_b_c1: !!opencv-matrix
 | 相机 y（图像下） | 约 body +z（上） |
 | 相机 z（光轴） | 约 body +x（前） |
 
-平移是相机光心在 body 中的位置：前 +0.0403 m、左 -0.0446 m（即 IMU
-右侧 0.0446 m）、上 +0.0089 m。
+左目平移是相机光心在 body 中的位置：前 +0.0403 m、左 -0.0446 m（即 IMU
+右侧 0.0446 m）、上 +0.0089 m。双目基线 0.06475 m，右目相对左目绕 y 轴约
+0.578°。
 
-`Stereo.T_c1_c2` 同样来自 `kalibr_ws/calib-camchain.yaml`，是 Kalibr
-`cam1.T_cn_cnm1` 的逆（左目 ← 右目）：
-
-```yaml
-Stereo.T_c1_c2: !!opencv-matrix
-  rows: 4
-  cols: 4
-  dt: f
-  data: [0.999949, -0.000045, 0.010089, 0.064749,
-         0.000046, 0.999999, -0.000065, 0.000017,
-         -0.010089, 0.000065, 0.999949, -0.000311,
-         0.0, 0.0, 0.0, 1.0]
-```
-
-基线 0.06475 m，右目相对左目绕 y 轴约 0.578°。
-
-矩阵的 `dt` 必须是 `f`。ORB-SLAM3 的
-`Converter::toMatrix3d()` 固定按 `float` 读取 OpenCV 矩阵，写成 `dt: d`
-会被读成全零，随后 `Sophus::SO3` 因四元数为零直接终止进程。
+VINS 的 OpenCV 矩阵解析按配置的 `dt` 读取；当前配置使用 `dt: d`（double）。
 
 ## 6. 如何调整
 
@@ -187,13 +192,13 @@ ros2 launch flyrat_sensors sensors.launch.py \
 
 ### 6.2 改相机外参
 
-直接编辑 YAML 的 `IMU.T_b_c1` 矩阵。为避免每次 `colcon build` 后安装目录
-不同步，运行时把 `settings_path` 指向源码树中的文件：
+直接编辑 `libflyrat/configs/vins_fusion/uvc_640x480_imu.yaml` 的
+`body_T_cam0` 和 `body_T_cam1`。为避免每次 `colcon build` 后安装目录不同步，
+运行时把 `vins_config` 指向源码树中的文件：
 
 ```sh
 ros2 launch flyrat_slam slam.launch.py \
-  vocabulary_path:=/workspaces/flyrat/playground/ORB_SLAM3/Vocabulary/ORBvoc.txt \
-  settings_path:=/workspaces/flyrat/libflyrat/configs/orb_slam3/uvc_640x480_imu.yaml
+  vins_config:=/workspaces/flyrat/libflyrat/configs/vins_fusion/uvc_640x480_imu.yaml
 ```
 
 `slam_node` 启动时会检查矩阵是否为有限值、旋转是否正交、行列式是否为 1；
@@ -204,12 +209,13 @@ ros2 launch flyrat_slam slam.launch.py \
 ```sh
 ros2 run tf2_ros tf2_echo slam_map imu_link
 ros2 run tf2_ros tf2_echo imu_link camera_left_optical_frame
+ros2 run tf2_ros tf2_echo imu_link camera_right_optical_frame
 ros2 run tf2_ros tf2_echo camera_left_optical_frame camera_right_optical_frame
 ```
 
-第二条应输出 `T_body_camera`，即 `IMU.T_b_c1` 本身（`tf2_echo` 打印的是把
-target 的数据变换到 source 的矩阵）。若结果是它的逆，说明静态 TF 方向写反。
-第三条应输出 `Stereo.T_c1_c2`，标定值为平移约 `(+0.06475, +0.0000175,
+第二条应输出 `body_T_cam0` 本身（`tf2_echo` 打印的是把 target 的数据变换到
+source 的矩阵）。若结果是它的逆，说明静态 TF 方向写反。第三条应输出
+`body_T_cam1`。第四条由 TF 树组合得到，平移约 `(+0.06475, +0.0000175,
 -0.00031)`、绕 y 轴约 0.578°。
 
 ## 7. 验证动作
@@ -235,13 +241,13 @@ ros2 topic echo /flyrat/sensors/imu --field angular_velocity
 然后启动 SLAM，在 Foxglove 中：
 
 1. 固定坐标系选 `slam_map`；
-2. 打开 `imu_link` 和 `camera_left_optical_frame` 的 TF；
+2. 打开 `imu_link` 和两个相机光学系的 TF；
 3. 手持设备缓慢平移、左右偏航、抬头低头；
 4. 观察 `imu_link` 的朝向是否与真实机体一致。
 
 不要在固定坐标系为 `imu_link` 时判断朝向；那样 `imu_link` 永远显示为单位姿态。
-静止桌面场景通常无法完成 IMU 初始化，日志出现
-`Not enough motion for initializing` 是预期现象，需要平移或明显晃动。
+静止桌面场景通常无法完成 VINS 初始化，日志停留在 `NOT_INITIALIZED` 是预期
+现象，需要平移或明显晃动。
 
 ## 8. 常见现象
 
@@ -251,19 +257,13 @@ ros2 topic echo /flyrat/sensors/imu --field angular_velocity
   光轴；这是坐标分解，不是 SLAM 算错。看 `imu_link`，不要看相机系。
 - **`imu_link` 绝对姿态在启动时漂移**：IMU 尚未完成重力对齐，世界系还没有
   定义；等初始化完成后再判断。
-- **相机外参改了但运行没变化**：`settings_path` 指向的是安装目录中的旧
+- **相机外参改了但运行没变化**：`vins_config` 指向的是安装目录中的旧
   YAML；改指向源码树，或重新 `colcon build`。
+- **一直 `NOT_INITIALIZED`**：VINS 需要足够的运动激励和纹理，静止桌面不够；
+  同时确认 IMU 时间戳单调且覆盖图像时刻。
 
-## 9. 相关提交
+## 9. 迁移记录
 
-| 提交 | 内容 | 对坐标的影响 |
-|---|---|---|
-| `22cc062` | 拆分加速度/陀螺仪轴向参数 | 引入 `bf_to_flu`，只翻陀螺仪 z |
-| `4d0005c` | 把陀螺仪默认值改成 `none` | **回归**：静态检查只看了加速度 z，没有覆盖偏航符号，左偏航仍为负 |
-| `0675026` | 发布机体位姿、对齐传感器时间戳 | `T_world_body = T_world_camera * T_camera_body`，数值链路正确 |
-| `2e9e00b` | 占位外参改为倒置正视前方 | 相机 z 与 body x 平行，滚转在相机系里表现为绕光轴旋转 |
-
-本轮用实机逐项复测后确认：本机陀螺仪原始数据已经是 FLU，默认应为
-`imu_gyro_axis=none`。左偏航实测 `angular_velocity.z ≈ +0.43 rad/s`，
-右偏航为负；此前默认 `bf_to_flu` 会把偏航方向翻反。如果后续再改轴向，
-请按第 7 节的偏航、俯仰、滚转三个动作逐项验证，不要只用静止加速度判断。
+SLAM 迁移到 VINS-Fusion 后，输出直接是 `T_world_body`；静态外参改为
+`body_T_cam0` / `body_T_cam1`。IMU 轴向映射和接收节点的
+scale/misalignment、时间偏移补偿保持不变。

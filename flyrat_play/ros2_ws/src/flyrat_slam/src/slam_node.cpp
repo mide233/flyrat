@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Headless ORB-SLAM3 IMU-stereo node for the real-vehicle sensor stream.
+// Headless VINS-Fusion stereo-inertial node for the real-vehicle sensor stream.
 //
 // The receiver publishes the camera images and the IMU asynchronously over ROS
 // 2. This node synchronises the two images, keeps a short IMU history, and
@@ -59,8 +59,6 @@ const char* state_name(State state)
     switch (state) {
     case State::kTracking:
         return "TRACKING";
-    case State::kRecentlyLost:
-        return "RECENTLY_LOST";
     case State::kLost:
         return "LOST";
     case State::kNotInitialized:
@@ -74,7 +72,6 @@ std::uint8_t diagnostic_level(State state)
     switch (state) {
     case State::kTracking:
         return diagnostic_msgs::msg::DiagnosticStatus::OK;
-    case State::kRecentlyLost:
     case State::kNotInitialized:
         return diagnostic_msgs::msg::DiagnosticStatus::WARN;
     case State::kLost:
@@ -137,14 +134,12 @@ public:
     SlamNode()
         : Node("slam_node")
     {
-        vocabulary_path_ = declare_parameter<std::string>("vocabulary_path", "");
-        settings_path_ = declare_parameter<std::string>("settings_path", "");
+        vins_config_ = declare_parameter<std::string>("vins_config", "");
         left_topic_ = declare_parameter<std::string>(
             "left_topic", "/flyrat/sensors/stereo/left/image_raw");
         right_topic_ = declare_parameter<std::string>(
             "right_topic", "/flyrat/sensors/stereo/right/image_raw");
         imu_topic_ = declare_parameter<std::string>("imu_topic", "/flyrat/sensors/imu");
-        mode_ = declare_parameter<std::string>("mode", "imu_stereo");
         world_frame_ = declare_parameter<std::string>("world_frame", "slam_map");
         body_frame_ = declare_parameter<std::string>("body_frame", "imu_link");
         camera_frame_ = declare_parameter<std::string>(
@@ -158,15 +153,9 @@ public:
         status_period_ = declare_parameter<double>("status_period", 1.0);
         trajectory_path_ = declare_parameter<std::string>("trajectory_path", "");
 
-        if (vocabulary_path_.empty()) {
+        if (vins_config_.empty()) {
             throw std::runtime_error(
-                "vocabulary_path is required; the ORBvoc.txt file is not stored in the repository");
-        }
-        if (settings_path_.empty()) {
-            throw std::runtime_error("settings_path is empty");
-        }
-        if (mode_ != "stereo" && mode_ != "imu_stereo") {
-            throw std::runtime_error("mode must be 'stereo' or 'imu_stereo'");
+                "vins_config is required; point it at a VINS stereo-inertial YAML");
         }
         if (body_frame_.empty() || camera_frame_.empty() ||
             body_frame_ == camera_frame_) {
@@ -216,27 +205,19 @@ public:
             std::bind(&SlamNode::on_stereo, this, std::placeholders::_1,
                 std::placeholders::_2));
 
-        use_imu_ = mode_ == "imu_stereo";
-        const bool use_imu = use_imu_;
-        if (use_imu) {
-            imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
-                imu_topic_, rclcpp::SensorDataQoS(),
-                std::bind(&SlamNode::on_imu, this, std::placeholders::_1));
-        }
+        imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
+            imu_topic_, rclcpp::SensorDataQoS(),
+            std::bind(&SlamNode::on_imu, this, std::placeholders::_1));
 
         Options options;
-        options.mode = use_imu ? Mode::kImuStereo : Mode::kStereo;
-        options.vocabulary_path = vocabulary_path_;
-        options.settings_path = settings_path_;
-        RCLCPP_INFO(get_logger(), "loading ORB-SLAM3 %s vocabulary and settings",
-            use_imu ? "IMU-stereo" : "stereo");
+        options.config_path = vins_config_;
+        RCLCPP_INFO(get_logger(), "loading VINS-Fusion stereo-inertial config: %s",
+            vins_config_.c_str());
         slam_ = std::make_unique<StereoSlam>(options);
-        RCLCPP_INFO(get_logger(), "ORB-SLAM3 %s ready",
-            use_imu ? "IMU-stereo" : "stereo");
-        const std::string imu_suffix = use_imu ? ", " + imu_topic_ : "";
+        RCLCPP_INFO(get_logger(), "VINS-Fusion stereo-inertial ready");
         RCLCPP_INFO(get_logger(),
-            "subscribed to %s, %s%s; publishing /flyrat/slam/{odometry,path,status}",
-            left_topic_.c_str(), right_topic_.c_str(), imu_suffix.c_str());
+            "subscribed to %s, %s, %s; publishing /flyrat/slam/{odometry,path,status}",
+            left_topic_.c_str(), right_topic_.c_str(), imu_topic_.c_str());
 
         last_status_time_ = std::chrono::duration<double>(
             std::chrono::steady_clock::now().time_since_epoch())
@@ -283,18 +264,18 @@ private:
 
     void load_extrinsics()
     {
-        cv::FileStorage settings(settings_path_, cv::FileStorage::READ);
-        if (!settings.isOpened()) {
+        cv::FileStorage config(vins_config_, cv::FileStorage::READ);
+        if (!config.isOpened()) {
             throw std::runtime_error(
-                "cannot open SLAM settings for extrinsics: " + settings_path_);
+                "cannot open VINS config for extrinsics: " + vins_config_);
         }
 
         const auto read_isometry = [&](const std::string& key) {
             cv::Mat node_mat;
-            settings[key] >> node_mat;
+            config[key] >> node_mat;
             if (node_mat.rows != 4 || node_mat.cols != 4) {
                 throw std::runtime_error(
-                    key + " must be a 4x4 matrix in " + settings_path_);
+                    key + " must be a 4x4 matrix in " + vins_config_);
             }
             cv::Mat mat64;
             node_mat.convertTo(mat64, CV_64F);
@@ -316,26 +297,11 @@ private:
             return out;
         };
 
-        // ORB-SLAM3 calls this matrix T_b_c1 and uses it as camera -> body:
-        // a point in the left optical frame is mapped into the IMU/body frame.
-        // That is also the pose of the camera in the body frame, which is
-        // exactly what the imu_link -> camera static TF must broadcast.
-        T_body_camera_ = read_isometry("IMU.T_b_c1");
-        // Composing T_world_camera into T_world_body needs the inverse.
-        T_camera_body_ = T_body_camera_.inverse();
-
-        // Stereo.T_c1_c2 maps right-camera coordinates into the left-camera
-        // frame (p_left = T_c1_c2 * p_right), which is exactly the pose of the
-        // right camera expressed in the left camera frame.
-        const bool has_stereo_extrinsic = !settings["Stereo.T_c1_c2"].empty();
-        if (has_stereo_extrinsic) {
-            T_left_right_ = read_isometry("Stereo.T_c1_c2");
-            has_right_camera_extrinsic_ = true;
-        } else {
-            RCLCPP_WARN(get_logger(),
-                "Stereo.T_c1_c2 is missing; not publishing %s -> %s",
-                camera_frame_.c_str(), right_camera_frame_.c_str());
-        }
+        // VINS uses body_T_cam* as camera -> body. The same matrix is the pose
+        // of the camera in the body frame, which is what the static TF
+        // imu_link -> camera_*_optical_frame broadcasts.
+        T_body_camera_ = read_isometry("body_T_cam0");
+        T_body_right_camera_ = read_isometry("body_T_cam1");
     }
 
     void publish_static_extrinsics()
@@ -361,10 +327,8 @@ private:
         std::vector<geometry_msgs::msg::TransformStamped> transforms;
         transforms.push_back(make_transform(
             body_frame_, camera_frame_, T_body_camera_));
-        if (has_right_camera_extrinsic_) {
-            transforms.push_back(make_transform(
-                camera_frame_, right_camera_frame_, T_left_right_));
-        }
+        transforms.push_back(make_transform(
+            body_frame_, right_camera_frame_, T_body_right_camera_));
         static_tf_broadcaster_->sendTransform(transforms);
     }
 
@@ -472,19 +436,23 @@ private:
         }
 
         std::vector<ImuSample> imu;
-        if (previous_stamp >= 0.0) {
+        double last_imu_sent = -1.0;
+        {
             std::lock_guard<std::mutex> lock(imu_mutex_);
-            for (const ImuSample& sample : imu_buffer_) {
-                if (sample.timestamp > previous_stamp &&
-                    sample.timestamp <= frame.stamp_s) {
-                    imu.push_back(sample);
-                }
+            // Send every buffered sample, including samples slightly newer than
+            // the image. VINS needs an IMU sample at or after the image time to
+            // process it, and extra samples stay in its own interval buffer.
+            imu.assign(imu_buffer_.begin(), imu_buffer_.end());
+            for (const ImuSample& sample : imu) {
+                last_imu_sent = std::max(last_imu_sent, sample.timestamp);
             }
-            while (!imu_buffer_.empty() &&
-                imu_buffer_.front().timestamp <= frame.stamp_s) {
-                imu_buffer_.pop_front();
-            }
-            imu_buffer_size_.store(imu_buffer_.size());
+        }
+        if (imu.empty()) {
+            dropped_frames_.fetch_add(1);
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                "waiting for IMU before stereo timestamp %.9f",
+                frame.stamp_s);
+            return;
         }
 
         Result result;
@@ -499,6 +467,15 @@ private:
         }
 
         {
+            std::lock_guard<std::mutex> lock(imu_mutex_);
+            while (!imu_buffer_.empty() &&
+                imu_buffer_.front().timestamp <= last_imu_sent) {
+                imu_buffer_.pop_front();
+            }
+            imu_buffer_size_.store(imu_buffer_.size());
+        }
+
+        {
             std::lock_guard<std::mutex> lock(state_mutex_);
             // A reset may have happened while track() was running; drop this
             // result instead of repopulating the freshly cleared path.
@@ -507,18 +484,16 @@ private:
             }
             last_frame_stamp_ = frame.stamp_s;
             if (result.pose.valid) {
-                const Eigen::Isometry3d world_body = to_world_body(result);
-                const Eigen::Quaterniond orientation(world_body.linear());
                 geometry_msgs::msg::PoseStamped pose;
                 pose.header.stamp = frame.stamp;
                 pose.header.frame_id = world_frame_;
-                pose.pose.position.x = world_body.translation().x();
-                pose.pose.position.y = world_body.translation().y();
-                pose.pose.position.z = world_body.translation().z();
-                pose.pose.orientation.x = orientation.x();
-                pose.pose.orientation.y = orientation.y();
-                pose.pose.orientation.z = orientation.z();
-                pose.pose.orientation.w = orientation.w();
+                pose.pose.position.x = result.pose.position.x();
+                pose.pose.position.y = result.pose.position.y();
+                pose.pose.position.z = result.pose.position.z();
+                pose.pose.orientation.x = result.pose.orientation.x();
+                pose.pose.orientation.y = result.pose.orientation.y();
+                pose.pose.orientation.z = result.pose.orientation.z();
+                pose.pose.orientation.w = result.pose.orientation.w();
                 path_.poses.push_back(std::move(pose));
                 while (static_cast<int>(path_.poses.size()) > path_max_poses_) {
                     path_.poses.erase(path_.poses.begin());
@@ -536,36 +511,10 @@ private:
         }
     }
 
-    Eigen::Isometry3d to_world_body(const Result& result)
-    {
-        Eigen::Isometry3d world_camera = Eigen::Isometry3d::Identity();
-        world_camera.linear() = result.pose.orientation.toRotationMatrix();
-        world_camera.translation() = result.pose.position;
-        Eigen::Isometry3d world_body = world_camera * T_camera_body_;
-
-        // ORB-SLAM3 defines the stereo world at the first left-camera frame, so
-        // its axes are optical (x right, y down, z forward). Rebase the world to
-        // the first tracked body pose so slam_map is the initial imu_link frame
-        // (FLU: x forward, y left, z up). Without this, a forward motion shows
-        // up as +z and a climb as -y in Foxglove.
-        if (!use_imu_) {
-            std::lock_guard<std::mutex> lock(world_origin_mutex_);
-            if (!have_body_world_origin_) {
-                body_world_origin_ = world_body;
-                have_body_world_origin_ = true;
-                RCLCPP_INFO(get_logger(),
-                    "stereo world frame rebased to the first body pose (FLU)");
-            }
-            return body_world_origin_.inverse() * world_body;
-        }
-        return world_body;
-    }
-
     void publish_pose(const Result& result, const rclcpp::Time& stamp)
     {
-        const Eigen::Isometry3d world_body = to_world_body(result);
-        const Eigen::Vector3d& position = world_body.translation();
-        const Eigen::Quaterniond orientation(world_body.linear());
+        const Eigen::Vector3d& position = result.pose.position;
+        const Eigen::Quaterniond& orientation = result.pose.orientation;
         if (!position.allFinite() || !Eigen::Vector4d(orientation.x(),
                 orientation.y(), orientation.z(), orientation.w()).allFinite()) {
             return;
@@ -634,14 +583,10 @@ private:
                 reset_epoch_.fetch_add(1);
             }
             {
-                std::lock_guard<std::mutex> lock(world_origin_mutex_);
-                have_body_world_origin_ = false;
-                body_world_origin_.setIdentity();
-            }
-            {
                 std::lock_guard<std::mutex> lock(imu_mutex_);
                 imu_buffer_.clear();
                 imu_buffer_size_.store(0);
+                last_imu_stamp_.store(-1.0);
             }
             {
                 std::lock_guard<std::mutex> lock(queue_mutex_);
@@ -689,7 +634,7 @@ private:
 
         diagnostic_msgs::msg::DiagnosticStatus status;
         status.name = "flyrat_slam";
-        status.hardware_id = "orb_slam3";
+        status.hardware_id = "vins_fusion";
         status.level = diagnostic_level(state);
 
         // Device and host clocks are only approximately aligned, so a small
@@ -723,31 +668,17 @@ private:
         status_pub_->publish(status);
     }
 
-    std::string vocabulary_path_;
-    std::string settings_path_;
+    std::string vins_config_;
     std::string left_topic_;
     std::string right_topic_;
     std::string imu_topic_;
-    std::string mode_;
     std::string world_frame_;
     std::string body_frame_;
     std::string camera_frame_;
     std::string right_camera_frame_;
-    // IMU.T_b_c1: pose of the left camera in the body frame, used by the
-    // imu_link -> camera static TF.
+    // body_T_cam0 / body_T_cam1: poses of the cameras in the IMU/body frame.
     Eigen::Isometry3d T_body_camera_ { Eigen::Isometry3d::Identity() };
-    // Inverse of T_body_camera_: maps body coordinates into camera
-    // coordinates and composes T_world_camera into T_world_body.
-    Eigen::Isometry3d T_camera_body_ { Eigen::Isometry3d::Identity() };
-    // Stereo.T_c1_c2: pose of the right camera in the left camera frame.
-    Eigen::Isometry3d T_left_right_ { Eigen::Isometry3d::Identity() };
-    bool has_right_camera_extrinsic_ = false;
-    bool use_imu_ = false;
-    // Pure stereo only: body pose of the first tracked frame, used to rebase
-    // slam_map from the camera optical frame to the initial body frame.
-    bool have_body_world_origin_ = false;
-    Eigen::Isometry3d body_world_origin_ { Eigen::Isometry3d::Identity() };
-    std::mutex world_origin_mutex_;
+    Eigen::Isometry3d T_body_right_camera_ { Eigen::Isometry3d::Identity() };
     double sync_slop_ = 0.010;
     double imu_buffer_seconds_ = 1.0;
     int path_max_poses_ = 1000;

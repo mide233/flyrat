@@ -134,7 +134,7 @@ a_gyro = C_gyro_i * a_body
 w_body = C_gyro_i^T * inv(M_gyr) * (w_raw - A * a_gyro)
 ```
 
-零偏仍由 ORB-SLAM3 在线估计。`imu_time_offset` 会从 IMU 时间戳中减去，
+零偏仍由 VINS-Fusion 在线估计。`imu_time_offset` 会从 IMU 时间戳中减去，
 用来补偿 Kalibr 估计的相机-IMU 时间偏移；关闭 intrinsics 时该偏移不生效。
 `T_i_b` 为单位阵。标定文件和数值来自 `kalibr_ws/calib-imu.yaml`。
 
@@ -157,7 +157,7 @@ w_body = C_gyro_i^T * inv(M_gyr) * (w_raw - A * a_gyro)
   [`../slam/coordinates.md`](../slam/coordinates.md)。
 
 这两个参数只做轴向映射，不包含安装角旋转；飞控板或 IMU 相对机体的安装角在
-`IMU.T_b_c1` 中处理，尺度/轴失准在 `imu_intrinsics.yaml` 中处理。
+`body_T_cam0` / `body_T_cam1` 中处理，尺度/轴失准在 `imu_intrinsics.yaml` 中处理。
 
 ## 4. 话题
 

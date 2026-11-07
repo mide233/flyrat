@@ -3,9 +3,9 @@
 <package format="3">
   <name>flyrat_slam</name>
   <version>0.1.0</version>
-  <description>Runs headless ORB-SLAM3 IMU-stereo on the real-vehicle sensor
-    topics forwarded over adb, and publishes odometry, TF, path and status for
-    Foxglove and algorithm development.</description>
+  <description>Runs headless VINS-Fusion stereo-inertial SLAM on the
+    real-vehicle sensor topics forwarded over adb, and publishes odometry, TF,
+    path and status for Foxglove and algorithm development.</description>
   <maintainer email="flyrat@example.com">flyrat maintainers</maintainer>
   <license>GPL-3.0-or-later</license>
 
@@ -19,6 +19,9 @@
   <depend>std_srvs</depend>
   <depend>tf2_ros</depend>
   <depend>message_filters</depend>
+  <depend>eigen</depend>
+  <depend>libceres-dev</depend>
+  <depend>libboost-dev</depend>
   <depend>libopencv-dev</depend>
 
   <exec_depend>launch</exec_depend>
