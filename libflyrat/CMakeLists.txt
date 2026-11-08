@@ -67,6 +67,21 @@ target_include_directories(flyrat_odometry PUBLIC
 target_link_libraries(flyrat_odometry PUBLIC Threads::Threads Eigen3::Eigen)
 target_compile_options(flyrat_odometry PRIVATE -Wall -Wextra)
 
+# Optional ToF-inertial backend.  The TIO-Former research model is exported to
+# TorchScript; building this target pulls in libtorch, so it stays opt-in and
+# the base libflyrat build keeps its small dependency set.
+option(FLYRAT_BUILD_TIO "Build the TorchScript TIO-Former ToF-inertial backend" OFF)
+if(FLYRAT_BUILD_TIO)
+  find_package(Torch REQUIRED)
+  add_library(flyrat_tio src/tio/tio_odometry.cpp)
+  add_library(flyrat::tio ALIAS flyrat_tio)
+  target_include_directories(flyrat_tio PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>)
+  target_link_libraries(flyrat_tio PUBLIC flyrat_odometry ${TORCH_LIBRARIES})
+  target_compile_options(flyrat_tio PRIVATE -Wall -Wextra)
+endif()
+
 # ST VL53L5CX user-space driver (ULD). The output is trimmed to the blocks the
 # flight stack needs: distance, target status, target count and temperature.
 # Four sensors on one 750 kHz bus cannot afford the full 532-byte result block.
@@ -118,7 +133,12 @@ target_compile_options(flyrat_msp_interact PRIVATE -Wall -Wextra)
 # protocol layer (not the other way around).
 target_link_libraries(flyrat_hardware PUBLIC flyrat_msp_interact)
 
-install(TARGETS flyrat flyrat_odometry flyrat_hardware flyrat_msp_interact flyrat_vl53l5cx
+set(FLYRAT_INSTALL_TARGETS
+  flyrat flyrat_odometry flyrat_hardware flyrat_msp_interact flyrat_vl53l5cx)
+if(FLYRAT_BUILD_TIO)
+  list(APPEND FLYRAT_INSTALL_TARGETS flyrat_tio)
+endif()
+install(TARGETS ${FLYRAT_INSTALL_TARGETS}
   EXPORT flyrat_targets
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib)
@@ -153,6 +173,12 @@ if(FLYRAT_BUILD_TOOLS)
   add_executable(stereo_bench tools/stereo_bench.cpp)
   target_link_libraries(stereo_bench PRIVATE flyrat_hardware)
   target_compile_options(stereo_bench PRIVATE -Wall -Wextra)
+
+  if(FLYRAT_BUILD_TIO)
+    add_executable(tio_bench tools/tio_bench.cpp)
+    target_link_libraries(tio_bench PRIVATE flyrat_tio)
+    target_compile_options(tio_bench PRIVATE -Wall -Wextra)
+  endif()
 endif()
 
 if(FLYRAT_BUILD_TESTS)
@@ -208,4 +234,13 @@ if(FLYRAT_BUILD_TESTS)
   target_compile_definitions(test_odometry_api PRIVATE
     FLYRAT_TEST_CAMERA_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/configs/camera/uvc_640x480.yaml")
   add_test(NAME test_odometry_api COMMAND test_odometry_api)
+
+  if(FLYRAT_BUILD_TIO)
+    add_executable(test_tio_api tests/test_tio_api.cpp)
+    target_link_libraries(test_tio_api PRIVATE flyrat_tio)
+    target_compile_options(test_tio_api PRIVATE -Wall -Wextra)
+    target_compile_definitions(test_tio_api PRIVATE
+      FLYRAT_TEST_TIO_MODEL="${CMAKE_CURRENT_SOURCE_DIR}/models/tio_former_window64.pt")
+    add_test(NAME test_tio_api COMMAND test_tio_api)
+  endif()
 endif()

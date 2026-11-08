@@ -17,8 +17,10 @@
 
 - 不追求复现论文 6 向 TOFSense-M 的绝对数值。
 - 不实现 TLIO、AirIO、Crazyflie Flow 作为基线。
-- 不在本阶段做 C++/边缘部署；先完成 PyTorch 原型。
-- 不修改 `libflyrat`、`flyrat_odometry` 或飞控代码；验证通过后再接入。
+- 不在本阶段做边缘部署；先完成 PyTorch 原型，再把 TorchScript 模型接到
+  `libflyrat`/ROS 2 做开发机验证。RK3566 交叉编译与机载性能评估仍后置。
+- 不改动飞控代码；研究代码放在 `research/tio_former/`，接入只新增
+  `flyrat::tio` 和 `tio_odometry_node`，不替换双目骨架。
 
 ### 1.3 与论文的关键差异
 
@@ -60,16 +62,20 @@ research/tio_former/
 │   ├── postprocess_sequence.py
 │   ├── inspect_sequence.py
 │   ├── build_gz_plugin.sh
-│   └── download_assets.sh
+│   ├── download_assets.sh
+│   ├── export_tio.py           # checkpoint -> TorchScript
+│   └── publish_processed_ros.py # 仿真序列 -> ROS 话题回放
 ├── tio_former/
-│   ├── data/{dataset,imu}.py
+│   ├── data/{dataset,imu,torch_dataset}.py
+│   ├── models/{tio_former,geometry,losses}.py
 │   ├── sim/{scene,trajectory,tof}.py
 │   └── utils/{config,se3,logging,seed}.py
 ├── tests/
 └── report/
 ```
 
-- `configs/model`、`configs/train`、`configs/eval` 已为 M3 预留。
+- `configs/model`、`configs/train`、`configs/eval` 已用于 M3–M5 的模型、
+  训练、主结果、消融和鲁棒性实验。
 - 代码、配置、脚本、世界生成器、测试和报告纳入 git。
 - `data/`、`assets/`、`runs/`、`checkpoints/` 不提交。
 - 真实 mesh 从 Gazebo Fuel 下载，记录来源和 license，资产不提交。
@@ -267,7 +273,7 @@ scene_id, seq_id, traj_type, split
 ## 9. 当前进度
 
 - M0 完成：目录、配置、SE(3)/ToF/轨迹/IMU 工具、NPZ 数据容器和测试。
-  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q` 共 40 项通过。
+  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q` 共 47 项通过。
 - M1 完成：四个场景生成器、4 向 ToF rig、Gazebo 轨迹播放插件、
   单序列 headless 录制与 8×8 后处理。
 - M1 实测（`corridor_demo`）：182 帧、12.07 s、1.80 m；4×8×8 @ 15 Hz；
@@ -303,5 +309,21 @@ scene_id, seq_id, traj_type, split
   `scripts/aggregate_seeds.py`、`scripts/run_loso.py`，场景过滤支持
   `train.py --exclude-scenes` 与 `evaluate.py --scenes`。中文技术报告
   `report/m5_report.md` 汇总方法、数据、主结果、消融、鲁棒性、LOSO、
-  实时性与局限；M5 结果表与图在 `report/`。测试 40 项通过。
+  实时性与局限；M5 结果表与图在 `report/`。测试 47 项通过。
+- 模型改进 v2：新增 `hybrid`、`gated_fifo`、`hybrid_gated` 三个变体，用
+  可学习 gate 分别控制 cross-attention 和 Chunk-FIFO summary 分支，使模型
+  从 `naive_concat` / `kv_only_no_fifo` 结构出发再学习增强。15-epoch 筛选
+  中 `hybrid_gated` 为 0.4208 m；40-epoch 复核 ATE 0.4122 m，优于原 full
+  主模型的 0.4316 m，但仍未超过 `naive_concat`（0.4013 m）和
+  `kv_only_no_fifo`（0.3925 m），RPER 0.757° 也明显差于 full 的 0.257°；
+  gate 基本未打开。位置/旋转双分支 `hybrid_split` 15-epoch ATE 0.4350 m、
+  RPER 0.837°，没有改善。结论为负结果，保留原 full 模型与导出模型。结果记录在
+  `report/model_v2_results.md`。
+- C++/ROS 接入（实验性）：新增 `flyrat::tio`（`FLYRAT_BUILD_TIO`，CPU
+  libtorch）和 ROS 2 `tio_odometry_node`，将导出的 TorchScript 模型
+  `libflyrat/models/tio_former_window64.pt` 接入 `/flyrat/sensors/tof_0..3`
+  与 `/flyrat/sensors/imu`，发布与骨架节点相同的 odometry/path/status/TF/reset
+  接口。仿真数据回放已验证 `TRACKING` 和有效里程计消息；默认构建不依赖
+  libtorch，真实 4×VL53L5CX 与机载部署仍未验证。说明见
+  `docs/agent/odometry/tio_former.md`。
 - 运行说明见 `research/tio_former/README.md`。

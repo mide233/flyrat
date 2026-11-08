@@ -6,7 +6,8 @@
   <description>Odometry scaffold for the real-vehicle sensor stream. It
     synchronises stereo images and IMU samples forwarded over adb, maintains
     the body/camera TF tree, and publishes odometry, path and status topics.
-    The estimator backend is not implemented yet.</description>
+    The stereo backend is a scaffold; a second node runs the TIO-Former
+    ToF-inertial model through libtorch.</description>
   <maintainer email="flyrat@example.com">flyrat maintainers</maintainer>
   <license>MIT</license>
 
@@ -20,6 +21,7 @@
   <depend>std_srvs</depend>
   <depend>tf2_ros</depend>
   <depend>message_filters</depend>
+  <depend>flyrat_sensors_interfaces</depend>
   <depend>libopencv-dev</depend>
 
   <exec_depend>launch</exec_depend>

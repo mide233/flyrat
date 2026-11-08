@@ -3,6 +3,7 @@
 /runs/
 /checkpoints/
 /.venv/
+/.venv-cpu/
 __pycache__/
 *.pyc
 .pytest_cache/

@@ -52,7 +52,7 @@ def _args() -> argparse.Namespace:
     parser.add_argument(
         "--variant",
         default="full",
-        help="full | imu_only | tof_only | naive_concat | memoryless | kv_only_no_fifo",
+        help="full | imu_only | tof_only | naive_concat | memoryless | kv_only_no_fifo | hybrid | gated_fifo | hybrid_gated | hybrid_split",
     )
     return parser.parse_args()
 

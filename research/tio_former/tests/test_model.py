@@ -118,7 +118,21 @@ def test_losses_backward() -> None:
     assert "step" in breakdown
 
 
-@pytest.mark.parametrize("variant", ["full", "imu_only", "tof_only", "naive_concat", "memoryless", "kv_only_no_fifo"])
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "full",
+        "imu_only",
+        "tof_only",
+        "naive_concat",
+        "memoryless",
+        "kv_only_no_fifo",
+        "hybrid",
+        "gated_fifo",
+        "hybrid_gated",
+        "hybrid_split",
+    ],
+)
 def test_variants_forward_shapes(variant: str) -> None:
     config = load_yaml(CONFIG)
     config.setdefault("model", {})["variant"] = variant
@@ -136,7 +150,9 @@ def test_variants_forward_shapes(variant: str) -> None:
     assert torch.isfinite(out["delta_phi"]).all()
 
 
-@pytest.mark.parametrize("variant", ["memoryless", "kv_only_no_fifo"])
+@pytest.mark.parametrize(
+    "variant", ["memoryless", "kv_only_no_fifo", "gated_fifo", "hybrid_gated", "hybrid_split"]
+)
 def test_variant_streaming_matches_full(variant: str) -> None:
     config = load_yaml(CONFIG)
     config.setdefault("model", {})["variant"] = variant

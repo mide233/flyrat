@@ -13,6 +13,7 @@
    - 实机传感器 → [`hardware/sensor_forwarding.md`](hardware/sensor_forwarding.md)
    - 仿真 → [`simulation/betaflight_sitl_gazebo.md`](simulation/betaflight_sitl_gazebo.md)
    - 里程计 → [`odometry/overview.md`](odometry/overview.md)
+   - TIO-Former 接入 → [`odometry/tio_former.md`](odometry/tio_former.md)
    - 坐标系与变换 → [`odometry/coordinates.md`](odometry/coordinates.md)
    - 研究计划 → [`research/tio_former.md`](research/tio_former.md)
 
@@ -46,6 +47,9 @@
   里程计骨架的 C++ 接口、ROS 2 节点、话题、参数、构建运行方式和后端接入点。
 - [`odometry/coordinates.md`](odometry/coordinates.md)
   IMU/相机坐标系、`imu.T_body_camera` 方向、TF 链、当前标定外参和逐步调试方法。
+- [`odometry/tio_former.md`](odometry/tio_former.md)
+  TIO-Former ToF-惯性模型的 C++ 接口、TorchScript 导出、libtorch/ROS 构建、
+  `tio_odometry_node` 话题契约、仿真回放和实机限制。
 
 ### 报告
 

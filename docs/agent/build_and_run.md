@@ -354,9 +354,11 @@ ros2 launch flyrat_control flyrat_sitl.launch.py \
 ## 7. 里程计骨架
 
 ORB-SLAM3 已从仓库移除。`libflyrat` 现在提供不依赖 OpenCV 的
-`flyrat::odometry` 接口，ROS 2 侧对应 `flyrat_odometry` 包。两者目前都是骨架：
+`flyrat::odometry` 接口，ROS 2 侧对应 `flyrat_odometry` 包。双目后端仍是骨架：
 节点会正常启动、校验标定、发布静态 TF 和状态，但后端返回
-`kNotInitialized`，不会输出有效位姿。算法实现位置和接口细节见
+`kNotInitialized`，不会输出有效位姿。包内另有实验性的 TIO-Former ToF-惯性
+后端 `tio_odometry_node`，需要 libtorch 显式开启，详见 7.6 和
+[`odometry/tio_former.md`](odometry/tio_former.md)。算法实现位置和双目接口细节见
 [`odometry/overview.md`](odometry/overview.md)。
 
 ### 7.1 构建与测试
@@ -554,6 +556,56 @@ trajectory_path=
 `record_duration` 结束后自动给录制进程发 SIGTERM 并写完 MCAP；录制停止后
 bringup 仍在运行，按 `Ctrl-C` 结束。`ros2 bag info /path/to/bag` 可检查消息数和
 频率。`record:=true` 不会传给 `bringup.launch.py`，它只是脚本参数。
+
+### 7.6 TIO-Former ToF 后端（实验）
+
+TIO-Former 使用前/左/右/下 4 颗 8×8 ToF 和 200 Hz IMU，模型从
+`research/tio_former/` 导出为 TorchScript。默认构建不会编译它；需要 CPU
+libtorch：
+
+```sh
+cd research/tio_former
+python3 -m venv .venv-cpu
+.venv-cpu/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+cd ../..
+TORCH_CMAKE="$PWD/research/tio_former/.venv-cpu/lib/python3.12/site-packages/torch/share/cmake"
+```
+
+libflyrat 后端与基准：
+
+```sh
+cmake -S libflyrat -B libflyrat/build-tio \
+  -DFLYRAT_BUILD_TIO=ON -DFLYRAT_BUILD_TESTS=OFF -DFLYRAT_BUILD_TOOLS=ON \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$TORCH_CMAKE"
+cmake --build libflyrat/build-tio -j"$(nproc)"
+ctest --test-dir libflyrat/build-tio --output-on-failure -R tio
+libflyrat/build-tio/tio_bench libflyrat/models/tio_former_window64.pt 40
+```
+
+ROS 节点：
+
+```sh
+bash -lc '
+  source /opt/ros/jazzy/setup.bash
+  cd flyrat_play/ros2_ws
+  colcon build --symlink-install \
+    --packages-select flyrat_sensors_interfaces flyrat_sensors flyrat_odometry \
+    --cmake-args -DCMAKE_BUILD_TYPE=Release -DFLYRAT_BUILD_TIO=ON \
+      -DCMAKE_PREFIX_PATH='"$TORCH_CMAKE"'
+  source install/setup.bash
+  ros2 launch flyrat_odometry tio_odometry.launch.py'
+```
+
+一键实机 bringup 用 `odometry_backend:=tio` 切换后端：
+
+```sh
+.script/bringup_real.sh odometry_backend:=tio
+```
+
+它和双目节点使用同一组 `/flyrat/odometry/*` 话题与 `odometry_map -> imu_link`
+TF，因此 Foxglove 配置不需要改。节点需要 64 帧（约 4.3 秒）ToF 才输出第一个
+有效位姿。ToF 视角顺序、`sensor_order`、参数和限制见
+[`odometry/tio_former.md`](odometry/tio_former.md)。
 
 ## 8. Docker 与 CI
 

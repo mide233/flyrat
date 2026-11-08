@@ -22,7 +22,8 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - MSP v1 异步客户端 `flyrat::MspInteract`：TCP/串口、轮询、重连、回调与最新快照。
 - `flyrat::hardware::Transport`：串口和 TCP 字节流抽象，单测可注入假传输。
 - 姿态保持 `AttitudeHold`、on-manifold MPC `Ommpc`、`LocalEstimator`、`RcReceiver`。
-- 单元测试 9 个，其中 `test_odometry_api` 覆盖里程计骨架接口和桩行为。
+- 单元测试 9 个，其中 `test_odometry_api` 覆盖里程计骨架接口和桩行为；
+  开启 `FLYRAT_BUILD_TIO=ON` 后另加 `test_tio_api`。
 
 ### 2.2 实机硬件
 
@@ -103,6 +104,30 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - `imu.T_body_camera` 使用 `kalibr_ws/` 标定的相机→IMU 外参：相机倒置安装，
   相机原点在 IMU 前方 0.0403 m、右侧 0.0446 m、上方 0.0089 m，基线 0.06475 m。
 
+### 2.6 TIO-Former 实验后端
+
+完整说明见 [`odometry/tio_former.md`](../odometry/tio_former.md)。
+
+- `research/tio_former/` 的仿真模型已导出为
+  `libflyrat/models/tio_former_window64.pt`（TorchScript，4.6 MB）。
+- `flyrat::tio::TioOdometry` 在 C++ 中维护 64 帧 ToF/IMU 滑动窗口，调用
+  libtorch 推理并积分机体增量；输入为前/左/右/下 4 个 8×8 距离图和 16 个
+  IMU 样本/帧。
+- `tio_odometry_node` 订阅 `/flyrat/sensors/tof_0..3` 和
+  `/flyrat/sensors/imu`，发布与双目节点相同的 `/flyrat/odometry/*` 和
+  `odometry_map -> imu_link` TF。
+- TIO 目标默认关闭；需要 `FLYRAT_BUILD_TIO=ON` 和 CPU libtorch。开发机已用
+  仿真序列验证端到端推理和 ROS 发布，`test_tio_api` 覆盖接口、warm-up 和
+  推理冒烟。
+- 尚未在实机 ToF 上验证精度、噪声和安装方向；也没有 RK3566 交叉编译和
+  机载性能数据。
+- 模型改进 v2（`hybrid` / `gated_fifo` / `hybrid_gated`）已完成 15/40-epoch
+  筛选：40-epoch `hybrid_gated` ATE 0.4122 m，优于原 full 的 0.4316 m，
+  但仍未超过 `naive_concat`（0.4013 m）和 `kv_only_no_fifo`（0.3925 m），
+  且 RPER 0.757° 明显差于 full 的 0.257°。位置/旋转双分支 `hybrid_split`
+  15-epoch ATE 0.4350 m、RPER 0.837°，没有改善。结论为负结果，当前导出
+  模型仍为原 full 模型。
+
 ## 3. 实测指标
 
 | 项目 | 实测值 | 说明 |
@@ -118,6 +143,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 | ROS 2 IMU 输入 | 200.3–200.8 Hz | 开发机接收节点 |
 | ROS 2 双目输入 | 60.0 Hz | 左右各 640x480 mono8 |
 | ROS 2 里程计状态发布 | 1 Hz | `diagnostic_msgs` |
+| TIO-Former ROS 链路 | `TRACKING` | 仿真序列回放，开发机 CPU libtorch |
 
 ## 4. 构建与运行
 
@@ -146,6 +172,8 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   漂移和长期稳定性。
 - 里程计 ROS 节点依赖 OpenCV，目前在开发机运行；泰山派没有 OpenCV，内存也
   只有 2 GB，能否上机仍需评估。
+- TIO-Former 后端依赖 libtorch，只在 Gazebo 4 向 ToF 数据上训练和验证；
+  实机噪声、安装方向、RK3566 交叉编译与机载延迟均未验证。
 
 ## 6. 最近提交
 
@@ -173,5 +201,7 @@ f2ea59b fix(tof): define result-trimming macros in platform header
    链路健康状态。
 5. 视 adb 带宽和算法需求，评估双目降到 30 Hz 或使用硬件编码的长期方案。
 6. 评估里程计在泰山派上的可行性（需要 OpenCV 和更大内存），或维持开发机运算。
-7. 后端输出稳定位姿后，补充跟踪耗时、RSS、漂移等实测指标，并替换当前
+7. 为 TIO-Former 录实机 8×8 ToF + IMU 序列，验证传感器方向、真实噪声和
+   仿真到实机的泛化；再评估 libtorch 在 RK3566 上的交叉编译与延迟。
+8. 后端输出稳定位姿后，补充跟踪耗时、RSS、漂移等实测指标，并替换当前
    “里程计骨架”占位状态。

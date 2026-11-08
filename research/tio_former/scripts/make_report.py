@@ -19,7 +19,7 @@ def _args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--main", default="runs/eval_main/summary.json")
     parser.add_argument("--ablations", default="runs/ablations/summary.json")
-    parser.add_argument("--train-metrics", default="checkpoints/main/seed0/metrics.jsonl")
+    parser.add_argument("--train-metrics", default="checkpoints/main_imu/seed0/metrics.jsonl")
     parser.add_argument("--robustness", default="runs/robustness/summary.json")
     parser.add_argument("--out", default="report")
     return parser.parse_args()

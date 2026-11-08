@@ -1,8 +1,13 @@
 # 里程计模块
 
-`flyrat_odometry` 是实机双目/双目惯性里程计的骨架。**算法后端尚未实现**：
+`flyrat_odometry` 是实机双目/双目惯性里程计的骨架。**双目算法后端尚未实现**：
 节点会正常接收、同步和缓存数据并发布完整的状态与 TF，但位姿始终为无效值，
 状态始终为 `NOT_INITIALIZED`。
+
+同一个包还提供实验性的 TIO-Former ToF-惯性节点 `tio_odometry_node`。它把
+`research/tio_former/` 训练并导出为 TorchScript 的模型通过 libtorch 接进 ROS，
+使用前/左/右/下 4 颗 8×8 ToF 和 200 Hz IMU，发布相同的话题/TF 契约。该节点
+目前只在仿真数据上验证，详见 [`tio_former.md`](tio_former.md)。
 
 这样做的目的是先把传感器链路、时间同步、坐标系和 ROS 接口固定下来，后续只
 替换 `libflyrat` 中的后端实现，不需要再改节点和启动脚本。
@@ -17,6 +22,7 @@
 | `libflyrat/tests/test_odometry_api.cpp` | 接口和桩行为测试 |
 | `flyrat_play/ros2_ws/src/flyrat_odometry/` | ROS 2 节点、参数、launch |
 | `docs/agent/odometry/coordinates.md` | 坐标系、TF 链和标定矩阵说明 |
+| `docs/agent/odometry/tio_former.md` | TIO-Former TorchScript 推理、C++/ROS 接入与限制 |
 
 ## 2. C++ 接口
 
@@ -133,6 +139,10 @@ imu:
 .script/build_libflyrat.sh
 .script/build_ros2.sh
 ```
+
+以上命令只构建双目骨架。TIO-Former 节点需要 libtorch，用
+`FLYRAT_BUILD_TIO=ON` 单独构建，步骤见
+[`tio_former.md`](tio_former.md#3-构建)。
 
 单独运行节点：
 

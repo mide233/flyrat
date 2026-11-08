@@ -94,6 +94,10 @@ def _launch_setup(context, *args, **kwargs):
     start_sensors = _flag(context, 'start_sensors')
     start_odometry = _flag(context, 'start_odometry')
     start_foxglove = _flag(context, 'start_foxglove')
+    backend = _text(context, 'odometry_backend') or 'stereo'
+    if backend not in ('stereo', 'tio'):
+        raise RuntimeError(
+            f"odometry_backend must be 'stereo' or 'tio', got {backend!r}")
 
     local_port = _text(context, 'local_port')
     device_port = _text(context, 'device_port')
@@ -170,24 +174,49 @@ def _launch_setup(context, *args, **kwargs):
         ))
 
     if start_odometry:
-        calibration = _resolve_camera_config(context)
-        actions.append(LogInfo(
-            msg=f'[bringup] odometry calibration: {calibration}'))
-        odometry_launch = os.path.join(
-            get_package_share_directory('flyrat_odometry'),
-            'launch',
-            'odometry.launch.py')
-        actions.append(TimerAction(
-            period=1.0,
-            actions=[IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(odometry_launch),
-                launch_arguments={
-                    'camera_config_path': calibration,
-                    'mode': LaunchConfiguration('mode'),
-                    'trajectory_path': LaunchConfiguration('trajectory_path'),
-                }.items(),
-            )],
-        ))
+        if backend == 'tio':
+            tio_launch = os.path.join(
+                get_package_share_directory('flyrat_odometry'),
+                'launch',
+                'tio_odometry.launch.py')
+            model_path = os.path.join(
+                get_package_share_directory('flyrat_odometry'),
+                'models',
+                'tio_former_window64.pt')
+            actions.append(LogInfo(
+                msg=f'[bringup] TIO-Former backend: {model_path}'))
+            actions.append(TimerAction(
+                period=1.0,
+                actions=[IncludeLaunchDescription(
+                    PythonLaunchDescriptionSource(tio_launch),
+                    launch_arguments={
+                        'model_path': model_path,
+                        'world_frame': 'odometry_map',
+                        'body_frame': 'imu_link',
+                        'warmup_frames': LaunchConfiguration('tio_warmup_frames'),
+                        'trajectory_path': LaunchConfiguration('trajectory_path'),
+                    }.items(),
+                )],
+            ))
+        else:
+            calibration = _resolve_camera_config(context)
+            actions.append(LogInfo(
+                msg=f'[bringup] odometry calibration: {calibration}'))
+            odometry_launch = os.path.join(
+                get_package_share_directory('flyrat_odometry'),
+                'launch',
+                'odometry.launch.py')
+            actions.append(TimerAction(
+                period=1.0,
+                actions=[IncludeLaunchDescription(
+                    PythonLaunchDescriptionSource(odometry_launch),
+                    launch_arguments={
+                        'camera_config_path': calibration,
+                        'mode': LaunchConfiguration('mode'),
+                        'trajectory_path': LaunchConfiguration('trajectory_path'),
+                    }.items(),
+                )],
+            ))
 
     if start_foxglove:
         actions.append(TimerAction(
@@ -247,7 +276,13 @@ def generate_launch_description():
             description='Start sensor_receiver_node.'),
         DeclareLaunchArgument(
             'start_odometry', default_value='true',
-            description='Start odometry_node.'),
+            description='Start the selected odometry backend.'),
+        DeclareLaunchArgument(
+            'odometry_backend', default_value='stereo',
+            description="Odometry backend: 'stereo' (scaffold) or 'tio'."),
+        DeclareLaunchArgument(
+            'tio_warmup_frames', default_value='64',
+            description='ToF frames collected before the first TIO pose.'),
         DeclareLaunchArgument(
             'mode', default_value='imu_stereo',
             description="Odometry mode: 'imu_stereo' or 'stereo'."),

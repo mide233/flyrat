@@ -20,7 +20,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = sys.executable
 
-VARIANTS = ("full", "imu_only", "tof_only", "naive_concat", "memoryless", "kv_only_no_fifo")
+VARIANTS = (
+    "full",
+    "imu_only",
+    "tof_only",
+    "naive_concat",
+    "memoryless",
+    "kv_only_no_fifo",
+    "hybrid",
+    "gated_fifo",
+    "hybrid_gated",
+    "hybrid_split",
+)
 
 
 def _args() -> argparse.Namespace:
@@ -36,7 +47,7 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--eval-only", action="store_true")
     parser.add_argument(
         "--main-checkpoint",
-        default="checkpoints/main/seed0/best.pt",
+        default="checkpoints/main_imu/seed0/best.pt",
         help="Use the main run as the full-model seed 0 entry",
     )
     parser.add_argument("--train-full", action="store_true", help="Retrain full instead of reusing main")

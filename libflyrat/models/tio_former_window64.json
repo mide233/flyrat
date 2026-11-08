@@ -1,0 +1,16 @@
+{
+  "source_checkpoint": "research/tio_former/checkpoints/main_imu/seed0/best.pt",
+  "window_frames": 64,
+  "views": 4,
+  "grid_size": 8,
+  "imu_samples": 16,
+  "channels": 6,
+  "parameters": 1129542,
+  "trace_max_abs_difference": 0.0,
+  "view_order": [
+    "front",
+    "left",
+    "right",
+    "down"
+  ]
+}

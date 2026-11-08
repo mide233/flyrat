@@ -45,6 +45,7 @@ class ModelConfig:
     local_capacity: int = 8
     chunk_size: int = 4
     fifo_capacity: int = 4
+    gated_summary: bool = False
     summary_hidden_dim: int = 256
     pose_hidden_dim: int = 128
     pose_dropout: float = 0.0
@@ -80,6 +81,7 @@ class ModelConfig:
             local_capacity=_as_int(streaming.get("local_capacity"), 8),
             chunk_size=_as_int(streaming.get("chunk_size"), 4),
             fifo_capacity=_as_int(streaming.get("fifo_capacity"), 4),
+            gated_summary=bool(streaming.get("gated_summary", False)),
             summary_hidden_dim=_as_int(streaming.get("summary_hidden_dim"), 256),
             pose_hidden_dim=_as_int(pose.get("hidden_dim"), 128),
             pose_dropout=float(pose.get("dropout", 0.0)),
@@ -117,6 +119,7 @@ class ModelConfig:
                     "local_capacity": self.local_capacity,
                     "chunk_size": self.chunk_size,
                     "fifo_capacity": self.fifo_capacity,
+                    "gated_summary": self.gated_summary,
                     "summary_hidden_dim": self.summary_hidden_dim,
                 },
                 "pose_head": {
@@ -198,10 +201,17 @@ class ViewTransformer(nn.Module):
 
 
 class CrossViewFusion(nn.Module):
-    """IMU query attends to the directional range tokens."""
+    """IMU query attends to the directional range tokens.
 
-    def __init__(self, config: ModelConfig) -> None:
+    With ``hybrid=True`` the attention branch is added to a direct
+    concatenation branch through a learnable gate.  Initialising the gate near
+    zero makes the hybrid start as the stronger naive-concat baseline while
+    still allowing the model to learn directional attention.
+    """
+
+    def __init__(self, config: ModelConfig, hybrid: bool = False) -> None:
         super().__init__()
+        self.hybrid = hybrid
         self.attention = nn.MultiheadAttention(
             embed_dim=config.feature_dim,
             num_heads=config.fusion_heads,
@@ -209,11 +219,22 @@ class CrossViewFusion(nn.Module):
             batch_first=True,
         )
         self.norm = nn.LayerNorm(config.feature_dim)
+        if hybrid:
+            self.concat_proj = nn.Linear(2 * config.feature_dim, config.feature_dim)
+            self.out_norm = nn.LayerNorm(config.feature_dim)
+            self.attention_gate = nn.Parameter(torch.tensor(-6.0))
 
     def forward(self, imu_token: torch.Tensor, view_tokens: torch.Tensor) -> torch.Tensor:
         query = imu_token.unsqueeze(1)
         fused, _ = self.attention(query, view_tokens, view_tokens, need_weights=False)
-        return self.norm(query + fused).squeeze(1)
+        attention_out = self.norm(query + fused).squeeze(1)
+        if not self.hybrid:
+            return attention_out
+        concat = self.concat_proj(
+            torch.cat([view_tokens.mean(dim=1), imu_token], dim=-1)
+        )
+        fused_out = concat + torch.sigmoid(self.attention_gate) * attention_out
+        return self.out_norm(fused_out)
 
 
 @dataclass
@@ -253,6 +274,10 @@ class BoundedCausalLayer(nn.Module):
         self.local_capacity = config.local_capacity
         self.chunk_size = config.chunk_size
         self.fifo_capacity = config.fifo_capacity
+        self.gated_summary = bool(config.gated_summary)
+        self.summary_gate = (
+            nn.Parameter(torch.tensor(-6.0)) if self.gated_summary else None
+        )
         self.qkv = nn.Linear(self.dim, 3 * self.dim)
         self.out = nn.Linear(self.dim, self.dim)
         self.phi = nn.Sequential(
@@ -334,13 +359,25 @@ class BoundedCausalLayer(nn.Module):
                 start = g * (1 + (t - c) // g)
                 num_chunks = start // g
             first_chunk = max(0, num_chunks - self.fifo_capacity)
-            keys = [item[0] for item in chunk_summaries[first_chunk:num_chunks]]
-            values = [item[1] for item in chunk_summaries[first_chunk:num_chunks]]
-            keys.append(k[:, start : t + 1])
-            values.append(v[:, start : t + 1])
-            context_k = torch.cat(keys, dim=1)
-            context_v = torch.cat(values, dim=1)
-            outputs.append(self._attend(q[:, t : t + 1], context_k, context_v))
+            summary_keys = [item[0] for item in chunk_summaries[first_chunk:num_chunks]]
+            summary_values = [item[1] for item in chunk_summaries[first_chunk:num_chunks]]
+            local_k = k[:, start : t + 1]
+            local_v = v[:, start : t + 1]
+            query = q[:, t : t + 1]
+            if self.gated_summary:
+                context = self._attend(query, local_k, local_v)
+                if summary_keys:
+                    summary_context = self._attend(
+                        query,
+                        torch.cat(summary_keys, dim=1),
+                        torch.cat(summary_values, dim=1),
+                    )
+                    context = context + torch.sigmoid(self.summary_gate) * summary_context
+                outputs.append(context)
+            else:
+                context_k = torch.cat(summary_keys + [local_k], dim=1)
+                context_v = torch.cat(summary_values + [local_v], dim=1)
+                outputs.append(self._attend(query, context_k, context_v))
         return self._finish(x, torch.cat(outputs, dim=1))
 
     def forward_step(
@@ -373,9 +410,15 @@ class BoundedCausalLayer(nn.Module):
                 elif summary_k.shape[1] > self.fifo_capacity:
                     summary_k = summary_k[:, -self.fifo_capacity :]
                     summary_v = summary_v[:, -self.fifo_capacity :]
-        context_k = torch.cat([summary_k, local_k], dim=1)
-        context_v = torch.cat([summary_v, local_v], dim=1)
-        attention = self._attend(q, context_k, context_v)
+        if self.gated_summary:
+            attention = self._attend(q, local_k, local_v)
+            if summary_k.shape[1] > 0:
+                summary_attention = self._attend(q, summary_k, summary_v)
+                attention = attention + torch.sigmoid(self.summary_gate) * summary_attention
+        else:
+            context_k = torch.cat([summary_k, local_k], dim=1)
+            context_v = torch.cat([summary_v, local_v], dim=1)
+            attention = self._attend(q, context_k, context_v)
         out = self._finish(x, attention)
         return out, LayerState(local_k, local_v, summary_k, summary_v)
 
@@ -433,6 +476,10 @@ class TioFormer(nn.Module):
             "naive_concat",
             "memoryless",
             "kv_only_no_fifo",
+            "hybrid",
+            "gated_fifo",
+            "hybrid_gated",
+            "hybrid_split",
         }
         if config.variant not in valid_variants:
             raise ValueError(f"unknown model variant {config.variant!r}")
@@ -440,6 +487,8 @@ class TioFormer(nn.Module):
             config = replace(config, local_capacity=0, fifo_capacity=0)
         elif config.variant == "kv_only_no_fifo":
             config = replace(config, fifo_capacity=0)
+        elif config.variant in {"gated_fifo", "hybrid_gated"}:
+            config = replace(config, gated_summary=True)
         self.config = config
         self.variant = config.variant
         self.range_encoder = (
@@ -459,17 +508,35 @@ class TioFormer(nn.Module):
             None if config.variant == "tof_only" else ImuEncoder(config)
         )
         self.fusion = (
-            CrossViewFusion(config)
-            if config.variant in {"full", "memoryless", "kv_only_no_fifo"}
+            CrossViewFusion(
+                config,
+                hybrid=config.variant in {"hybrid", "hybrid_gated"},
+            )
+            if config.variant
+            in {
+                "full",
+                "memoryless",
+                "kv_only_no_fifo",
+                "hybrid",
+                "gated_fifo",
+                "hybrid_gated",
+                "hybrid_split",
+            }
             else None
         )
         self.concat_proj = (
             nn.Linear(2 * config.feature_dim, config.feature_dim)
-            if config.variant == "naive_concat"
+            if config.variant in {"naive_concat", "hybrid_split"}
             else None
         )
         self.streaming = StreamingTransformer(config)
         self.pose_head = PoseHead(config)
+        self.streaming_pos = (
+            StreamingTransformer(config) if config.variant == "hybrid_split" else None
+        )
+        self.pose_head_pos = (
+            PoseHead(config) if config.variant == "hybrid_split" else None
+        )
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> "TioFormer":
@@ -477,7 +544,16 @@ class TioFormer(nn.Module):
 
     def init_state(
         self, batch_size: int, device: torch.device, dtype: torch.dtype
-    ) -> list[LayerState]:
+    ) -> list[LayerState] | tuple[list[LayerState], list[LayerState]]:
+        if self.variant == "hybrid_split":
+            return (
+                self.streaming_pos.init_state(
+                    batch_size, self.config.feature_dim, device, dtype
+                ),
+                self.streaming.init_state(
+                    batch_size, self.config.feature_dim, device, dtype
+                ),
+            )
         return self.streaming.init_state(batch_size, self.config.feature_dim, device, dtype)
 
     def count_parameters(self) -> int:
@@ -543,6 +619,16 @@ class TioFormer(nn.Module):
             return self.concat_proj(torch.cat([view_tokens.mean(dim=1), imu_tokens], dim=-1))
         return self.fusion(imu_tokens, view_tokens)
 
+    def _fused_features_pair(self, tof, imu, weight, previous_tof, previous_weight):
+        """Position branch = concat/local; rotation branch = directional attention."""
+        view_tokens = self._view_tokens(tof, weight, previous_tof, previous_weight)
+        imu_tokens = self._imu_tokens(imu)
+        position = self.concat_proj(
+            torch.cat([view_tokens.mean(dim=1), imu_tokens], dim=-1)
+        )
+        rotation = self.fusion(imu_tokens, view_tokens)
+        return position, rotation
+
     def forward(
         self,
         tof: torch.Tensor,
@@ -561,6 +647,18 @@ class TioFormer(nn.Module):
             previous_weight: optional reliability weights for ``previous_tof``.
         """
         batch, length = tof.shape[0], tof.shape[1]
+        if self.variant == "hybrid_split":
+            position, rotation = self._fused_features_pair(
+                tof, imu, weight, previous_tof, previous_weight
+            )
+            position_hidden = self.streaming_pos(position.reshape(batch, length, -1))
+            rotation_hidden = self.streaming(rotation.reshape(batch, length, -1))
+            position_motion = self.pose_head_pos(position_hidden)
+            rotation_motion = self.pose_head(rotation_hidden)
+            return {
+                "delta_p": position_motion[..., :3],
+                "delta_phi": rotation_motion[..., 3:],
+            }
         features = self._fused_features(
             tof, imu, weight, previous_tof, previous_weight
         )
@@ -581,6 +679,28 @@ class TioFormer(nn.Module):
         if tof.shape[1] != 1:
             raise ValueError("forward_stream expects T=1")
         batch = tof.shape[0]
+        if self.variant == "hybrid_split":
+            position, rotation = self._fused_features_pair(
+                tof, imu, weight, previous_tof, previous_weight
+            )
+            if states is None:
+                states = self.init_state(batch, position.device, position.dtype)
+            position_states, rotation_states = states
+            position_hidden, position_states = self.streaming_pos.forward_step(
+                position.unsqueeze(1), position_states
+            )
+            rotation_hidden, rotation_states = self.streaming.forward_step(
+                rotation.unsqueeze(1), rotation_states
+            )
+            position_motion = self.pose_head_pos(position_hidden)
+            rotation_motion = self.pose_head(rotation_hidden)
+            return (
+                {
+                    "delta_p": position_motion[..., :3],
+                    "delta_phi": rotation_motion[..., 3:],
+                },
+                (position_states, rotation_states),
+            )
         fused = self._fused_features(
             tof, imu, weight, previous_tof, previous_weight
         ).unsqueeze(1)

@@ -1,0 +1,16 @@
+tio_odometry_node:
+  ros__parameters:
+    # Installed model path is replaced by the launch file; this default works
+    # when running from the package source tree with a relative path.
+    model_path: ""
+    world_frame: odometry_map
+    body_frame: imu_link
+    warmup_frames: 64
+    path_max_poses: 1000
+    path_publish_period: 0.2
+    status_period: 1.0
+    trajectory_path: ""
+    tof_rate_hz: 15.0
+    imu_buffer_seconds: 2.0
+    # View index -> sensor id. The model expects front, left, right, down.
+    sensor_order: [0, 1, 2, 3]

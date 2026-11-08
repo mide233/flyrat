@@ -31,6 +31,20 @@ The method uses 4× VL53L5CX 8×8 ToF arrays (front / left / right / down) and a
   RPEp 0.0179 ± 0.0005 m / RPER 0.315 ± 0.061° / EDR 8.98 ± 0.43%**；
   LOSO 平均 ATE **0.4652 m**。完整报告见 `report/m5_report.md`，
   M4 结果表见 `report/m4_results.md`。
+- **模型改进筛选（v2）**：新增 `hybrid`、`gated_fifo`、`hybrid_gated`、
+  `hybrid_split`。15-epoch 筛选中 `hybrid_gated` ATE 0.4208 m；40-epoch 复核
+  0.4122 m，优于原 full 的 0.4316 m，但仍未超过 `naive_concat`（0.4013 m）和
+  `kv_only_no_fifo`（0.3925 m），RPER 0.757° 也更差。位置/旋转双分支
+  `hybrid_split` 为 0.4350 m，没有改善。结论为负结果，保留原 full 模型；
+  详见 `report/model_v2_results.md`。
+- **C++/ROS 接入完成（实验）**：主模型导出为
+  `libflyrat/models/tio_former_window64.pt`，新增 `flyrat::tio::TioOdometry`
+  和 `tio_odometry_node`，用 libtorch 在 C++ 中推理并发布
+  `/flyrat/odometry/*` 与 `odometry_map -> imu_link`。开发机已用仿真序列
+  跑通端到端链路；尚未做实机精度验证或 RK3566 部署。详见
+  [`docs/agent/odometry/tio_former.md`](../../docs/agent/odometry/tio_former.md)。
+  当前 Python 测试 **47 项通过**，C++ 默认构建 9 项、TIO 构建另加
+  `test_tio_api`。
 
 ## 依赖
 
@@ -197,6 +211,33 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/run_loso.py --epochs 1
 
 完整中文技术报告见 `report/m5_report.md`。
 
+## C++ / ROS 2 接入（实验）
+
+导出 TorchScript 模型（默认读取 `checkpoints/main_imu/seed0/best.pt`）：
+
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/export_tio.py \
+  --checkpoint checkpoints/main_imu/seed0/best.pt \
+  --out ../libflyrat/models/tio_former_window64.pt
+```
+
+C++ 后端需要 CPU libtorch：
+
+```bash
+python3 -m venv .venv-cpu
+.venv-cpu/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+TORCH_CMAKE="$PWD/.venv-cpu/lib/python3.12/site-packages/torch/share/cmake"
+cd ..
+cmake -S libflyrat -B libflyrat/build-tio \
+  -DFLYRAT_BUILD_TIO=ON -DFLYRAT_BUILD_TESTS=ON -DFLYRAT_BUILD_TOOLS=ON \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$TORCH_CMAKE"
+cmake --build libflyrat/build-tio -j"$(nproc)"
+ctest --test-dir libflyrat/build-tio --output-on-failure -R tio
+```
+
+ROS 包默认不编译 TIO 节点，需要 `-DFLYRAT_BUILD_TIO=ON`。节点、话题、回放和
+实机限制见 [`docs/agent/odometry/tio_former.md`](../../docs/agent/odometry/tio_former.md)。
+
 ## 测试
 
 ```bash
@@ -214,7 +255,7 @@ sim/         世界生成器输出、ToF rig、Gazebo 插件
 scripts/     世界/轨迹生成、录制、后处理、训练和评估入口
 tio_former/  Python 包：SE(3)、轨迹、ToF、IMU、数据和模型
 tests/       单元测试和资产检查
-report/      M4 结果表与图（M5 技术报告后续补充）
+report/      M4/M5 结果表、v2 负结果与技术报告
 ```
 
 ## 约定
