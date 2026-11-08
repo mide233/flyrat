@@ -1,18 +1,18 @@
 # 里程计模块
 
-`flyrat_odometry` 是实机双目/双目惯性里程计的骨架。**双目算法后端尚未实现**：
-节点会正常接收、同步和缓存数据并发布完整的状态与 TF，但位姿始终为无效值，
-状态始终为 `NOT_INITIALIZED`。
+`flyrat_odometry` 包包含两条路线：
 
-同一个包还提供实验性的 TIO-Former ToF-惯性节点 `tio_odometry_node`。它把
-`research/tio_former/` 训练并导出为 TorchScript 的模型通过 libtorch 接进 ROS，
-使用前/左/右/下 4 个 8×8 ToF 和 200 Hz IMU，发布相同的话题/TF 契约。实机
-ToF/IMU 链路已经验证，节点可以进入 `TRACKING`；但模型只在仿真数据上训练，
-当前实机静态零漂约 0.98 m / 20 s，暂不能用于飞行闭环。详见
-[`tio_former.md`](tio_former.md) 和 [`handoff.md`](handoff.md)。
+- **默认：TIO-Former ToF-惯性后端** `tio_odometry_node`。它使用前/左/右/下
+  4 个 8×8 ToF 和 200 Hz IMU，通过 libtorch 运行 TorchScript 模型。实机链路
+  已进入 `TRACKING`，但模型只在仿真数据上训练，2026-11-08 旧布局下静态
+  零漂约 0.98 m / 20 s，暂不能用于飞行闭环。详见
+  [`tio_former.md`](tio_former.md) 和 [`handoff.md`](handoff.md)。
+- **legacy：立体/立体惯性骨架** `odometry_node`。本文其余部分说明这条旧路线。
+  **算法后端尚未实现**：节点会接收、同步和缓存数据并发布状态与 TF，但位姿
+  始终无效，状态始终为 `NOT_INITIALIZED`。
 
-这样做的目的是先把传感器链路、时间同步、坐标系和 ROS 接口固定下来，后续只
-替换 `libflyrat` 中的后端实现，不需要再改节点和启动脚本。
+保留旧骨架是为了固定传感器链路、时间同步、坐标系和 ROS 接口；当前实机已
+移除双目，改为单个黑白单目相机，因此旧路线不再是默认路径。
 
 ## 1. 组成
 
@@ -20,7 +20,7 @@ ToF/IMU 链路已经验证，节点可以进入 `TRACKING`；但模型只在仿�
 |---|---|
 | `libflyrat/include/flyrat/odometry/odometry.hpp` | ROS 无关的里程计接口 |
 | `libflyrat/src/odometry/odometry.cpp` | 当前为桩实现，后端接入点 |
-| `libflyrat/configs/camera/uvc_640x480.yaml` | 相机内参、双目外参、IMU 噪声和外参 |
+| `libflyrat/configs/camera/uvc_640x480.yaml` | 旧双目标定；当前单目不使用 |
 | `libflyrat/tests/test_odometry_api.cpp` | 接口和桩行为测试 |
 | `flyrat_play/ros2_ws/src/flyrat_odometry/` | ROS 2 节点、参数、launch |
 | `docs/agent/odometry/coordinates.md` | 坐标系、TF 链和标定矩阵说明 |
@@ -143,7 +143,7 @@ imu:
 .script/build_ros2.sh
 ```
 
-以上命令只构建双目骨架。TIO-Former 节点需要 libtorch，用
+以上命令默认只构建节点骨架；TIO-Former 节点需要 libtorch，用
 `FLYRAT_BUILD_TIO=ON` 单独构建，步骤见
 [`tio_former.md`](tio_former.md#3-构建)。
 
@@ -153,10 +153,16 @@ imu:
 ros2 launch flyrat_odometry odometry.launch.py
 ```
 
-实机一键启动：
+实机一键启动（默认 TIO）：
 
 ```sh
 .script/bringup_real.sh
+```
+
+旧立体骨架需要显式选择：
+
+```sh
+.script/bringup_real.sh odometry_backend:=stereo
 ```
 
 不启动里程计、只看传感器：
@@ -179,8 +185,9 @@ ctest --test-dir libflyrat/build --output-on-failure -R odometry
 
 ## 7. 当前限制
 
-- 没有任何位姿输出；`/flyrat/odometry/odometry` 不会被发布，`/tf` 只有静态
-  外参。
+- **以下限制仅针对 legacy 立体骨架**：没有任何位姿输出；
+  `/flyrat/odometry/odometry` 不会被发布，`/tf` 只有静态外参。
 - 状态固定为 `NOT_INITIALIZED`，诊断级别为 WARN。
 - `saveTrajectory()` 未实现，设置 `trajectory_path` 只会在退出时报错。
-- 双目与 IMU 没有硬件同步，时间对齐仍依赖接收节点的时间戳修正。
+- 旧双目与 IMU 没有硬件同步，时间对齐仍依赖接收节点的时间戳修正。
+- 当前实机已无双目，单目相机还没有标定和视觉后端。

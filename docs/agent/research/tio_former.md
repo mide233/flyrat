@@ -20,7 +20,7 @@
 - 不在本阶段做边缘部署；先完成 PyTorch 原型，再把 TorchScript 模型接到
   `libflyrat`/ROS 2 做开发机验证。RK3566 交叉编译与机载性能评估仍后置。
 - 不改动飞控代码；研究代码放在 `research/tio_former/`，接入只新增
-  `flyrat::tio` 和 `tio_odometry_node`，不替换双目骨架。
+  `flyrat::tio` 和 `tio_odometry_node`；旧立体骨架保留为 legacy。
 
 ### 1.3 与论文的关键差异
 
@@ -326,14 +326,13 @@ scene_id, seq_id, traj_type, split
   接口。仿真回放和真实 4×VL53L5CX + IMU 都已验证 `TRACKING` 和有效里程计
   消息；默认构建不依赖 libtorch，但机载部署仍未验证。说明见
   `docs/agent/odometry/tio_former.md`。
-- 真机验证（2026-11-08）：四颗 ToF 设备端实测 14.8–15.2 Hz，0 读取错误；
-  TIO 节点进入 `TRACKING`。但无人机静止放桌面 20 s 漂移约 0.98 m，主要受
-  下视距桌面 0–5 mm、缺少前向 ToF（front 槽位接后向）和仿真域差异影响。
+- 真机验证（2026-11-08，旧布局）：四颗 ToF 设备端实测 14.8–15.2 Hz，0 读取
+  错误；TIO 节点进入 `TRACKING`。但无人机静止放桌面 20 s 漂移约 0.98 m，
+  主要受下视距桌面 0–5 mm、旧映射 front 槽位接后向和仿真域差异影响。
   当前模型不能用于飞行闭环；完整记录和下一步见
   `docs/agent/odometry/handoff.md`。
 - 实机准备：`flyrat_sensor_forwarder` 默认改为 8×8 @ 15 Hz，并新增
-  `--tof-resolution` / `--tof-rate`。由 INT/LPn 接线确定传感器 ID 为
-  0=下、1=后、2=左、3=右；TIO 节点用 `sensor_order: [1,2,3,0]` 映射到模型
-  front/left/right/down。当前机架没有前向 ToF，front 槽位暂用后向数据，
-  精度验证前需加装前向传感器或重训 rear/left/right/down 模型。
+  `--tof-resolution` / `--tof-rate`。机头改到原后向 ToF 一端后，传感器 ID 为
+  0=下、1=前、2=右、3=左；TIO 节点用 `sensor_order: [1,3,2,0]` 映射到模型
+  front/left/right/down。旧布局的 0.98 m 漂移需在新布局净空条件下复测。
 - 运行说明见 `research/tio_former/README.md`。

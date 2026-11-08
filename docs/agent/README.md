@@ -34,7 +34,7 @@
 ### 硬件
 
 - [`hardware/sensor_forwarding.md`](hardware/sensor_forwarding.md)
-  泰山派上的 IMU、4 颗 VL53L5CX ToF、双目相机如何采集、打包并通过 adb
+  泰山派上的 IMU、4 颗 VL53L5CX ToF、黑白单目相机如何采集、打包并通过 adb
   转发到开发机 ROS 2。
 
 ### 仿真

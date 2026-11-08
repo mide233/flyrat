@@ -4,7 +4,7 @@
   <name>flyrat_sensors</name>
   <version>0.1.0</version>
   <description>Receives the real-vehicle sensor stream over an adb TCP tunnel and
-    publishes IMU, ToF and stereo camera ROS 2 topics.</description>
+    publishes IMU, ToF and monochrome camera ROS 2 topics.</description>
   <maintainer email="flyrat@example.com">flyrat maintainers</maintainer>
   <license>MIT</license>
 

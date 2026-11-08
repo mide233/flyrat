@@ -172,7 +172,7 @@ public:
                 "tof_topic_" + std::to_string(index), defaults[index]);
         }
         const auto sensor_order = declare_parameter<std::vector<int64_t>>(
-            "sensor_order", { 1, 2, 3, 0 });
+            "sensor_order", { 1, 3, 2, 0 });
         if (sensor_order.size() != 4) {
             throw std::runtime_error("sensor_order must contain four sensor ids");
         }
@@ -190,12 +190,6 @@ public:
             "model views front/left/right/down <- ToF sensors %d/%d/%d/%d",
             sensor_order_[0], sensor_order_[1], sensor_order_[2],
             sensor_order_[3]);
-        if (sensor_order_[0] == 1) {
-            RCLCPP_WARN(get_logger(),
-                "model 'front' view is fed by sensor 1 (rear): the current "
-                "airframe has no front ToF; add a front sensor or retrain "
-                "with rear/left/right/down for correct real-flight use");
-        }
 
         rclcpp::QoS tof_qos = rclcpp::SensorDataQoS();
         tof_qos.keep_last(4);
@@ -473,7 +467,7 @@ private:
     double status_period_ = 1.0;
     int path_max_poses_ = 1000;
     std::array<std::string, 4> tof_topics_;
-    std::array<int, 4> sensor_order_ { 1, 2, 3, 0 };
+    std::array<int, 4> sensor_order_ { 1, 3, 2, 0 };
     std::atomic<double> last_tof_stamp_ { -1.0 };
 
     std::unique_ptr<TioOdometry> odometry_;

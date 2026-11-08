@@ -122,13 +122,13 @@ ctest --test-dir libflyrat/build --output-on-failure
 
 ```sh
 ./libflyrat/build/tof_bench --device /dev/i2c-2 --seconds 10 \
-  --resolution 4 --hz 60 --sensors 4
+  --resolution 8 --hz 15 --sensors 4
 ```
 
 可选 `--interrupts`、`--lpn`、`--int`、`--poll-ms`。ToF 地址固定为
 `0x60/0x62/0x64/0x66`，不支持通过参数修改。
 
-`stereo_bench`：双目相机采集。
+`stereo_bench`：旧双目采集工具；当前实机已改为单目，仅保留给旧硬件。
 
 ```sh
 ./libflyrat/build/stereo_bench --device /dev/video10 \
@@ -172,10 +172,12 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 --msp-device PATH       默认 /dev/ttyS3
 --msp-baud N            默认 921600
 --camera-device PATH    默认 /dev/video10
---camera-width N        默认 1280（左右拼接总宽）
+--camera-width N        默认 640
 --camera-height N       默认 480
 --camera-fps N          默认 60
---no-imu --no-tof --no-stereo
+--tof-resolution N      默认 8（4 或 8）
+--tof-rate HZ           默认 15（4x4 最高 60，8x8 最高 15）
+--no-imu --no-tof --no-camera
 --help
 ```
 
@@ -235,12 +237,11 @@ ros2 run flyrat_sensors sensor_receiver_node
 ```text
 /flyrat/sensors/imu
 /flyrat/sensors/tof_0 … /flyrat/sensors/tof_3
-/flyrat/sensors/stereo/left/image_raw
-/flyrat/sensors/stereo/right/image_raw
+/flyrat/sensors/camera/image_raw
 ```
 
-默认 `stereo_color=false`，发布 mono8；需要彩色时设置
-`stereo_color:=true`，发布 bgr8。
+单目相机发布 `mono8`，默认 640x480；`camera_frame_id` 默认为
+`camera_front_optical_frame`。
 
 ## 5. ROS 2
 
@@ -275,13 +276,13 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 |---|---|
 | `flyrat_sensors_interfaces` | `TofZone`、`TofFrame` 自定义消息 |
 | `flyrat_sensors` | TCP 接收、MJPEG 解码、ROS 发布 |
-| `flyrat_odometry` | 里程计节点骨架（双目/IMU 同步、TF、状态；后端待实现） |
+| `flyrat_odometry` | 默认 TIO-Former ToF-惯性节点；旧立体骨架保留为 legacy |
 | `flyrat_msp` | MSP 协议接入 |
 | `flyrat_control` | 控制节点与 SITL launch |
 
 `sensors.launch.py` 参数：`host`（默认 127.0.0.1）、`port`（默认 5000）、
-`stereo_color`、`acc_lsb_per_g`、`gyro_lsb_per_dps`、`imu_accel_axis`（默认
-`none`）、`imu_gyro_axis`（默认 `none`）。当前实机加速度和陀螺仪原始数据
+`acc_lsb_per_g`、`gyro_lsb_per_dps`、`imu_accel_axis`（默认 `none`）、
+`imu_gyro_axis`（默认 `none`）。当前实机加速度和陀螺仪原始数据
 都已是 ROS FLU，实测左偏航 `angular_velocity.z > 0`。只有偏航为顺时针正的
 飞控才需要 `bf_to_flu`（翻 z）；真正的 FRD 数据源用 `frd_to_flu`。
 
@@ -351,15 +352,14 @@ ros2 launch flyrat_control flyrat_sitl.launch.py \
 仿真细节、端口和话题见
 [`simulation/betaflight_sitl_gazebo.md`](simulation/betaflight_sitl_gazebo.md)。
 
-## 7. 里程计骨架
+## 7. 里程计
 
-ORB-SLAM3 已从仓库移除。`libflyrat` 现在提供不依赖 OpenCV 的
-`flyrat::odometry` 接口，ROS 2 侧对应 `flyrat_odometry` 包。双目后端仍是骨架：
-节点会正常启动、校验标定、发布静态 TF 和状态，但后端返回
-`kNotInitialized`，不会输出有效位姿。包内另有实验性的 TIO-Former ToF-惯性
-后端 `tio_odometry_node`，需要 libtorch 显式开启，详见 7.6 和
-[`odometry/tio_former.md`](odometry/tio_former.md)。算法实现位置和双目接口细节见
-[`odometry/overview.md`](odometry/overview.md)。
+当前 `bringup_real.sh` 默认启动 TIO-Former ToF-惯性后端
+`tio_odometry_node`（4×8×8 ToF + 200 Hz IMU，需要 libtorch，见 7.6）。
+`libflyrat` 同时保留不依赖 OpenCV 的旧立体接口 `flyrat::odometry` 和
+`odometry_node`，但它已是 legacy 骨架：只做输入校验、静态 TF 和状态发布，
+不输出有效位姿。TIO 细节见 [`odometry/tio_former.md`](odometry/tio_former.md)，
+旧接口见 [`odometry/overview.md`](odometry/overview.md)。
 
 ### 7.1 构建与测试
 
@@ -385,10 +385,10 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 节点使用 OpenCV 将 ROS 图像消息转换为 `ImageView`，并用 `cv::FileStorage`
 读取标定文件。
 
-### 7.2 标定配置
+### 7.2 legacy 标定配置
 
-`libflyrat/configs/camera/uvc_640x480.yaml` 保存 DECXIN 双目 UVC 相机和
-Betaflight IMU 的实机标定：
+`libflyrat/configs/camera/uvc_640x480.yaml` 保存旧 DECXIN 双目 UVC 相机和
+Betaflight IMU 的实机标定；当前单目相机不使用该文件：
 
 - `camera.left` / `camera.right`：640x480 每目内参和 plumb-bob 畸变；
 - `camera.T_left_right`：左目 ← 右目，`p_left = T_left_right * p_right`；
@@ -399,7 +399,7 @@ Betaflight IMU 的实机标定：
 `share/flyrat_odometry/config/`，也可以通过 `camera_config_path` 指向源码树
 或其他文件。
 
-### 7.3 C++ API
+### 7.3 legacy C++ API
 
 头文件 `libflyrat/include/flyrat/odometry/odometry.hpp`：
 
@@ -416,7 +416,7 @@ auto result = odometry.track(left, right, timestamp, imu_samples);
 `libflyrat/src/odometry/odometry.cpp`，用 TODO 标出了后端接入位置；`track()`
 当前只做输入校验并返回 `State::kNotInitialized`。
 
-### 7.4 ROS 2 节点
+### 7.4 legacy 立体 ROS 2 节点
 
 先按第 4.3 节启动设备转发和 `flyrat_sensors`，再运行：
 
@@ -426,9 +426,9 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
   ros2 launch flyrat_odometry odometry.launch.py'
 ```
 
-`camera_config_path` 默认使用包内安装的 `uvc_640x480.yaml`；
-`body_frame:=imu_link` 是默认机体坐标系；`world_frame` 默认
-`odometry_map`。节点会发布静态 `imu_link -> camera_left_optical_frame` 和
+该节点只用于旧立体路线；默认 bringup 不会启动它。`camera_config_path` 默认
+使用包内安装的 `uvc_640x480.yaml`；`body_frame:=imu_link` 是默认机体坐标系；
+`world_frame` 默认 `odometry_map`。节点会发布静态 `imu_link -> camera_left_optical_frame` 和
 `camera_left_optical_frame -> camera_right_optical_frame`（来自
 `camera.T_left_right`）。其余参数见 `flyrat_odometry/config/odometry.yaml`。
 
@@ -472,11 +472,11 @@ IMU 的 scale/misalignment 在 `sensor_receiver_node` 发布前按
 ### 7.5 一键 bringup
 
 `bringup.launch.py` 把 adb forward、设备端 forwarder、`sensor_receiver_node` 和
-`odometry_node` 串成一条启动链：
+选定的里程计后端串成一条启动链：
 
 ```sh
-.script/bringup_real.sh                         # 传感器 + 里程计骨架
-.script/bringup_real.sh mode:=stereo             # 纯双目，不订阅 IMU
+.script/bringup_real.sh                         # 传感器 + TIO 后端
+.script/bringup_real.sh odometry_backend:=stereo # 旧立体骨架
 .script/bringup_real.sh start_foxglove:=true    # 再加 Foxglove bridge
 .script/bringup_real.sh start_odometry:=false   # 只看传感器
 .script/bringup_real.sh start_adb_forward:=false start_device:=false  # 复用已有转发
@@ -497,13 +497,14 @@ ros2 launch flyrat_odometry bringup.launch.py
   `/tmp/flyrat_sensor_forwarder --listen 127.0.0.1:5000`；
 - 设备 forwarder 意外退出时整个 launch 停止，不会让接收节点无限重连；
 - 1 秒后启动 `sensor_receiver_node`（ToF 初始化约 7 秒，接收节点会自动重连）；
-- 1 秒后启动 `odometry_node`；
+- 1 秒后启动默认的 `tio_odometry_node`；
 - 使用脚本时，`Ctrl-C` 会停止设备端 forwarder 并删除 adb forward；直接
   `ros2 launch` 不会做这两步清理。
 
-`camera_config_path` 默认优先使用源码树的
-`libflyrat/configs/camera/uvc_640x480.yaml`，所以改外参后不需要重新
-`colcon build`。也可以显式指定其他文件。
+设备端默认相机为 `/dev/video10`、640x480 MJPEG（请求 60 Hz，主机实测约
+30 Hz）；可用 `camera_device`、
+`camera_width`、`camera_height`、`camera_fps` 覆盖。旧立体路线的
+`camera_config_path` 只有 `odometry_backend:=stereo` 时才需要。
 
 常用参数：
 
@@ -516,19 +517,20 @@ start_device=true
 start_adb_forward=true
 start_sensors=true
 start_odometry=true
-mode=imu_stereo        # 纯双目用 mode:=stereo
-camera_fps=60          # 标定录制用 20
-camera_config_path=    # 空则自动查找源码树/包内标定
+odometry_backend=tio   # tio（默认）或 stereo（legacy）
+camera_device=/dev/video10
+camera_width=640
+camera_height=480
+camera_fps=60          # 请求值；主机实测约 30 Hz
 record=false           # true 时用 ros2 bag record 录传感器
 record_path=           # 空则 /tmp/flyrat_bags/<时间戳>
-record_topics=/flyrat/sensors/imu /flyrat/sensors/stereo/left/image_raw /flyrat/sensors/stereo/right/image_raw
+record_topics=/flyrat/sensors/imu /flyrat/sensors/camera/image_raw
 record_imu_only=false  # true 时只录 IMU（Allan 方差）
 record_storage=mcap
 record_duration=0      # 秒数或 30m/3h；>0 时倒计时并自动停止录制
 record_warmup=8        # 先等设备启动，再开始倒计时
 start_foxglove=false
 foxglove_port=8765
-stereo_color=false
 imu_accel_axis=none
 imu_gyro_axis=none
 trajectory_path=
@@ -546,7 +548,7 @@ trajectory_path=
   record_duration:=3h
 ```
 
-录双目 + IMU 做 Kalibr，相机降到 20 Hz：
+录单目 + IMU，相机降到 20 Hz：
 
 ```sh
 .script/bringup_real.sh start_odometry:=false camera_fps:=20 record:=true
@@ -596,30 +598,28 @@ bash -lc '
   ros2 launch flyrat_odometry tio_odometry.launch.py'
 ```
 
-一键实机 bringup 用 `odometry_backend:=tio` 切换后端：
+默认一键 bringup 已经是 TIO：
 
 ```sh
-.script/bringup_real.sh odometry_backend:=tio
+.script/bringup_real.sh
 ```
 
-它和双目节点使用同一组 `/flyrat/odometry/*` 话题与 `odometry_map -> imu_link`
-TF，因此 Foxglove 配置不需要改。节点需要 64 帧（约 4.3 秒）ToF 才输出第一个
-有效位姿。
+它和旧立体节点使用同一组 `/flyrat/odometry/*` 话题与
+`odometry_map -> imu_link` TF，因此 Foxglove 配置不需要改。节点需要 64 帧
+（约 4.3 秒）ToF 才输出第一个有效位姿。参数名是 `start_odometry`（默认
+`true`），不是旧的 `start_slam`。
 
-注意参数名是 `start_odometry`（默认 `true`），不是旧的 `start_slam`；默认
-后端是 `stereo`，所以跑 TIO 必须显式写 `odometry_backend:=tio`。
-
-2026-11-08 真机验证结果：4 颗 ToF 设备端实测 14.8–15.2 Hz，TIO 节点能进入
-`TRACKING` 并发布 odometry/TF；但无人机静止放桌面 20 s 漂移约 0.98 m，
-主要受下视贴桌面、缺少前向 ToF 和仿真域差异影响。当前不能用于飞行闭环。
-完整记录见 [`odometry/handoff.md`](odometry/handoff.md)。
+2026-11-08 旧布局真机验证结果：4 颗 ToF 设备端实测 14.8–15.2 Hz，TIO
+节点能进入 `TRACKING` 并发布 odometry/TF；但无人机静止放桌面 20 s 漂移约
+0.98 m，主要受下视贴桌面、旧映射中 front 槽位接后向数据以及仿真域差异影响。
+当前不能用于飞行闭环。机头重定义后新映射尚未做净空静止/飞行验证。完整记录见
+[`odometry/handoff.md`](odometry/handoff.md)。
 
 实机 ToF 默认配置已改为 **8×8 @ 15 Hz**。`flyrat_sensor_forwarder` 的
-`--tof-resolution` / `--tof-rate` 可覆盖，8×8 最高 15 Hz。Onboard INT/LPn
-接线对应关系为：传感器 0=下、1=后、2=左、3=右；TIO 节点配置
-`sensor_order: [1,2,3,0]`，即模型 front 槽位暂时使用后向传感器。当前机架
-没有前向 ToF，做实机精度验证前应加装前向传感器，或重新训练
-rear/left/right/down 模型。ToF 视角顺序、`sensor_order`、参数和限制见
+`--tof-resolution` / `--tof-rate` 可覆盖，8×8 最高 15 Hz。机头在原来后向
+ToF 一端，当前 INT/LPn 对应关系为：传感器 0=下、1=前、2=右、3=左；TIO
+节点配置 `sensor_order: [1,3,2,0]`，即模型 front/left/right/down ← 1/3/2/0。
+ToF 视角顺序、`sensor_order`、参数和限制见
 [`odometry/tio_former.md`](odometry/tio_former.md)。
 
 ## 8. Docker 与 CI
@@ -676,5 +676,7 @@ docker exec -it rat-dev-full bash
 | ROS 收不到数据 | 先确认 `adb forward --list`，再确认设备 forwarder 已监听 5000 |
 | ToF 全部 `distance_mm=0` | 确认 C/C++ 没有单独传 `VL53L5CX_DISABLE_*`，重新完整编译 |
 | ToF 初始化失败 | 确认四颗 LPn/INT 接线和 i2c2，检查地址是否被其他器件占用 |
-| 里程计未输出位姿 | 当前后端是桩实现，只发布 `NOT_INITIALIZED` 状态；等待后续算法实现 |
+| 里程计未输出位姿 | 默认 TIO 需等 64 帧 ToF；旧 `stereo` 骨架只会发布 `NOT_INITIALIZED` |
+| 相机无图像 | 确认设备 `/dev/video10` 存在，且 bringup 未传 `--no-camera` |
+| ToF 方向不对 | 检查 `sensor_order: [1,3,2,0]`（前/左/右/下 ← 1/3/2/0） |
 | 里程计配置错误 | 检查 `camera_config_path` 指向的 YAML 是否存在、`T_body_camera` 是否为合法等距变换 |

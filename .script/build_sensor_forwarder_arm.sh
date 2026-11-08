@@ -65,7 +65,7 @@ CXX_SOURCES=(
     libflyrat/src/msp_interact.cpp
     libflyrat/src/hardware/serial_transport.cpp
     libflyrat/src/hardware/tof.cpp
-    libflyrat/src/hardware/stereo_jpeg_source.cpp
+    libflyrat/src/hardware/mono_jpeg_source.cpp
 )
 
 OBJ_DIR="${BUILD_DIR}/obj"

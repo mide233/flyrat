@@ -14,7 +14,7 @@
 #   .script/bringup_real.sh start_odometry:=false
 #   .script/bringup_real.sh odometry_backend:=tio
 #   .script/bringup_real.sh record:=true record_imu_only:=true record_duration:=3h
-#   .script/bringup_real.sh camera_config_path:=/path/to/calibration.yaml
+#   .script/bringup_real.sh record:=true record_topics:="/flyrat/sensors/imu /flyrat/sensors/camera/image_raw"
 #
 # Environment:
 #   ROS_DISTRO                ROS 2 distribution (default: jazzy)
@@ -75,7 +75,7 @@ START_ADB_FORWARD=1
 START_DEVICE=1
 RECORD=0
 RECORD_PATH=""
-RECORD_TOPICS="/flyrat/sensors/imu /flyrat/sensors/stereo/left/image_raw /flyrat/sensors/stereo/right/image_raw"
+RECORD_TOPICS="/flyrat/sensors/imu /flyrat/sensors/camera/image_raw"
 RECORD_IMU_ONLY=0
 RECORD_STORAGE=mcap
 RECORD_DURATION=0

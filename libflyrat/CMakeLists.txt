@@ -104,7 +104,7 @@ add_library(flyrat_hardware
   src/hardware/mjpeg_decoder.cpp
   src/hardware/serial_transport.cpp
   src/hardware/stereo_camera.cpp
-  src/hardware/stereo_jpeg_source.cpp
+  src/hardware/mono_jpeg_source.cpp
   src/hardware/tcp_transport.cpp
   src/hardware/tof.cpp)
 add_library(flyrat::flyrat_hardware ALIAS flyrat_hardware)

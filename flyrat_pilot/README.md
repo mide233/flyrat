@@ -26,18 +26,18 @@ cmake --build flyrat_pilot/build -j
   同时提供每类数据的最新快照。断线自动重连，运行期错误通过 `LinkStats` 与
   link 回调返回；`send_rc()` 只写单槽邮箱，不等待 ACK。
 - `flyrat::hardware::TofArray`：4 颗 VL53L5CX 共用 i2c2 的用户态驱动。
-  默认 4x4@60 Hz、只保留 distance/target_status/nb_target（128 B/帧），
-  地址硬编码为 `0x60/0x62/0x64/0x66`，不再单独配置；LPn 默认
-  `108/114/101/98`，INT 默认 `107/104/100/97`（下/后/左/右）。
+  传感器转发程序默认使用 8x8@15 Hz（TIO-Former 输入）；只保留
+  distance/target_status/nb_target（128 B/帧）。地址硬编码为
+  `0x60/0x62/0x64/0x66`，不再单独配置；LPn 默认 `108/114/101/98`，
+  INT 默认 `107/104/100/97`（下/前/右/左，机头在原后向 ToF 一端）。
   每次启动逐颗释放 LPn，自动探测传感器残留的旧地址并改回固定地址；
   四颗从启动到监听约 7.2 秒。
 - `flyrat::hardware::Imu`：读取 `MspInteract` 的 IMU 最新快照，可带最大年龄检查。
-- `flyrat::hardware::StereoCamera`：UVC 双目相机 V4L2 采集，按左右拼接帧拆成两个
-  同时间戳的视图。`StereoFormat::kYuyv` 为原始 YUYV（默认 `1280x480@15`，左右各
-  640x480）；`StereoFormat::kMjpeg` 使用 Rockchip MPP 硬解，推荐 `1280x480@60`
-  （左右各 640x480）或 `640x240@60`。MJPEG 的 `grayscale=true` 输出左右 GRAY8，
-  `grayscale=false` 输出左右 NV12 彩色（Y 平面后接 UV 平面）。MJPEG 解码通过运行时
-  `dlopen` 加载 GStreamer，需要目标端有 `mppjpegdec`，因此使用该模式的程序需动态链接。
+- `flyrat::hardware::MonoJpegSource`：USB 黑白相机的 V4L2 MJPEG 采集，默认
+  `/dev/video10`、640x480@60。设备端不解码，只把原生 JPEG 转发到开发机；
+  主机端 `sensor_receiver_node` 用 OpenCV 解码为 `mono8`。
+- `flyrat::hardware::StereoCamera`：旧双目采集实现，当前实机已移除双目，仅
+  保留给旧硬件/旧数据。
 - `flyrat::hardware::Transport` / `make_serial_transport()` / `make_tcp_transport()`：
   MSP 使用的字节流后端，单测可注入假传输。
 - `flyrat::RcReceiver`：UDP 9004 虚拟接收机（仅仿真用）。

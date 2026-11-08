@@ -98,10 +98,8 @@ public:
         reconnect_ms_ = declare_parameter<int>("reconnect_ms", 1000);
         imu_frame_id_ = declare_parameter<std::string>("imu_frame_id", "imu_link");
         tof_frame_prefix_ = declare_parameter<std::string>("tof_frame_id", "tof_");
-        left_frame_id_ = declare_parameter<std::string>(
-            "left_frame_id", "camera_left_optical_frame");
-        right_frame_id_ = declare_parameter<std::string>(
-            "right_frame_id", "camera_right_optical_frame");
+        camera_frame_id_ = declare_parameter<std::string>(
+            "camera_frame_id", "camera_front_optical_frame");
         acc_lsb_per_g_ = declare_parameter<double>("acc_lsb_per_g", 2048.0);
         gyro_lsb_per_dps_ = declare_parameter<double>("gyro_lsb_per_dps", 16.4);
         imu_accel_axis_ = declare_parameter<std::string>("imu_accel_axis", "none");
@@ -122,7 +120,6 @@ public:
             "imu_gyr_A", zero9);
         const auto gyr_c = declare_parameter<std::vector<double>>(
             "imu_gyr_C_gyro_i", identity9);
-        stereo_color_ = declare_parameter<bool>("stereo_color", false);
         const int tof_count = declare_parameter<int>("tof_count", 4);
 
         if (imu_intrinsics_enable_) {
@@ -188,10 +185,8 @@ public:
         const auto qos = rclcpp::SensorDataQoS().keep_last(2);
         imu_pub_ = create_publisher<sensor_msgs::msg::Imu>(
             "/flyrat/sensors/imu", qos);
-        left_pub_ = create_publisher<sensor_msgs::msg::Image>(
-            "/flyrat/sensors/stereo/left/image_raw", qos);
-        right_pub_ = create_publisher<sensor_msgs::msg::Image>(
-            "/flyrat/sensors/stereo/right/image_raw", qos);
+        camera_pub_ = create_publisher<sensor_msgs::msg::Image>(
+            "/flyrat/sensors/camera/image_raw", qos);
         for (int i = 0; i < std::max(tof_count, 0); ++i) {
             tof_pubs_.push_back(create_publisher<flyrat_sensors_interfaces::msg::TofFrame>(
                 "/flyrat/sensors/tof_" + std::to_string(i), qos));
@@ -347,8 +342,8 @@ private:
         case flyrat::sensors::MessageType::kTof:
             publish_tof(header, payload);
             break;
-        case flyrat::sensors::MessageType::kStereoJpeg:
-            publish_stereo(header, payload);
+        case flyrat::sensors::MessageType::kCameraJpeg:
+            publish_camera(header, payload);
             break;
         case flyrat::sensors::MessageType::kStats:
             break;
@@ -434,23 +429,19 @@ private:
         ++tof_count_;
     }
 
-    void publish_stereo(const flyrat::sensors::Header& header,
+    void publish_camera(const flyrat::sensors::Header& header,
         const std::vector<std::uint8_t>& payload)
     {
-        flyrat::sensors::StereoJpegView view;
-        if (!flyrat::sensors::decode_stereo_jpeg(payload.data(), payload.size(), view)) {
+        flyrat::sensors::JpegView view;
+        if (!flyrat::sensors::decode_jpeg(payload.data(), payload.size(), view)) {
             RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-                "malformed stereo JPEG payload");
-            return;
-        }
-        if ((view.width % 2U) != 0U) {
+                "malformed camera JPEG payload");
             return;
         }
 
         cv::Mat encoded(1, static_cast<int>(view.size), CV_8UC1,
             const_cast<std::uint8_t*>(view.jpeg));
-        cv::Mat decoded = cv::imdecode(
-            encoded, stereo_color_ ? cv::IMREAD_COLOR : cv::IMREAD_GRAYSCALE);
+        cv::Mat decoded = cv::imdecode(encoded, cv::IMREAD_GRAYSCALE);
         if (decoded.empty() || decoded.cols != static_cast<int>(view.width) ||
             decoded.rows != static_cast<int>(view.height)) {
             RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
@@ -458,19 +449,11 @@ private:
             return;
         }
 
-        const int half = decoded.cols / 2;
-        const cv::Mat left = decoded.colRange(0, half);
-        const cv::Mat right = decoded.colRange(half, decoded.cols);
-        const rclcpp::Time stamp = stamp_for(header.device_time_ns);
-        const std::string encoding = stereo_color_ ? "bgr8" : "mono8";
-
-        sensor_msgs::msg::Image left_msg;
-        sensor_msgs::msg::Image right_msg;
-        fill_image(left_msg, left, encoding, stamp, left_frame_id_);
-        fill_image(right_msg, right, encoding, stamp, right_frame_id_);
-        left_pub_->publish(left_msg);
-        right_pub_->publish(right_msg);
-        ++stereo_count_;
+        sensor_msgs::msg::Image msg;
+        fill_image(msg, decoded, "mono8", stamp_for(header.device_time_ns),
+            camera_frame_id_);
+        camera_pub_->publish(msg);
+        ++camera_count_;
     }
 
     std::string host_;
@@ -478,8 +461,7 @@ private:
     int reconnect_ms_ = 1000;
     std::string imu_frame_id_;
     std::string tof_frame_prefix_;
-    std::string left_frame_id_;
-    std::string right_frame_id_;
+    std::string camera_frame_id_;
     double acc_lsb_per_g_ = 2048.0;
     double gyro_lsb_per_dps_ = 16.4;
     std::string imu_accel_axis_ = "none";
@@ -496,13 +478,11 @@ private:
     cv::Matx33d gyr_M_inv_ = cv::Matx33d::eye();
     cv::Matx33d gyr_A_ = cv::Matx33d::zeros();
     cv::Matx33d gyr_C_ = cv::Matx33d::eye();
-    bool stereo_color_ = false;
 
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
     std::vector<rclcpp::Publisher<flyrat_sensors_interfaces::msg::TofFrame>::SharedPtr>
         tof_pubs_;
-    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr left_pub_;
-    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr right_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr camera_pub_;
 
     std::thread thread_;
     std::atomic<bool> stop_ { false };
@@ -511,7 +491,7 @@ private:
     std::int64_t offset_ns_ = 0;
     std::uint64_t imu_count_ = 0;
     std::uint64_t tof_count_ = 0;
-    std::uint64_t stereo_count_ = 0;
+    std::uint64_t camera_count_ = 0;
 };
 
 } // namespace flyrat_sensors

@@ -1,6 +1,6 @@
 # 实机传感器转发到 ROS 2
 
-本文说明如何把泰山派上的 IMU、4 颗 VL53L5CX ToF 和双目相机，通过 adb 转发到
+本文说明如何把泰山派上的 IMU、4 颗 VL53L5CX ToF 和黑白单目相机，通过 adb 转发到
 开发机，并在 ROS 2 中发布为标准/自定义话题，用于算法调试。项目整体状态见
 [`status/project_status.md`](../status/project_status.md)，编译与运行命令见
 [`build_and_run.md`](../build_and_run.md)。
@@ -11,7 +11,7 @@
 泰山派 flyrat_sensor_forwarder
   ├─ MspInteract    /dev/ttyS3       IMU，原始计数
   ├─ TofArray       i2c2             4 × VL53L5CX
-  └─ StereoJpegSource /dev/video10   原生 MJPEG，左右拼接
+  └─ MonoJpegSource  /dev/video10   原生 MJPEG，640x480 黑白
               │
               ▼
        TCP 127.0.0.1:5000
@@ -21,18 +21,12 @@
 开发机 flyrat_sensors/sensor_receiver_node
   ├─ sensor_msgs/Imu
   ├─ flyrat_sensors_interfaces/TofFrame ×4
-  └─ sensor_msgs/Image 左右目
+  └─ sensor_msgs/Image 单目 mono8
 ```
 
-设备端不解码双目 MJPEG。当前 adb 链路实测约 30 MB/s：
-
-| 数据 | 带宽 |
-|---|---:|
-| 原生 MJPEG 1280x480@60 | 约 3.2 MB/s |
-| 原始 GRAY8 640x480/眼@60 | 约 36.9 MB/s |
-| 原始 NV12 640x480/眼@60 | 约 55 MB/s |
-
-因此默认只用原生 MJPEG 过 adb，开发机再用 OpenCV 解码、拆左右。
+设备端不解码相机 MJPEG。当前 adb 链路实测约 30 MB/s；640x480@60
+黑白 MJPEG 通常远低于 1 MB/s。默认只把原生 MJPEG 过 adb，开发机再用
+OpenCV 解码为 `mono8`。
 
 ## 2. 设备端
 
@@ -51,12 +45,12 @@
 --msp-device /dev/ttyS3   飞控 MSP 串口
 --msp-baud 921600
 --camera-device /dev/video10
---camera-width 1280       整幅左右拼接宽度
+--camera-width 640        单目图像宽度
 --camera-height 480
---camera-fps 60
+--camera-fps 60         请求值；主机实测约 30 Hz
 --tof-resolution 8      4 或 8；默认 8
 --tof-rate 15           4x4 最高 60，8x8 最高 15；默认 15
---no-imu / --no-tof / --no-stereo
+--no-imu / --no-tof / --no-camera
 ```
 
 TIO-Former 需要 4 颗 ToF 都输出 **8×8 @ 15 Hz**，因此
@@ -69,16 +63,16 @@ ToF 的安装方向由 INT/LPn 的电气连接确定。RK3566 的 Linux GPIO 编
 | 传感器 ID | 方向 | INT | LPn | Linux GPIO |
 |---:|---|---|---|---|
 | 0 | 下 | 3B3 | 3B4 | 107 / 108 |
-| 1 | 后 | 3B0 | 3C2 | 104 / 114 |
-| 2 | 左 | 3A4 | 3A5 | 100 / 101 |
-| 3 | 右 | 3A1 | 3A2 | 97 / 98 |
+| 1 | 前 | 3B0 | 3C2 | 104 / 114 |
+| 2 | 右 | 3A4 | 3A5 | 100 / 101 |
+| 3 | 左 | 3A1 | 3A2 | 97 / 98 |
 
 `TofArray` 的 `int_gpio` / `lpn_gpio` 数组顺序必须与上表一致：
 `int = {107, 104, 100, 97}`，`lpn = {108, 114, 101, 98}`。
 ROS 话题 `/flyrat/sensors/tof_0..3` 也按这个传感器 ID 发布。TIO-Former
 节点再通过 `sensor_order` 把它映射到模型的
-front/left/right/down 视角；当前实机没有前向 ToF，映射为
-`[1, 2, 3, 0]`（模型 front 槽位暂用后向传感器），详见
+front/left/right/down 视角。当前机头已改到原后向 ToF 一端，因此映射为
+`[1, 3, 2, 0]`，详见
 [`../odometry/tio_former.md`](../odometry/tio_former.md)。
 
 VL53L5CX 的输出裁剪宏（`VL53L5CX_DISABLE_*`）统一写在
@@ -129,7 +123,6 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 ```text
 host=127.0.0.1
 port=5000
-stereo_color=false
 acc_lsb_per_g=2048.0
 gyro_lsb_per_dps=16.4
 imu_accel_axis=none
@@ -137,8 +130,8 @@ imu_gyro_axis=none
 ```
 
 节点还支持 `reconnect_ms`、`tof_count`、`imu_frame_id`、`tof_frame_id`、
-`left_frame_id`、`right_frame_id`，直接运行节点时可用 `--ros-args -p 名字:=值`
-传入。
+`camera_frame_id`（默认 `camera_front_optical_frame`），直接运行节点时可用
+`--ros-args -p 名字:=值` 传入。
 
 `MSP_RAW_IMU` 的尺度跟飞控板有关。当前实机的
 `flyrat_sensors/config/imu_intrinsics.yaml` 同时设置了：
@@ -191,22 +184,21 @@ w_body = C_gyro_i^T * inv(M_gyr) * (w_raw - A * a_gyro)
 /flyrat/sensors/tof_1
 /flyrat/sensors/tof_2
 /flyrat/sensors/tof_3
-/flyrat/sensors/stereo/left/image_raw
-/flyrat/sensors/stereo/right/image_raw
+/flyrat/sensors/camera/image_raw
 ```
 
 - IMU：`sensor_msgs/msg/Imu`，线加速度为 m/s²、角速度为 rad/s，orientation 暂无，
   协方差首项为 `-1`。`imu_frame_id` 默认 `imu_link`。
 - ToF：每颗一个 `flyrat_sensors_interfaces/msg/TofFrame`，`zones[64]`，
   `valid = target_status in {5, 9}`。
-- 双目：默认 `mono8`，`stereo_color:=true` 时 `bgr8`；宽高为单眼尺寸。
+- 单目相机：`sensor_msgs/msg/Image`，`mono8`，默认 640x480，请求 60 Hz。
 
 ## 5. 验收
 
 ```sh
 ros2 topic hz /flyrat/sensors/imu
 ros2 topic hz /flyrat/sensors/tof_0
-ros2 topic hz /flyrat/sensors/stereo/left/image_raw
+ros2 topic hz /flyrat/sensors/camera/image_raw
 ros2 topic echo --once /flyrat/sensors/tof_0
 ```
 
@@ -215,16 +207,17 @@ ros2 topic echo --once /flyrat/sensors/tof_0
 - IMU 约 200 Hz；静止时 `linear_acceleration.z` 约 `+9.8 m/s²`；
 - 每颗 ToF 约 15 Hz，`TofFrame.resolution=8`（8×8）；若显式使用
   `--tof-resolution 4 --tof-rate 60`，则约 57–58 Hz、`resolution=4`；
-- 左右图像各约 60 Hz，`1280x480` 模式下单眼 `640x480`。
+- 单目图像 `640x480`、`mono8`；2026-11-08 主机实测约 30 Hz（请求 60 Hz，
+  受 UVC/adb/解码链路限制）。
 
 2026-11-08 设备端 `tof_bench` 实测（10 s，8×8@15）：
 
 | Sensor | 帧数 | 实测频率 | 读取错误 | 平均读取 |
 |---:|---:|---:|---:|---:|
 | 0（下） | 151 | 15.1 Hz | 0 | 4.66 ms |
-| 1（后） | 152 | 15.2 Hz | 0 | 4.68 ms |
-| 2（左） | 150 | 15.0 Hz | 0 | 4.69 ms |
-| 3（右） | 148 | 14.8 Hz | 0 | 4.68 ms |
+| 1（前） | 152 | 15.2 Hz | 0 | 4.68 ms |
+| 2（右） | 150 | 15.0 Hz | 0 | 4.69 ms |
+| 3（左） | 148 | 14.8 Hz | 0 | 4.68 ms |
 
 主机侧 `ros2 topic hz` 在 TIO 推理负载下可能读到约 13 Hz，这是测量进程丢消息，
 不是传感器实际频率；以设备端 `tof_bench` 或节点 `processed_frames` 为准。
@@ -236,8 +229,8 @@ ros2 topic echo --once /flyrat/sensors/tof_0
 - ToF 地址是易失的，掉电后会回到 `0x52`；当前的启动探测会自动恢复并改回固定地址。
   LPn 拉低只关闭 I2C，不复位地址。
 - 四颗 ToF 初始化约 7.2 秒，forwarder 在这段时间内还不能提供 ToF 数据；
-  IMU 和双目也会等 `start()` 完成，因此从启动到监听约 7 秒。
-- 双目是原生 MJPEG，有损；需要原始像素时应改为低帧率 GRAY8/NV12 模式。
+  IMU 和单目相机也会等 `start()` 完成，因此从启动到监听约 7 秒。
+- 相机是原生 MJPEG，有损；需要原始像素时应改用低帧率原始格式。
 - 设备时间戳和主机时间戳通过 `TIME` 帧做偏移估计，不是硬实时同步。
 - MJPEG 解码在开发机完成，设备端 CPU 只负责采集和发送。
-- 双目和 ToF 没有硬件同步，跨传感器时间戳只能按到达时间/设备时间近似对齐。
+- 相机、ToF 和 IMU 没有硬件同步，跨传感器时间戳只能按到达时间/设备时间近似对齐。

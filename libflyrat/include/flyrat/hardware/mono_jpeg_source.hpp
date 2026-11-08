@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: MIT
 //
-// Raw MJPEG capture for the side-by-side USB stereo camera.
+// Raw MJPEG capture for the USB monochrome camera.
 //
 // This source deliberately does not decode the JPEG. The sensor forwarder
 // sends the camera's native MJPEG frames to the development machine, where
-// OpenCV decodes and splits them. At 1280x480@60 this is about 3 MB/s instead
-// of 55 MB/s for raw NV12, which matters because the adb tunnel tops out near
-// 30 MB/s.
+// OpenCV decodes them. At 640x480@60 MJPEG uses well under 1 MB/s, which is
+// important because the adb tunnel tops out near 30 MB/s.
 #pragma once
 
 #include <chrono>
@@ -20,23 +19,23 @@
 
 namespace flyrat::hardware {
 
-struct StereoJpegConfig {
+struct MonoJpegConfig {
     std::string device = "/dev/video10";
-    int width = 1280; // full side-by-side width
+    int width = 640;
     int height = 480;
     int fps = 60;
     int buffer_count = 4;
 };
 
-struct StereoJpegFrame {
-    int width = 0; // full side-by-side width
+struct MonoJpegFrame {
+    int width = 0;
     int height = 0;
     std::vector<std::uint8_t> jpeg;
     std::uint64_t sequence = 0;
     std::chrono::steady_clock::time_point stamp;
 };
 
-struct StereoJpegStats {
+struct MonoJpegStats {
     std::uint64_t frames = 0;
     std::uint64_t dropped = 0;
     std::uint64_t errors = 0;
@@ -46,28 +45,28 @@ struct StereoJpegStats {
     bool running = false;
 };
 
-class StereoJpegError : public std::runtime_error {
+class MonoJpegError : public std::runtime_error {
 public:
     using std::runtime_error::runtime_error;
 };
 
-class StereoJpegSource {
+class MonoJpegSource {
 public:
-    explicit StereoJpegSource(StereoJpegConfig config);
-    ~StereoJpegSource();
+    explicit MonoJpegSource(MonoJpegConfig config);
+    ~MonoJpegSource();
 
-    StereoJpegSource(const StereoJpegSource&) = delete;
-    StereoJpegSource& operator=(const StereoJpegSource&) = delete;
+    MonoJpegSource(const MonoJpegSource&) = delete;
+    MonoJpegSource& operator=(const MonoJpegSource&) = delete;
 
     void start();
     void stop();
 
     bool running() const;
-    std::optional<StereoJpegFrame> latest() const;
-    StereoJpegStats stats() const;
+    std::optional<MonoJpegFrame> latest() const;
+    MonoJpegStats stats() const;
 
     // Runs on the capture thread. It must not block or call stop().
-    void set_callback(std::function<void(const StereoJpegFrame&)> callback);
+    void set_callback(std::function<void(const MonoJpegFrame&)> callback);
 
 private:
     struct Impl;

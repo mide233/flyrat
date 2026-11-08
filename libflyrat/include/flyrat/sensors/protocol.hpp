@@ -23,7 +23,7 @@ enum class MessageType : std::uint16_t {
     kTime = 1,
     kImu = 2,
     kTof = 3,
-    kStereoJpeg = 4,
+    kCameraJpeg = 4,
     kStats = 5,
 };
 
@@ -56,7 +56,7 @@ struct TofPayload {
     std::array<TofZoneWire, 64> zones {};
 };
 
-struct StereoJpegView {
+struct JpegView {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     const std::uint8_t* jpeg = nullptr;
@@ -235,7 +235,7 @@ inline bool decode_tof(const std::uint8_t* data, std::size_t size, TofPayload& t
     return true;
 }
 
-inline std::vector<std::uint8_t> encode_stereo_jpeg(std::uint32_t width,
+inline std::vector<std::uint8_t> encode_jpeg(std::uint32_t width,
     std::uint32_t height, const std::uint8_t* jpeg, std::size_t jpeg_size)
 {
     std::vector<std::uint8_t> out;
@@ -248,8 +248,8 @@ inline std::vector<std::uint8_t> encode_stereo_jpeg(std::uint32_t width,
     return out;
 }
 
-inline bool decode_stereo_jpeg(const std::uint8_t* data, std::size_t size,
-    StereoJpegView& view)
+inline bool decode_jpeg(const std::uint8_t* data, std::size_t size,
+    JpegView& view)
 {
     if (size < 8) {
         return false;

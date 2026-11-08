@@ -4,16 +4,16 @@
 // (normally `adb forward tcp:5000 tcp:5000`).
 //
 // The forwarder is deliberately a separate program from the flight runtime:
-// IMU, four ToF sensors and the stereo camera can be streamed while the
+// IMU, four ToF sensors and the monochrome camera can be streamed while the
 // flight-control code is still being developed. Sensor callbacks only encode
 // and enqueue; a dedicated writer thread performs socket I/O, so a slow host
-// can drop stereo frames without stalling the camera or ToF readers.
+// can drop camera frames without stalling the camera or ToF readers.
 #pragma once
 
 #include <memory>
 #include <string>
 
-#include "flyrat/hardware/stereo_jpeg_source.hpp"
+#include "flyrat/hardware/mono_jpeg_source.hpp"
 #include "flyrat/hardware/tof.hpp"
 
 namespace flyrat::pilot {
@@ -37,8 +37,8 @@ struct SensorForwarderConfig {
     bool enable_tof = true;
     hardware::TofConfig tof;
 
-    bool enable_stereo = true;
-    hardware::StereoJpegConfig camera;
+    bool enable_camera = true;
+    hardware::MonoJpegConfig camera;
 };
 
 class SensorForwarder {

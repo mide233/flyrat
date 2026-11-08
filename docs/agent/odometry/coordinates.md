@@ -1,9 +1,32 @@
 # 坐标系与变换说明
 
-本文说明实机 ROS 2 链路中的坐标系：`sensor_receiver_node` 发布的 IMU/双目，
-`odometry_node` 使用的 body 系，以及 `odometry_map`、`imu_link`、
-`camera_left_optical_frame` 之间的关系。里程计接口和参数见
-[`overview.md`](overview.md)。
+本文说明实机 ROS 2 链路中的坐标系。当前默认链路是 TIO-Former：
+`sensor_receiver_node` 发布 IMU 和 4 路 ToF，`tio_odometry_node` 发布
+`odometry_map -> imu_link`；单目相机发布
+`/flyrat/sensors/camera/image_raw`，`frame_id=camera_front_optical_frame`，
+但当前还没有单目标定或相机 TF。
+
+第 2–4 节及后面的标定矩阵属于 **legacy 立体路线**（`odometry_node`），
+当前实机已移除双目，保留这些内容仅用于旧数据/旧代码参考。里程计接口和参数见
+[`overview.md`](overview.md)，TIO 链路见 [`tio_former.md`](tio_former.md)。
+
+## 0. 当前默认链路（TIO-Former）
+
+```text
+MSP_RAW_IMU ─┐
+4×VL53L5CX  ─┼─> sensor_receiver_node ─> /flyrat/sensors/{imu,tof_0..3}
+             │                                  │
+             │                                  ▼
+             │                         tio_odometry_node
+             │                                  │
+             └──────────────────────────────────┘
+                                                ▼
+                              /flyrat/odometry/odometry  odometry_map -> imu_link
+                              TF odometry_map -> imu_link（动态）
+
+USB 单目 /dev/video10 -> /flyrat/sensors/camera/image_raw
+                          frame_id = camera_front_optical_frame（暂无外参 TF）
+```
 
 ## 1. 约定
 
@@ -21,7 +44,8 @@ ROS 机体系 `imu_link` 使用 FLU：
 | y | 左 |
 | z | 上 |
 
-相机系 `camera_left_optical_frame` 使用标准光学系：
+相机系使用标准光学系；legacy 立体为 `camera_left_optical_frame`，当前单目为
+`camera_front_optical_frame`：
 
 | 轴 | 方向 |
 |---|---|
@@ -29,7 +53,7 @@ ROS 机体系 `imu_link` 使用 FLU：
 | y | 图像下 |
 | z | 光轴向前 |
 
-## 2. 完整数据链
+## 2. legacy 立体数据链
 
 ```text
 MSP_RAW_IMU
@@ -56,7 +80,7 @@ TF  camera_left_optical_frame -> camera_right_optical_frame
 里程计后端约定 body 系就是 IMU 系，使用 FLU，重力方向 `(0, 0, -9.81)`。
 静止时加速度计应输出 `z ≈ +9.81 m/s²`。
 
-## 3. IMU 轴向映射
+## 3. IMU 轴向映射（对两条链路都适用）
 
 本机实测 `MSP_RAW_IMU` 的加速度和陀螺仪都已经是 ROS FLU，不需要翻转：
 
@@ -105,7 +129,7 @@ w_body = C_gyro_i^T * inv(M_gyr) * (w_raw - A * a_gyro)
 （cam0）。接收节点从 IMU 时间戳中减去这个值，让 IMU 与相机对齐。改标定结果时
 同时更新该文件。
 
-## 4. `imu.T_body_camera` 的方向
+## 4. legacy `imu.T_body_camera` 的方向
 
 配置中的 `imu.T_body_camera` 是**相机 → body**：
 

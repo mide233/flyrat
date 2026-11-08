@@ -30,7 +30,7 @@ int main()
     check(kMaxPayload == 8U * 1024U * 1024U, "max payload");
 
     Header header;
-    header.type = MessageType::kStereoJpeg;
+    header.type = MessageType::kCameraJpeg;
     header.payload_size = 1234;
     header.sequence = 0x1122334455667788ULL;
     header.device_time_ns = -123456789;
@@ -40,7 +40,7 @@ int main()
     Header decoded;
     check(decode_header(header_bytes.data(), header_bytes.size(), decoded),
         "decode valid header");
-    check(decoded.type == MessageType::kStereoJpeg, "header type");
+    check(decoded.type == MessageType::kCameraJpeg, "header type");
     check(decoded.payload_size == 1234, "header payload size");
     check(decoded.sequence == 0x1122334455667788ULL, "header sequence");
     check(decoded.device_time_ns == -123456789, "header signed time");
@@ -107,17 +107,17 @@ int main()
         "reject short ToF");
 
     const std::uint8_t jpeg[] = { 0xFF, 0xD8, 0x00, 0x11, 0xFF, 0xD9 };
-    const std::vector<std::uint8_t> stereo_payload = encode_stereo_jpeg(
-        1280, 480, jpeg, sizeof(jpeg));
-    check(stereo_payload.size() == 8 + sizeof(jpeg), "stereo payload size");
-    StereoJpegView view;
-    check(decode_stereo_jpeg(stereo_payload.data(), stereo_payload.size(), view),
-        "decode stereo header");
-    check(view.width == 1280 && view.height == 480, "stereo dimensions");
+    const std::vector<std::uint8_t> camera_payload = encode_jpeg(
+        640, 480, jpeg, sizeof(jpeg));
+    check(camera_payload.size() == 8 + sizeof(jpeg), "camera payload size");
+    JpegView view;
+    check(decode_jpeg(camera_payload.data(), camera_payload.size(), view),
+        "decode camera header");
+    check(view.width == 640 && view.height == 480, "camera dimensions");
     check(view.size == sizeof(jpeg) && view.jpeg[0] == 0xFF && view.jpeg[1] == 0xD8,
-        "stereo JPEG bytes");
-    check(!decode_stereo_jpeg(stereo_payload.data(), 7, view),
-        "reject short stereo header");
+        "camera JPEG bytes");
+    check(!decode_jpeg(camera_payload.data(), 7, view),
+        "reject short camera header");
 
     const std::vector<std::uint8_t> frame = encode_frame(
         MessageType::kImu, 42, 987654321, imu_payload);

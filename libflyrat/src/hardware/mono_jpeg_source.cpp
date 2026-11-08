@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "flyrat/hardware/stereo_jpeg_source.hpp"
+#include "flyrat/hardware/mono_jpeg_source.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -43,18 +43,18 @@ constexpr std::size_t kMaxJpegBytes = 8U * 1024U * 1024U;
 
 } // namespace
 
-struct StereoJpegSource::Impl {
+struct MonoJpegSource::Impl {
     struct Buffer {
         void* start = nullptr;
         std::size_t length = 0;
     };
 
-    explicit Impl(StereoJpegConfig cfg)
+    explicit Impl(MonoJpegConfig cfg)
         : config(std::move(cfg))
     {
     }
 
-    StereoJpegConfig config;
+    MonoJpegConfig config;
     int fd = -1;
     std::vector<Buffer> buffers;
     std::atomic<int> actual_width { 0 };
@@ -63,8 +63,8 @@ struct StereoJpegSource::Impl {
     std::atomic<bool> running { false };
     std::thread thread;
     mutable std::mutex mutex;
-    std::optional<StereoJpegFrame> latest;
-    std::function<void(const StereoJpegFrame&)> callback;
+    std::optional<MonoJpegFrame> latest;
+    std::function<void(const MonoJpegFrame&)> callback;
 
     std::atomic<std::uint64_t> frames { 0 };
     std::atomic<std::uint64_t> dropped { 0 };
@@ -79,16 +79,16 @@ struct StereoJpegSource::Impl {
     {
         fd = ::open(config.device.c_str(), O_RDWR | O_NONBLOCK);
         if (fd < 0) {
-            throw StereoJpegError("open " + config.device + ": " + std::strerror(errno));
+            throw MonoJpegError("open " + config.device + ": " + std::strerror(errno));
         }
 
         v4l2_capability cap {};
         if (xioctl(fd, VIDIOC_QUERYCAP, &cap) < 0) {
-            throw StereoJpegError(ioctl_error("VIDIOC_QUERYCAP"));
+            throw MonoJpegError(ioctl_error("VIDIOC_QUERYCAP"));
         }
         if (!(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) ||
             !(cap.capabilities & V4L2_CAP_STREAMING)) {
-            throw StereoJpegError(config.device + " is not a streaming video capture device");
+            throw MonoJpegError(config.device + " is not a streaming video capture device");
         }
 
         v4l2_format format {};
@@ -98,14 +98,14 @@ struct StereoJpegSource::Impl {
         format.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
         format.fmt.pix.field = V4L2_FIELD_NONE;
         if (xioctl(fd, VIDIOC_S_FMT, &format) < 0) {
-            throw StereoJpegError(ioctl_error("VIDIOC_S_FMT"));
+            throw MonoJpegError(ioctl_error("VIDIOC_S_FMT"));
         }
         if (format.fmt.pix.pixelformat != V4L2_PIX_FMT_MJPEG) {
-            throw StereoJpegError("device rejected MJPEG");
+            throw MonoJpegError("device rejected MJPEG");
         }
         if (static_cast<int>(format.fmt.pix.width) != config.width ||
             static_cast<int>(format.fmt.pix.height) != config.height) {
-            throw StereoJpegError("device did not accept the requested MJPEG mode");
+            throw MonoJpegError("device did not accept the requested MJPEG mode");
         }
 
         actual_width = config.width;
@@ -122,10 +122,10 @@ struct StereoJpegSource::Impl {
         request.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         request.memory = V4L2_MEMORY_MMAP;
         if (xioctl(fd, VIDIOC_REQBUFS, &request) < 0) {
-            throw StereoJpegError(ioctl_error("VIDIOC_REQBUFS"));
+            throw MonoJpegError(ioctl_error("VIDIOC_REQBUFS"));
         }
         if (request.count < 2) {
-            throw StereoJpegError("device provided fewer than two capture buffers");
+            throw MonoJpegError("device provided fewer than two capture buffers");
         }
 
         buffers.resize(request.count);
@@ -135,23 +135,23 @@ struct StereoJpegSource::Impl {
             buffer.memory = V4L2_MEMORY_MMAP;
             buffer.index = i;
             if (xioctl(fd, VIDIOC_QUERYBUF, &buffer) < 0) {
-                throw StereoJpegError(ioctl_error("VIDIOC_QUERYBUF"));
+                throw MonoJpegError(ioctl_error("VIDIOC_QUERYBUF"));
             }
             void* start = mmap(nullptr, buffer.length, PROT_READ | PROT_WRITE,
                 MAP_SHARED, fd, static_cast<off_t>(buffer.m.offset));
             if (start == MAP_FAILED) {
-                throw StereoJpegError("mmap capture buffer: " + std::string(std::strerror(errno)));
+                throw MonoJpegError("mmap capture buffer: " + std::string(std::strerror(errno)));
             }
             buffers[i].start = start;
             buffers[i].length = buffer.length;
             if (xioctl(fd, VIDIOC_QBUF, &buffer) < 0) {
-                throw StereoJpegError(ioctl_error("VIDIOC_QBUF"));
+                throw MonoJpegError(ioctl_error("VIDIOC_QBUF"));
             }
         }
 
         v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         if (xioctl(fd, VIDIOC_STREAMON, &type) < 0) {
-            throw StereoJpegError(ioctl_error("VIDIOC_STREAMON"));
+            throw MonoJpegError(ioctl_error("VIDIOC_STREAMON"));
         }
     }
 
@@ -185,12 +185,12 @@ struct StereoJpegSource::Impl {
         running = false;
     }
 
-    StereoJpegFrame make_frame(const Buffer& buffer, const v4l2_buffer& meta) const
+    MonoJpegFrame make_frame(const Buffer& buffer, const v4l2_buffer& meta) const
     {
         if (meta.bytesused == 0 || meta.bytesused > kMaxJpegBytes) {
-            throw StereoJpegError("invalid MJPEG frame size");
+            throw MonoJpegError("invalid MJPEG frame size");
         }
-        StereoJpegFrame frame;
+        MonoJpegFrame frame;
         frame.width = actual_width;
         frame.height = actual_height;
         const std::uint8_t* source = static_cast<const std::uint8_t*>(buffer.start);
@@ -198,7 +198,7 @@ struct StereoJpegSource::Impl {
         return frame;
     }
 
-    void publish(StereoJpegFrame frame, const v4l2_buffer& meta)
+    void publish(MonoJpegFrame frame, const v4l2_buffer& meta)
     {
         if (have_sequence && meta.sequence > last_sequence + 1) {
             dropped += meta.sequence - last_sequence - 1;
@@ -214,7 +214,7 @@ struct StereoJpegSource::Impl {
         first_stamp_us.compare_exchange_strong(expected, stamp_us);
         last_stamp_us = stamp_us;
 
-        std::function<void(const StereoJpegFrame&)> cb;
+        std::function<void(const MonoJpegFrame&)> cb;
         {
             std::lock_guard<std::mutex> lock(mutex);
             latest = frame;
@@ -281,27 +281,27 @@ struct StereoJpegSource::Impl {
     }
 };
 
-StereoJpegSource::StereoJpegSource(StereoJpegConfig config)
+MonoJpegSource::MonoJpegSource(MonoJpegConfig config)
     : impl_(std::make_unique<Impl>(std::move(config)))
 {
 }
 
-StereoJpegSource::~StereoJpegSource()
+MonoJpegSource::~MonoJpegSource()
 {
     stop();
 }
 
-void StereoJpegSource::start()
+void MonoJpegSource::start()
 {
     if (impl_->running) {
-        throw StereoJpegError("stereo JPEG source is already running");
+        throw MonoJpegError("camera JPEG source is already running");
     }
     if (impl_->config.device.empty()) {
-        throw StereoJpegError("stereo JPEG device path is empty");
+        throw MonoJpegError("camera JPEG device path is empty");
     }
     if (impl_->config.width <= 0 || impl_->config.height <= 0 ||
         impl_->config.fps <= 0) {
-        throw StereoJpegError("stereo JPEG width, height and fps must be positive");
+        throw MonoJpegError("camera JPEG width, height and fps must be positive");
     }
 
     impl_->frames = 0;
@@ -334,7 +334,7 @@ void StereoJpegSource::start()
     }
 }
 
-void StereoJpegSource::stop()
+void MonoJpegSource::stop()
 {
     impl_->running = false;
     if (impl_->thread.joinable()) {
@@ -343,20 +343,20 @@ void StereoJpegSource::stop()
     impl_->close_device();
 }
 
-bool StereoJpegSource::running() const
+bool MonoJpegSource::running() const
 {
     return impl_->running;
 }
 
-std::optional<StereoJpegFrame> StereoJpegSource::latest() const
+std::optional<MonoJpegFrame> MonoJpegSource::latest() const
 {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     return impl_->latest;
 }
 
-StereoJpegStats StereoJpegSource::stats() const
+MonoJpegStats MonoJpegSource::stats() const
 {
-    StereoJpegStats result;
+    MonoJpegStats result;
     result.frames = impl_->frames;
     result.dropped = impl_->dropped;
     result.errors = impl_->errors;
@@ -372,7 +372,7 @@ StereoJpegStats StereoJpegSource::stats() const
     return result;
 }
 
-void StereoJpegSource::set_callback(std::function<void(const StereoJpegFrame&)> callback)
+void MonoJpegSource::set_callback(std::function<void(const MonoJpegFrame&)> callback)
 {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     impl_->callback = std::move(callback);

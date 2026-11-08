@@ -36,12 +36,12 @@ void usage()
         << "  --msp-device PATH    default /dev/ttyS3\n"
         << "  --msp-baud N         default 921600\n"
         << "  --camera-device PATH default /dev/video10\n"
-        << "  --camera-width N     default 1280 (full side-by-side width)\n"
+        << "  --camera-width N     default 640\n"
         << "  --camera-height N    default 480\n"
         << "  --camera-fps N       default 60\n"
         << "  --tof-resolution N   default 8 (4 or 8)\n"
         << "  --tof-rate HZ        default 15 (4x4 up to 60, 8x8 up to 15)\n"
-        << "  --no-imu --no-tof --no-stereo\n"
+        << "  --no-imu --no-tof --no-camera\n"
         << "  --help\n";
 }
 
@@ -96,8 +96,8 @@ int main(int argc, char** argv)
             config.enable_imu = false;
         } else if (arg == "--no-tof") {
             config.enable_tof = false;
-        } else if (arg == "--no-stereo") {
-            config.enable_stereo = false;
+        } else if (arg == "--no-camera" || arg == "--no-stereo") {
+            config.enable_camera = false;
         } else if (arg == "--help" || arg == "-h") {
             usage();
             return 0;

@@ -13,11 +13,11 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     host = LaunchConfiguration('host')
     port = LaunchConfiguration('port')
-    stereo_color = LaunchConfiguration('stereo_color')
     acc_lsb_per_g = LaunchConfiguration('acc_lsb_per_g')
     gyro_lsb_per_dps = LaunchConfiguration('gyro_lsb_per_dps')
     imu_accel_axis = LaunchConfiguration('imu_accel_axis')
     imu_gyro_axis = LaunchConfiguration('imu_gyro_axis')
+    camera_frame_id = LaunchConfiguration('camera_frame_id')
 
     intrinsics_file = PathJoinSubstitution(
         [FindPackageShare('flyrat_sensors'), 'config', 'imu_intrinsics.yaml'])
@@ -25,9 +25,6 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('host', default_value='127.0.0.1'),
         DeclareLaunchArgument('port', default_value='5000'),
-        DeclareLaunchArgument(
-            'stereo_color', default_value='false',
-            description='Publish bgr8 images instead of mono8.'),
         DeclareLaunchArgument(
             'acc_lsb_per_g', default_value='2048.0',
             description='Betaflight MSP_RAW_IMU accelerometer scale.'),
@@ -37,6 +34,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'imu_accel_axis', default_value='none',
             description="Accelerometer axes: 'none' (already FLU) or 'frd_to_flu'."),
+        DeclareLaunchArgument(
+            'camera_frame_id', default_value='camera_front_optical_frame',
+            description='frame_id for /flyrat/sensors/camera/image_raw.'),
         DeclareLaunchArgument(
             'imu_gyro_axis', default_value='none',
             description="Gyroscope axes: 'none' (already FLU), "
@@ -50,12 +50,12 @@ def generate_launch_description():
             parameters=[intrinsics_file, {
                 'host': host,
                 'port': ParameterValue(port, value_type=int),
-                'stereo_color': ParameterValue(stereo_color, value_type=bool),
                 'acc_lsb_per_g': ParameterValue(acc_lsb_per_g, value_type=float),
                 'gyro_lsb_per_dps': ParameterValue(
                     gyro_lsb_per_dps, value_type=float),
                 'imu_accel_axis': imu_accel_axis,
                 'imu_gyro_axis': imu_gyro_axis,
+                'camera_frame_id': camera_frame_id,
             }],
         ),
     ])

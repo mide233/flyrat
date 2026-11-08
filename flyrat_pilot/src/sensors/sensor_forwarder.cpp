@@ -114,7 +114,7 @@ struct SensorForwarder::Impl {
         }
         std::lock_guard<std::mutex> lock(queue_mu);
         priority_queue.clear();
-        stereo_queue.clear();
+        camera_queue.clear();
     }
 
     void open_server()
@@ -184,15 +184,15 @@ struct SensorForwarder::Impl {
             }
         }
 
-        if (config.enable_stereo) {
+        if (config.enable_camera) {
             try {
-                camera = std::make_unique<hardware::StereoJpegSource>(config.camera);
-                camera->set_callback([this](const hardware::StereoJpegFrame& frame) {
-                    on_stereo(frame);
+                camera = std::make_unique<hardware::MonoJpegSource>(config.camera);
+                camera->set_callback([this](const hardware::MonoJpegFrame& frame) {
+                    on_camera(frame);
                 });
                 camera->start();
             } catch (const std::exception& error) {
-                std::cerr << "sensor forwarder: stereo disabled: " << error.what() << '\n';
+                std::cerr << "sensor forwarder: camera disabled: " << error.what() << '\n';
                 camera.reset();
             }
         }
@@ -223,11 +223,11 @@ struct SensorForwarder::Impl {
             ++sequence, to_ns(frame.stamp), sensors::encode_tof(payload)));
     }
 
-    void on_stereo(const hardware::StereoJpegFrame& frame)
+    void on_camera(const hardware::MonoJpegFrame& frame)
     {
-        enqueue_stereo(sensors::encode_frame(sensors::MessageType::kStereoJpeg,
+        enqueue_camera(sensors::encode_frame(sensors::MessageType::kCameraJpeg,
             ++sequence, to_ns(frame.stamp),
-            sensors::encode_stereo_jpeg(static_cast<std::uint32_t>(frame.width),
+            sensors::encode_jpeg(static_cast<std::uint32_t>(frame.width),
                 static_cast<std::uint32_t>(frame.height),
                 frame.jpeg.data(), frame.jpeg.size())));
     }
@@ -244,14 +244,14 @@ struct SensorForwarder::Impl {
         queue_cv.notify_one();
     }
 
-    void enqueue_stereo(std::vector<std::uint8_t> frame)
+    void enqueue_camera(std::vector<std::uint8_t> frame)
     {
         {
             std::lock_guard<std::mutex> lock(queue_mu);
-            if (stereo_queue.size() >= 4) {
-                stereo_queue.pop_front();
+            if (camera_queue.size() >= 4) {
+                camera_queue.pop_front();
             }
-            stereo_queue.push_back(std::move(frame));
+            camera_queue.push_back(std::move(frame));
         }
         queue_cv.notify_one();
     }
@@ -264,7 +264,7 @@ struct SensorForwarder::Impl {
             {
                 std::unique_lock<std::mutex> lock(queue_mu);
                 queue_cv.wait_for(lock, std::chrono::milliseconds(200), [this] {
-                    return !running || !priority_queue.empty() || !stereo_queue.empty();
+                    return !running || !priority_queue.empty() || !camera_queue.empty();
                 });
                 if (!running) {
                     break;
@@ -272,9 +272,9 @@ struct SensorForwarder::Impl {
                 if (!priority_queue.empty()) {
                     frame = std::move(priority_queue.front());
                     priority_queue.pop_front();
-                } else if (!stereo_queue.empty()) {
-                    frame = std::move(stereo_queue.front());
-                    stereo_queue.pop_front();
+                } else if (!camera_queue.empty()) {
+                    frame = std::move(camera_queue.front());
+                    camera_queue.pop_front();
                 }
                 fd = client_fd;
             }
@@ -322,7 +322,7 @@ struct SensorForwarder::Impl {
                 }
                 client_fd = fd;
                 priority_queue.clear();
-                stereo_queue.clear();
+                camera_queue.clear();
             }
             std::cerr << "sensor forwarder: host connected\n";
         }
@@ -358,7 +358,7 @@ struct SensorForwarder::Impl {
 
     std::unique_ptr<MspInteract> msp;
     std::unique_ptr<hardware::TofArray> tof;
-    std::unique_ptr<hardware::StereoJpegSource> camera;
+    std::unique_ptr<hardware::MonoJpegSource> camera;
 
     std::thread accept_thread;
     std::thread writer_thread;
@@ -367,7 +367,7 @@ struct SensorForwarder::Impl {
     std::mutex queue_mu;
     std::condition_variable queue_cv;
     std::deque<std::vector<std::uint8_t>> priority_queue;
-    std::deque<std::vector<std::uint8_t>> stereo_queue;
+    std::deque<std::vector<std::uint8_t>> camera_queue;
 };
 
 SensorForwarder::SensorForwarder(SensorForwarderConfig config)

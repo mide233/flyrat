@@ -3,11 +3,10 @@
 <package format="3">
   <name>flyrat_odometry</name>
   <version>0.1.0</version>
-  <description>Odometry scaffold for the real-vehicle sensor stream. It
-    synchronises stereo images and IMU samples forwarded over adb, maintains
-    the body/camera TF tree, and publishes odometry, path and status topics.
-    The stereo backend is a scaffold; a second node runs the TIO-Former
-    ToF-inertial model through libtorch.</description>
+  <description>Odometry for the real-vehicle sensor stream. The default
+    tio_odometry_node runs the TIO-Former ToF-inertial model through libtorch
+    and publishes odometry, path and status topics. The older stereo node is
+    kept as a legacy scaffold.</description>
   <maintainer email="flyrat@example.com">flyrat maintainers</maintainer>
   <license>MIT</license>
 

@@ -94,7 +94,7 @@ def _launch_setup(context, *args, **kwargs):
     start_sensors = _flag(context, 'start_sensors')
     start_odometry = _flag(context, 'start_odometry')
     start_foxglove = _flag(context, 'start_foxglove')
-    backend = _text(context, 'odometry_backend') or 'stereo'
+    backend = _text(context, 'odometry_backend') or 'tio'
     if backend not in ('stereo', 'tio'):
         raise RuntimeError(
             f"odometry_backend must be 'stereo' or 'tio', got {backend!r}")
@@ -122,6 +122,9 @@ def _launch_setup(context, *args, **kwargs):
 
     if start_device:
         device_binary = _text(context, 'device_binary')
+        camera_device = _text(context, 'camera_device')
+        camera_width = _text(context, 'camera_width')
+        camera_height = _text(context, 'camera_height')
         camera_fps = _text(context, 'camera_fps')
         # Restart any forwarder left over from a previous run, otherwise the
         # new instance cannot bind the TCP port. Match the full command line,
@@ -137,6 +140,9 @@ def _launch_setup(context, *args, **kwargs):
             f'{wait_old}'
             f'exec {shlex.quote(device_binary)} '
             f'--listen {shlex.quote(device_host)}:{device_port} '
+            f'--camera-device {shlex.quote(camera_device)} '
+            f'--camera-width {shlex.quote(camera_width)} '
+            f'--camera-height {shlex.quote(camera_height)} '
             f'--camera-fps {shlex.quote(camera_fps)}')
         device_process = ExecuteProcess(
             cmd=adb + ['shell', remote_command],
@@ -164,7 +170,6 @@ def _launch_setup(context, *args, **kwargs):
                 launch_arguments={
                     'host': '127.0.0.1',
                     'port': local_port,
-                    'stereo_color': LaunchConfiguration('stereo_color'),
                     'acc_lsb_per_g': LaunchConfiguration('acc_lsb_per_g'),
                     'gyro_lsb_per_dps': LaunchConfiguration('gyro_lsb_per_dps'),
                     'imu_accel_axis': LaunchConfiguration('imu_accel_axis'),
@@ -263,8 +268,17 @@ def generate_launch_description():
             'device_binary', default_value='/tmp/flyrat_sensor_forwarder',
             description='Path to flyrat_sensor_forwarder on the device.'),
         DeclareLaunchArgument(
+            'camera_device', default_value='/dev/video10',
+            description='Device monochrome camera video node.'),
+        DeclareLaunchArgument(
+            'camera_width', default_value='640',
+            description='Camera frame width.'),
+        DeclareLaunchArgument(
+            'camera_height', default_value='480',
+            description='Camera frame height.'),
+        DeclareLaunchArgument(
             'camera_fps', default_value='60',
-            description='Device stereo FPS; use 20 for Kalibr recording.'),
+            description='Camera capture FPS.'),
         DeclareLaunchArgument(
             'start_adb_forward', default_value='true',
             description='Create and remove adb forward tcp:LOCAL->tcp:DEVICE.'),
@@ -278,8 +292,8 @@ def generate_launch_description():
             'start_odometry', default_value='true',
             description='Start the selected odometry backend.'),
         DeclareLaunchArgument(
-            'odometry_backend', default_value='stereo',
-            description="Odometry backend: 'stereo' (scaffold) or 'tio'."),
+            'odometry_backend', default_value='tio',
+            description="Odometry backend: 'tio' (working experimental) or 'stereo' (legacy scaffold)."),
         DeclareLaunchArgument(
             'tio_warmup_frames', default_value='64',
             description='ToF frames collected before the first TIO pose.'),
@@ -292,9 +306,6 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'foxglove_port', default_value='8765',
             description='foxglove_bridge WebSocket port.'),
-        DeclareLaunchArgument(
-            'stereo_color', default_value='false',
-            description='Publish bgr8 images instead of mono8.'),
         DeclareLaunchArgument(
             'acc_lsb_per_g', default_value='2048.0',
             description='Betaflight MSP_RAW_IMU accelerometer scale.'),
