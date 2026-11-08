@@ -3,7 +3,7 @@
 - 论文：TIO-Former: Ultra-Lightweight 6-Directional ToF-Inertial Odometry for
   Nano-UAVs via a Streaming Causal Transformer（arXiv:2609.17198）
 - 代码目录：`research/tio_former/`
-- 状态：M0–M4 完成，M5 待开始
+- 状态：M0–M5 完成
 - 最后更新：2026-11-08
 
 ## 1. 目标与边界
@@ -267,7 +267,7 @@ scene_id, seq_id, traj_type, split
 ## 9. 当前进度
 
 - M0 完成：目录、配置、SE(3)/ToF/轨迹/IMU 工具、NPZ 数据容器和测试。
-  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q` 共 39 项通过。
+  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q` 共 40 项通过。
 - M1 完成：四个场景生成器、4 向 ToF rig、Gazebo 轨迹播放插件、
   单序列 headless 录制与 8×8 后处理。
 - M1 实测（`corridor_demo`）：182 帧、12.07 s、1.80 m；4×8×8 @ 15 Hz；
@@ -296,4 +296,12 @@ scene_id, seq_id, traj_type, split
   负消融结果，不能据此声称复现了论文的 cross-attention/FIFO 增益。逐帧流式
   推理在 RTX 3060 上均值 1.95 ms、P95 2.31 ms，0/200 次超过 15 Hz 预算。
   结果汇总在 `report/m4_results.md`。
+- M5 完成：3 seeds（0/1/2）主结果平均 **ATE 0.4073 ± 0.0218 m、
+  RPEp 0.0179 ± 0.0005 m、RPER 0.315 ± 0.061°、EDR 8.98 ± 0.43%**；
+  LOSO 平均 ATE **0.4652 m**（corridor 0.4702、office 0.4988、
+  pantry 0.4621、meeting_room 0.4296）。新增
+  `scripts/aggregate_seeds.py`、`scripts/run_loso.py`，场景过滤支持
+  `train.py --exclude-scenes` 与 `evaluate.py --scenes`。中文技术报告
+  `report/m5_report.md` 汇总方法、数据、主结果、消融、鲁棒性、LOSO、
+  实时性与局限；M5 结果表与图在 `report/`。测试 40 项通过。
 - 运行说明见 `research/tio_former/README.md`。

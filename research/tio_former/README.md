@@ -26,7 +26,11 @@ The method uses 4× VL53L5CX 8×8 ToF arrays (front / left / right / down) and a
   完整模型优于 IMU-only 和 memoryless，但 `naive_concat` 与
   `kv_only_no_fifo` 仍更好，已在 `report/m4_results.md` 中作为负消融结果记录。
   逐帧流式推理 RTX 3060 上均值 1.95 ms、P95 2.31 ms，0/200 次超过 15 Hz 预算。
-- M5（技术报告与最终整理）尚未开始。
+- **M5 完成**：3 seeds 主结果、LOSO、鲁棒性、实时性、中文技术报告与
+  paper-style 表格/图。3 seeds 平均 **ATE 0.4073 ± 0.0218 m /
+  RPEp 0.0179 ± 0.0005 m / RPER 0.315 ± 0.061° / EDR 8.98 ± 0.43%**；
+  LOSO 平均 ATE **0.4652 m**。完整报告见 `report/m5_report.md`，
+  M4 结果表见 `report/m4_results.md`。
 
 ## 依赖
 
@@ -179,6 +183,19 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/make_report.py \
 结果见 `report/m4_results.md`。主模型 103 条测试序列 ATE 0.4316 m；
 完整模型优于 IMU-only，但 `naive_concat`/`kv_only_no_fifo` 更优，
 该负消融结果已如实记录。训练数据、检查点和运行输出均不提交。
+
+## 3 seeds 与 LOSO（M5）
+
+```bash
+# 3 seeds 聚合
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/aggregate_seeds.py \
+  --runs runs/eval_main_imu runs/eval_main_imu_seed1 runs/eval_main_imu_seed2
+
+# 留一场景
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/run_loso.py --epochs 15
+```
+
+完整中文技术报告见 `report/m5_report.md`。
 
 ## 测试
 

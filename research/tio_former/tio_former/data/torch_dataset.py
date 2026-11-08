@@ -76,6 +76,9 @@ class SequenceWindows(Dataset):
         max_sequences: int | None = None,
         files: list[str | Path] | None = None,
         cache: bool = True,
+        splits: list[str] | None = None,
+        scenes: list[str] | None = None,
+        exclude_scenes: list[str] | None = None,
     ) -> None:
         self.root = Path(root)
         self.window_frames = window_frames
@@ -90,8 +93,18 @@ class SequenceWindows(Dataset):
         else:
             for path in sorted(self.root.rglob("*.npz")):
                 meta = self._metadata(path)
-                if split is None or str(meta.get("split", "")) == split:
-                    self.files.append(path)
+                meta_split = str(meta.get("split", ""))
+                meta_scene = str(meta.get("scene", ""))
+                if splits is not None:
+                    if meta_split not in splits:
+                        continue
+                elif split is not None and meta_split != split:
+                    continue
+                if scenes is not None and meta_scene not in scenes:
+                    continue
+                if exclude_scenes is not None and meta_scene in exclude_scenes:
+                    continue
+                self.files.append(path)
         if max_sequences is not None:
             self.files = self.files[:max_sequences]
         if not self.files:

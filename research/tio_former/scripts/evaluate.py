@@ -33,6 +33,7 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--eval-config", default="configs/eval/main.yaml")
     parser.add_argument("--processed", default="data/processed")
     parser.add_argument("--split", default=None, help="Override eval config split")
+    parser.add_argument("--scenes", default="", help="comma-separated scene filter")
     parser.add_argument("--limit", type=int, default=0, help="Evaluate at most N sequences")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--out", default=None)
@@ -71,18 +72,19 @@ def _perturb_arrays(arrays: dict, metadata: dict, args: argparse.Namespace) -> N
     arrays["tof_weight"] = weight
 
 
-def _list_sequences(root: Path, split: str | None) -> list[Path]:
+def _list_sequences(root: Path, split: str | None, scenes: list[str] | None = None) -> list[Path]:
     files = sorted(root.rglob("*.npz"))
-    if split is None:
-        return files
     selected = []
     for path in files:
         sidecar = path.with_suffix(".json")
         if not sidecar.exists():
             continue
         metadata = json.loads(sidecar.read_text(encoding="utf-8"))
-        if metadata.get("split") == split:
-            selected.append(path)
+        if split is not None and metadata.get("split") != split:
+            continue
+        if scenes is not None and metadata.get("scene") not in scenes:
+            continue
+        selected.append(path)
     return selected
 
 
@@ -193,7 +195,11 @@ def main() -> int:
     logger = get_logger("evaluate")
     eval_config = load_yaml(ROOT / args.eval_config)
     split = args.split if args.split is not None else eval_config.get("split", "test")
-    files = _list_sequences(ROOT / args.processed, split)
+    files = _list_sequences(
+        ROOT / args.processed,
+        split,
+        [item for item in args.scenes.split(",") if item] or None,
+    )
     if args.limit:
         files = files[: args.limit]
     if not files:

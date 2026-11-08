@@ -45,6 +45,11 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument(
+        "--exclude-scenes",
+        default="",
+        help="comma-separated scene names to exclude from train/val",
+    )
+    parser.add_argument(
         "--variant",
         default="full",
         help="full | imu_only | tof_only | naive_concat | memoryless | kv_only_no_fifo",
@@ -114,6 +119,7 @@ def main() -> int:
     window = int(data_config.get("window_frames", 64))
     stride = max(1, window // 2)
     missing_ratios = augmentation.get("missing_ratios", [0.1, 0.3, 0.5])
+    exclude_scenes = [item for item in args.exclude_scenes.split(",") if item]
 
     train_set = SequenceWindows(
         ROOT / args.processed,
@@ -125,6 +131,7 @@ def main() -> int:
         missing_probability=float(augmentation.get("missing_probability", 0.6)),
         missing_ratios=list(missing_ratios),
         max_sequences=args.limit_train,
+        exclude_scenes=exclude_scenes or None,
     )
     val_set = SequenceWindows(
         ROOT / args.processed,
@@ -134,6 +141,7 @@ def main() -> int:
         seed=seed + 1,
         augment=False,
         max_sequences=args.limit_val,
+        exclude_scenes=exclude_scenes or None,
     )
     logger.info("dataset: %d train windows, %d val windows", len(train_set), len(val_set))
 

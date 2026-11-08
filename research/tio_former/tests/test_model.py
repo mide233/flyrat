@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -182,3 +183,18 @@ def test_dataset_item_shapes() -> None:
     assert item["delta_phi"].shape == (16, 3)
     assert np.isfinite(item["delta_p"].numpy()).all()
     assert np.isfinite(item["delta_phi"].numpy()).all()
+
+
+def test_dataset_scene_filter() -> None:
+    if not TEST_DATA.exists():
+        pytest.skip("processed dataset not generated")
+    dataset = SequenceWindows(
+        ROOT / "data/processed",
+        split="train",
+        exclude_scenes=["office"],
+        cache=False,
+    )
+    assert len(dataset.files) > 0
+    for path in dataset.files:
+        metadata = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+        assert metadata["scene"] != "office"
