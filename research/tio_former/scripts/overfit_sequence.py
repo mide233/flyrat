@@ -115,7 +115,7 @@ def main() -> int:
     torch.save(
         {
             "model": model.state_dict(),
-            "model_config": model_config.__dict__,
+            "model_config": model_config.to_dict(),
             "sequence": str(sequence),
             "steps": args.steps,
             "first_loss": history[0],

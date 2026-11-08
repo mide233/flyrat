@@ -28,13 +28,16 @@ tof:
 imu:
   rate_hz: 200.0
   samples_per_tof: 16
-  # Noise densities are taken from the FlyRat Kalibr calibration.
-  noise_gyro: 8.814974125038311e-05
-  noise_acc: 0.0029907713760960264
-  gyro_walk: 4.09314724371554e-06
-  acc_walk: 0.00015441665140112607
-  init_bias_acc: 0.05
-  init_bias_gyro: 0.005
+  # Noise densities start from the FlyRat Kalibr calibration but are raised
+  # deliberately: ideal analytic IMU is unrealistically clean and makes an
+  # IMU-only baseline near-perfect.  These values emulate a low-cost MEMS IMU
+  # with noticeable bias drift so the ToF branch has a realistic role.
+  noise_gyro: 4.0e-04
+  noise_acc: 0.02
+  gyro_walk: 5.0e-05
+  acc_walk: 0.0015
+  init_bias_acc: 0.2
+  init_bias_gyro: 0.01
   gravity: [0.0, 0.0, -9.81]
   time_offset_s: 0.0
 

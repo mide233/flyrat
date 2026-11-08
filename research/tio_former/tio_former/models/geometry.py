@@ -36,10 +36,16 @@ def so3_exp(omega: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     )
 
 
-def so3_log(rotation: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
-    """Batched matrix logarithm; returns axis-angle vectors."""
+def so3_log(rotation: torch.Tensor, eps: float = 1e-3) -> torch.Tensor:
+    """Batched matrix logarithm; returns axis-angle vectors.
+
+    ``acos`` and ``1/sin`` both become singular at a rotation angle of pi.
+    Real pose errors are far below pi, so clamp the cosine just inside the
+    valid range.  This keeps the gradient finite for randomly initialised
+    networks while changing the value by less than 0.1 degrees near pi.
+    """
     trace = rotation.diagonal(dim1=-2, dim2=-1).sum(dim=-1)
-    cosine = ((trace - 1.0) / 2.0).clamp(-1.0, 1.0)
+    cosine = ((trace - 1.0) / 2.0).clamp(-1.0 + 1e-6, 1.0 - 1e-6)
     theta = torch.acos(cosine)
     vector = torch.stack(
         [
@@ -49,10 +55,11 @@ def so3_log(rotation: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
         ],
         dim=-1,
     )
+    sin_theta = torch.sin(theta).clamp_min(eps)
     scale = torch.where(
         theta.abs() < eps,
         torch.full_like(theta, 0.5),
-        theta / (2.0 * torch.sin(theta).clamp_min(eps)),
+        theta / (2.0 * sin_theta),
     )
     return vector * scale.unsqueeze(-1)
 

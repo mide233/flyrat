@@ -20,7 +20,13 @@ The method uses 4× VL53L5CX 8×8 ToF arrays (front / left / right / down) and a
   cross-attention、Local KV + Chunk-FIFO 流式 Transformer、位姿头）、论文全部
   损失项、流式/全序列因果一致性测试、单序列过拟合。模型 1,129,542 参数；
   过拟合 300 步损失 0.2658 → 0.0045（−98.3%）。
-- M4–M5（全量训练、评估、消融、报告）尚未开始。
+- **M4 完成**：主训练、测试集评估、核心消融、鲁棒性和 PyTorch 实时性测试完成。
+  主模型 **103 条测试序列 ATE 0.4316 m / RPEp 0.0186 m /
+  RPER 0.257° / EDR 9.49%**（仿真 4 向 ToF，不能与论文 6 向数值直接对比）。
+  完整模型优于 IMU-only 和 memoryless，但 `naive_concat` 与
+  `kv_only_no_fifo` 仍更好，已在 `report/m4_results.md` 中作为负消融结果记录。
+  逐帧流式推理 RTX 3060 上均值 1.95 ms、P95 2.31 ms，0/200 次超过 15 Hz 预算。
+- M5（技术报告与最终整理）尚未开始。
 
 ## 依赖
 
@@ -133,6 +139,47 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/overfit_sequence.py \
 检查点写入 `checkpoints/`（不提交）。M3 实测：1,129,542 参数；300 步损失
 0.2658 → 0.0045（−98.3%）。
 
+## 训练与评估（M4）
+
+```bash
+# 若修改了 IMU 噪声/零偏配置，从已处理序列重建 IMU 窗口
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/regenerate_imu.py
+
+# 主模型训练（单卡或单进程；40 epochs）
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/train.py \
+  --workers 8 --epochs 40 --out checkpoints/main_imu --run-name seed0
+
+# 测试集评估
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/evaluate.py \
+  --checkpoint checkpoints/main_imu/seed0/best.pt --split test \
+  --out runs/eval_main_imu
+
+# 核心消融
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/run_ablations.py \
+  --variants full imu_only tof_only naive_concat memoryless kv_only_no_fifo \
+  --epochs 15 --workers 8 --main-checkpoint checkpoints/main_imu/seed0/best.pt \
+  --checkpoint-root checkpoints/ablations_imu --eval-root runs/ablations_imu
+
+# 鲁棒性
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/run_robustness.py \
+  --checkpoint checkpoints/main_imu/seed0/best.pt --limit 0 --out runs/robustness_imu
+
+# 逐帧实时性
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/benchmark_latency.py \
+  --checkpoint checkpoints/main_imu/seed0/best.pt --out runs/latency_imu.json
+
+# 汇总报告
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/make_report.py \
+  --main runs/eval_main_imu/summary.json \
+  --ablations runs/ablations_imu/summary.json \
+  --train-metrics checkpoints/main_imu/seed0/metrics.jsonl \
+  --robustness runs/robustness_imu/summary.json --out report
+```
+
+结果见 `report/m4_results.md`。主模型 103 条测试序列 ATE 0.4316 m；
+完整模型优于 IMU-only，但 `naive_concat`/`kv_only_no_fifo` 更优，
+该负消融结果已如实记录。训练数据、检查点和运行输出均不提交。
+
 ## 测试
 
 ```bash
@@ -150,7 +197,7 @@ sim/         世界生成器输出、ToF rig、Gazebo 插件
 scripts/     世界/轨迹生成、录制、后处理、训练和评估入口
 tio_former/  Python 包：SE(3)、轨迹、ToF、IMU、数据和模型
 tests/       单元测试和资产检查
-report/      中文技术报告（后续）
+report/      M4 结果表与图（M5 技术报告后续补充）
 ```
 
 ## 约定

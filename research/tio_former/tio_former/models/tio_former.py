@@ -9,7 +9,7 @@ configuration file and flagged in ``configs/model/base.yaml``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import torch
@@ -24,6 +24,7 @@ def _as_int(value: Any, default: int) -> int:
 @dataclass
 class ModelConfig:
     views: int = 4
+    variant: str = "full"
     tof_channels: int = 3
     tof_conv_channels: tuple[int, ...] = (32, 64, 128)
     feature_dim: int = 128
@@ -57,6 +58,8 @@ class ModelConfig:
         streaming = model.get("streaming", {})
         pose = model.get("pose_head", {})
         return cls(
+            views=_as_int(model.get("views"), 4),
+            variant=str(model.get("variant", "full")),
             tof_channels=_as_int(tof.get("input_channels"), 3),
             tof_conv_channels=tuple(tof.get("conv_channels", (32, 64, 128))),
             feature_dim=_as_int(tof.get("feature_dim"), 128),
@@ -81,6 +84,47 @@ class ModelConfig:
             pose_hidden_dim=_as_int(pose.get("hidden_dim"), 128),
             pose_dropout=float(pose.get("dropout", 0.0)),
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serializable nested config matching ``configs/model/base.yaml``."""
+        return {
+            "model": {
+                "variant": self.variant,
+                "tof": {
+                    "input_channels": self.tof_channels,
+                    "conv_channels": list(self.tof_conv_channels),
+                    "feature_dim": self.feature_dim,
+                    "view_layers": self.view_layers,
+                    "view_heads": self.view_heads,
+                    "view_ffn_dim": self.view_ffn_dim,
+                    "view_dropout": self.view_dropout,
+                    "view_embedding": self.view_embedding,
+                },
+                "imu": {
+                    "input_channels": self.imu_channels,
+                    "conv_channels": list(self.imu_conv_channels),
+                    "kernel_size": self.imu_kernel_size,
+                },
+                "fusion": {
+                    "heads": self.fusion_heads,
+                    "dropout": self.fusion_dropout,
+                },
+                "streaming": {
+                    "layers": self.streaming_layers,
+                    "heads": self.streaming_heads,
+                    "ffn_dim": self.streaming_ffn_dim,
+                    "dropout": self.streaming_dropout,
+                    "local_capacity": self.local_capacity,
+                    "chunk_size": self.chunk_size,
+                    "fifo_capacity": self.fifo_capacity,
+                    "summary_hidden_dim": self.summary_hidden_dim,
+                },
+                "pose_head": {
+                    "hidden_dim": self.pose_hidden_dim,
+                    "dropout": self.pose_dropout,
+                },
+            }
+        }
 
 
 class RangeEncoder(nn.Module):
@@ -269,19 +313,29 @@ class BoundedCausalLayer(nn.Module):
         outputs = []
         c = self.local_capacity
         g = self.chunk_size
+        # Chunk summaries only depend on the chunk itself, so compute each
+        # full chunk exactly once instead of at every later timestep.
+        chunk_summaries: list[tuple[torch.Tensor, torch.Tensor]] = []
+        for chunk_start in range(0, length // g * g, g):
+            chunk_summaries.append(
+                self._summary(
+                    k[:, chunk_start : chunk_start + g],
+                    v[:, chunk_start : chunk_start + g],
+                )
+            )
         for t in range(length):
-            if t < c:
+            if c <= 0:
+                start = t
+                num_chunks = 0
+            elif t < c:
                 start = 0
+                num_chunks = 0
             else:
                 start = g * (1 + (t - c) // g)
-            num_chunks = start // g
+                num_chunks = start // g
             first_chunk = max(0, num_chunks - self.fifo_capacity)
-            keys: list[torch.Tensor] = []
-            values: list[torch.Tensor] = []
-            for chunk in range(first_chunk, num_chunks):
-                sk, sv = self._summary(k[:, chunk * g : (chunk + 1) * g], v[:, chunk * g : (chunk + 1) * g])
-                keys.append(sk)
-                values.append(sv)
+            keys = [item[0] for item in chunk_summaries[first_chunk:num_chunks]]
+            values = [item[1] for item in chunk_summaries[first_chunk:num_chunks]]
             keys.append(k[:, start : t + 1])
             values.append(v[:, start : t + 1])
             context_k = torch.cat(keys, dim=1)
@@ -296,21 +350,29 @@ class BoundedCausalLayer(nn.Module):
         if x.shape[1] != 1:
             raise ValueError("forward_step expects exactly one frame")
         q, k, v = self._split_qkv(self.norm1(x))
-        local_k = torch.cat([state.local_k, k], dim=1)
-        local_v = torch.cat([state.local_v, v], dim=1)
-        summary_k = state.summary_k
-        summary_v = state.summary_v
-        if local_k.shape[1] > self.local_capacity:
-            sk, sv = self._summary(
-                local_k[:, : self.chunk_size], local_v[:, : self.chunk_size]
-            )
-            local_k = local_k[:, self.chunk_size :]
-            local_v = local_v[:, self.chunk_size :]
-            summary_k = torch.cat([summary_k, sk], dim=1)
-            summary_v = torch.cat([summary_v, sv], dim=1)
-            if summary_k.shape[1] > self.fifo_capacity:
-                summary_k = summary_k[:, -self.fifo_capacity :]
-                summary_v = summary_v[:, -self.fifo_capacity :]
+        if self.local_capacity <= 0:
+            local_k, local_v = k, v
+            summary_k = state.summary_k[:, :0]
+            summary_v = state.summary_v[:, :0]
+        else:
+            local_k = torch.cat([state.local_k, k], dim=1)
+            local_v = torch.cat([state.local_v, v], dim=1)
+            summary_k = state.summary_k
+            summary_v = state.summary_v
+            if local_k.shape[1] > self.local_capacity:
+                sk, sv = self._summary(
+                    local_k[:, : self.chunk_size], local_v[:, : self.chunk_size]
+                )
+                local_k = local_k[:, self.chunk_size :]
+                local_v = local_v[:, self.chunk_size :]
+                summary_k = torch.cat([summary_k, sk], dim=1)
+                summary_v = torch.cat([summary_v, sv], dim=1)
+                if self.fifo_capacity <= 0:
+                    summary_k = summary_k[:, :0]
+                    summary_v = summary_v[:, :0]
+                elif summary_k.shape[1] > self.fifo_capacity:
+                    summary_k = summary_k[:, -self.fifo_capacity :]
+                    summary_v = summary_v[:, -self.fifo_capacity :]
         context_k = torch.cat([summary_k, local_k], dim=1)
         context_v = torch.cat([summary_v, local_v], dim=1)
         attention = self._attend(q, context_k, context_v)
@@ -364,18 +426,48 @@ class TioFormer(nn.Module):
 
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
+        valid_variants = {
+            "full",
+            "imu_only",
+            "tof_only",
+            "naive_concat",
+            "memoryless",
+            "kv_only_no_fifo",
+        }
+        if config.variant not in valid_variants:
+            raise ValueError(f"unknown model variant {config.variant!r}")
+        if config.variant == "memoryless":
+            config = replace(config, local_capacity=0, fifo_capacity=0)
+        elif config.variant == "kv_only_no_fifo":
+            config = replace(config, fifo_capacity=0)
         self.config = config
-        self.range_encoder = RangeEncoder(config)
+        self.variant = config.variant
+        self.range_encoder = (
+            None if config.variant == "imu_only" else RangeEncoder(config)
+        )
         self.view_embedding = (
             nn.Parameter(torch.zeros(1, config.views, config.feature_dim))
-            if config.view_embedding
+            if config.view_embedding and config.variant != "imu_only"
             else None
         )
         if self.view_embedding is not None:
             nn.init.normal_(self.view_embedding, std=0.02)
-        self.view_transformer = ViewTransformer(config)
-        self.imu_encoder = ImuEncoder(config)
-        self.fusion = CrossViewFusion(config)
+        self.view_transformer = (
+            None if config.variant == "imu_only" else ViewTransformer(config)
+        )
+        self.imu_encoder = (
+            None if config.variant == "tof_only" else ImuEncoder(config)
+        )
+        self.fusion = (
+            CrossViewFusion(config)
+            if config.variant in {"full", "memoryless", "kv_only_no_fifo"}
+            else None
+        )
+        self.concat_proj = (
+            nn.Linear(2 * config.feature_dim, config.feature_dim)
+            if config.variant == "naive_concat"
+            else None
+        )
         self.streaming = StreamingTransformer(config)
         self.pose_head = PoseHead(config)
 
@@ -419,6 +511,38 @@ class TioFormer(nn.Module):
         delta = (current - previous) * current_mask * previous_mask
         return torch.stack([current, previous, delta], dim=3)
 
+    def _view_tokens(
+        self,
+        tof: torch.Tensor,
+        weight: torch.Tensor | None,
+        previous_tof: torch.Tensor | None,
+        previous_weight: torch.Tensor | None,
+    ) -> torch.Tensor:
+        batch, length, views, height, width = tof.shape
+        channels = self._range_channels(tof, weight, previous_tof, previous_weight)
+        flat = channels.reshape(batch * length * views, 3, height, width)
+        tokens = self.range_encoder(flat).reshape(batch * length, views, -1)
+        if self.view_embedding is not None:
+            tokens = tokens + self.view_embedding[:, :views]
+        return self.view_transformer(tokens)
+
+    def _imu_tokens(self, imu: torch.Tensor) -> torch.Tensor:
+        batch, length, samples, channels = imu.shape
+        return self.imu_encoder(
+            imu.reshape(batch * length, samples, channels).transpose(1, 2)
+        )
+
+    def _fused_features(self, tof, imu, weight, previous_tof, previous_weight):
+        if self.variant == "imu_only":
+            return self._imu_tokens(imu)
+        view_tokens = self._view_tokens(tof, weight, previous_tof, previous_weight)
+        if self.variant == "tof_only":
+            return view_tokens.mean(dim=1)
+        imu_tokens = self._imu_tokens(imu)
+        if self.variant == "naive_concat":
+            return self.concat_proj(torch.cat([view_tokens.mean(dim=1), imu_tokens], dim=-1))
+        return self.fusion(imu_tokens, view_tokens)
+
     def forward(
         self,
         tof: torch.Tensor,
@@ -436,19 +560,11 @@ class TioFormer(nn.Module):
             previous_tof: optional previous ranges aligned with ``tof``.
             previous_weight: optional reliability weights for ``previous_tof``.
         """
-        batch, length, views, _, _ = tof.shape
-        channels = self._range_channels(tof, weight, previous_tof, previous_weight)
-        flat = channels.reshape(batch * length * views, 3, tof.shape[-2], tof.shape[-1])
-        view_tokens = self.range_encoder(flat).reshape(batch * length, views, -1)
-        if self.view_embedding is not None:
-            view_tokens = view_tokens + self.view_embedding[:, :views]
-        view_tokens = self.view_transformer(view_tokens)
-
-        imu_tokens = self.imu_encoder(
-            imu.reshape(batch * length, imu.shape[-2], imu.shape[-1]).transpose(1, 2)
+        batch, length = tof.shape[0], tof.shape[1]
+        features = self._fused_features(
+            tof, imu, weight, previous_tof, previous_weight
         )
-        fused = self.fusion(imu_tokens, view_tokens)
-        hidden = self.streaming(fused.reshape(batch, length, -1))
+        hidden = self.streaming(features.reshape(batch, length, -1))
         motion = self.pose_head(hidden)
         return {"delta_p": motion[..., :3], "delta_phi": motion[..., 3:]}
 
@@ -465,16 +581,9 @@ class TioFormer(nn.Module):
         if tof.shape[1] != 1:
             raise ValueError("forward_stream expects T=1")
         batch = tof.shape[0]
-        channels = self._range_channels(tof, weight, previous_tof, previous_weight)
-        flat = channels.reshape(batch * tof.shape[2], 3, tof.shape[-2], tof.shape[-1])
-        view_tokens = self.range_encoder(flat).reshape(batch, tof.shape[2], -1)
-        if self.view_embedding is not None:
-            view_tokens = view_tokens + self.view_embedding[:, : tof.shape[2]]
-        view_tokens = self.view_transformer(view_tokens)
-        imu_token = self.imu_encoder(
-            imu.reshape(batch, imu.shape[-2], imu.shape[-1]).transpose(1, 2)
-        )
-        fused = self.fusion(imu_token, view_tokens).unsqueeze(1)
+        fused = self._fused_features(
+            tof, imu, weight, previous_tof, previous_weight
+        ).unsqueeze(1)
         if states is None:
             states = self.streaming.init_state(batch, fused.shape[-1], fused.device, fused.dtype)
         hidden, states = self.streaming.forward_step(fused, states)

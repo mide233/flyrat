@@ -75,6 +75,7 @@ class SequenceWindows(Dataset):
         missing_ratios: list[float] | None = None,
         max_sequences: int | None = None,
         files: list[str | Path] | None = None,
+        cache: bool = True,
     ) -> None:
         self.root = Path(root)
         self.window_frames = window_frames
@@ -96,9 +97,27 @@ class SequenceWindows(Dataset):
         if not self.files:
             raise FileNotFoundError(f"no NPZ sequences under {self.root} for split {split!r}")
         self.windows: list[tuple[int, int, int]] = []
+        self.cache: list[dict[str, np.ndarray]] | None = [] if cache else None
         for file_index, path in enumerate(self.files):
             with np.load(path, allow_pickle=False) as data:
                 length = int(data["tof"].shape[0])
+                if cache:
+                    tof = data["tof"].astype(np.float32)
+                    weight = data["tof_weight"].astype(np.float32)
+                    imu = data["imu"].astype(np.float32)
+                    poses = data["gt_pose"].astype(np.float32)
+                    delta_p, delta_phi = _increments(poses.astype(np.float64))
+                    assert self.cache is not None
+                    self.cache.append(
+                        {
+                            "tof": tof,
+                            "weight": weight,
+                            "imu": imu,
+                            "poses": poses,
+                            "delta_p": delta_p,
+                            "delta_phi": delta_phi,
+                        }
+                    )
             if window_frames is None or length <= window_frames:
                 self.windows.append((file_index, 0, length))
             else:
@@ -117,23 +136,35 @@ class SequenceWindows(Dataset):
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         file_index, start, length = self.windows[index]
-        arrays, _ = load_sequence(self.files[file_index])
         end = start + length
-        tof = arrays["tof"][start:end].astype(np.float32)
-        weight = arrays["tof_weight"][start:end].astype(np.float32)
-        imu = arrays["imu"][start:end].astype(np.float32)
-        poses = arrays["gt_pose"].astype(np.float64)
-        delta_p, delta_phi = _increments(poses)
-        previous = np.empty_like(tof)
-        previous_weight = np.empty_like(weight)
-        if start == 0:
-            previous[0] = tof[0]
-            previous_weight[0] = weight[0]
+        if self.cache is not None:
+            cached = self.cache[file_index]
+            tof = cached["tof"][start:end].copy()
+            weight = cached["weight"][start:end].copy()
+            imu = cached["imu"][start:end]
+            poses = cached["poses"]
+            delta_p = cached["delta_p"]
+            delta_phi = cached["delta_phi"]
+            if start == 0:
+                previous_frame = tof[0]
+                previous_weight_frame = weight[0]
+            else:
+                previous_frame = cached["tof"][start - 1]
+                previous_weight_frame = cached["weight"][start - 1]
         else:
-            previous[0] = arrays["tof"][start - 1]
-            previous_weight[0] = arrays["tof_weight"][start - 1]
-        previous[1:] = tof[:-1]
-        previous_weight[1:] = weight[:-1]
+            arrays, _ = load_sequence(self.files[file_index])
+            tof = arrays["tof"][start:end].astype(np.float32)
+            weight = arrays["tof_weight"][start:end].astype(np.float32)
+            imu = arrays["imu"][start:end].astype(np.float32)
+            poses = arrays["gt_pose"].astype(np.float32)
+            delta_p, delta_phi = _increments(poses.astype(np.float64))
+            if start == 0:
+                previous_frame = tof[0]
+                previous_weight_frame = weight[0]
+            else:
+                previous_frame = arrays["tof"][start - 1].astype(np.float32)
+                previous_weight_frame = arrays["tof_weight"][start - 1].astype(np.float32)
+
         if self.augment:
             rng = np.random.default_rng(self.seed + index)
             _augment_missing(
@@ -143,6 +174,13 @@ class SequenceWindows(Dataset):
                 probability=self.missing_probability,
                 ratios=self.missing_ratios,
             )
+
+        previous = np.empty_like(tof)
+        previous_weight = np.empty_like(weight)
+        previous[0] = previous_frame if start else tof[0]
+        previous_weight[0] = previous_weight_frame if start else weight[0]
+        previous[1:] = tof[:-1]
+        previous_weight[1:] = weight[:-1]
         return {
             "tof": torch.from_numpy(tof),
             "previous_tof": torch.from_numpy(previous),
@@ -160,6 +198,10 @@ def iterate_batches(
     batch_size: int,
     shuffle: bool = True,
     generator: torch.Generator | None = None,
+    *,
+    num_workers: int = 0,
+    pin_memory: bool = False,
+    persistent_workers: bool = False,
 ) -> Iterator[dict[str, torch.Tensor]]:
     from torch.utils.data import DataLoader
 
@@ -169,5 +211,8 @@ def iterate_batches(
         shuffle=shuffle,
         drop_last=False,
         generator=generator,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers and num_workers > 0,
     )
     yield from loader
