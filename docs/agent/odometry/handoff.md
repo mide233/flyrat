@@ -1,0 +1,315 @@
+# 里程计开发交接
+
+最后更新：2026-11-08  
+分支：`dev/odom-tio`  
+基线提交：`4593a72 feat(sensors): configure real ToF 8x8@15Hz and direction mapping`  
+（本文档随之后的清理/交接提交一起更新，最新提交以 `git log -1` 为准。）
+
+本文档给准备接手里程计/ToF 开发的同事使用：先说明“现在到底有什么、验证到
+什么程度”，再给出代码地图、接口契约、测试命令和下一步优先级。
+
+## 1. 当前结论
+
+| 部分 | 状态 | 说明 |
+|---|---|---|
+| 实机 4×VL53L5CX 8×8@15 Hz | **已验证** | 设备端 10 s 实测 14.8–15.2 Hz，0 读取错误 |
+| 实机 IMU + ToF 转发/ROS 接收 | **已验证** | 4 路 ToF、200 Hz IMU 可稳定进入 ROS 2 |
+| TIO-Former C++/ROS 推理链路 | **已验证能跑** | 进入 `TRACKING`，发布 odometry/path/status/TF |
+| TIO-Former 实机静态零漂 | **未通过** | 静止放桌面 20 s 漂移约 0.98 m |
+| 双目 `flyrat::odometry` 后端 | **仍是骨架** | 只输出 `NOT_INITIALIZED`，无有效位姿 |
+| 机载 RK3566 部署 | **未验证** | 目前只在开发机用 CPU libtorch 跑通 |
+
+**结论：传感器链路可以继续开发；当前 TIO-Former 模型不能直接用于飞行闭环。**
+主要原因是模型只在 Gazebo 前/左/右/下数据上训练，而当前机架是后/左/右/下，
+并且桌面测试时下视传感器距桌面只有 0–5 mm。
+
+## 2. 代码地图
+
+### 2.1 实机传感器
+
+| 路径 | 作用 |
+|---|---|
+| `libflyrat/include/flyrat/hardware/tof.hpp` | 4×VL53L5CX 配置、GPIO、`TofFrame`/`TofZone` |
+| `libflyrat/src/hardware/tof.cpp` | I2C 初始化、地址恢复、8×8/4×4 采集线程 |
+| `flyrat_pilot/src/sensors/sensor_forwarder*.{hpp,cpp}` | 设备端 IMU/ToF/双目 TCP 转发；默认 8×8@15 Hz |
+| `flyrat_play/ros2_ws/src/flyrat_sensors/` | 主机端 TCP 接收、协议解析、ROS 发布 |
+| `flyrat_play/ros2_ws/src/flyrat_sensors_interfaces/` | `TofFrame`/`TofZone` 消息 |
+
+### 2.2 TIO-Former 后端
+
+| 路径 | 作用 |
+|---|---|
+| `research/tio_former/` | 数据生成、PyTorch 模型、训练/评估、研究报告 |
+| `research/tio_former/scripts/export_tio.py` | checkpoint → TorchScript |
+| `libflyrat/models/tio_former_window64.pt` | 导出的固定 64 帧模型（4.6 MB） |
+| `libflyrat/include/flyrat/tio/tio_odometry.hpp` | `flyrat::tio::TioOdometry` 接口 |
+| `libflyrat/src/tio/tio_odometry.cpp` | 滑动窗口、IMU 插值、libtorch 推理、增量积分 |
+| `libflyrat/tools/tio_bench.cpp` | 合成输入推理基准 |
+| `libflyrat/tests/test_tio_api.cpp` | 接口、warm-up、reset、推理冒烟 |
+| `flyrat_play/ros2_ws/src/flyrat_odometry/src/tio_odometry_node.cpp` | ROS 2 节点 |
+| `flyrat_play/ros2_ws/src/flyrat_odometry/config/tio_odometry.yaml` | 节点参数和实机方向映射 |
+| `flyrat_play/ros2_ws/src/flyrat_odometry/launch/tio_odometry.launch.py` | 单节点启动 |
+| `docs/agent/odometry/tio_former.md` | 详细接入、构建、话题和限制 |
+
+### 2.3 双目骨架
+
+| 路径 | 作用 |
+|---|---|
+| `libflyrat/include/flyrat/odometry/odometry.hpp` | 双目/双目惯性接口 |
+| `libflyrat/src/odometry/odometry.cpp` | 桩实现，`TODO(odometry)` 标出接入点 |
+| `flyrat_play/ros2_ws/src/flyrat_odometry/src/odometry_node.cpp` | 双目 ROS 节点、同步、TF、状态 |
+| `libflyrat/configs/camera/uvc_640x480.yaml` | 实机 Kalibr 标定（不要随意改） |
+
+## 3. 接口契约
+
+### 3.1 TIO-Former 模型
+
+固定输入：
+
+```text
+tof              [1, 64, 4, 8, 8]  float32，单位 m
+imu              [1, 64, 16, 6]    float32，加速度 + 角速度
+weight           [1, 64, 4, 8, 8]  float32，0..1
+previous_tof     同 tof，前一帧
+previous_weight  同 weight，前一帧
+```
+
+固定输出：
+
+```text
+delta_p    [1, 64, 3]  机体坐标系位移增量
+delta_phi  [1, 64, 3]  机体坐标系旋转增量（轴角）
+```
+
+C++ 后端只取第 64 帧的增量，并按：
+
+```text
+p_t = p_{t-1} + R_{t-1} * delta_p
+R_t = R_{t-1} * exp(delta_phi)
+```
+
+积分。`Result::pose` 是 **`T_world_body`**，不是双目接口的
+`T_world_camera`。
+
+视角顺序固定为 **front / left / right / down**。实机 `sensor_order` 当前为
+`[1, 2, 3, 0]`，即 front 槽位暂时使用后向传感器；这是已知语义缺陷。
+
+### 3.2 ROS 话题与 TF
+
+`tio_odometry_node` 与双目节点使用同一套接口：
+
+```text
+/flyrat/sensors/tof_0 .. tof_3     flyrat_sensors_interfaces/TofFrame
+/flyrat/sensors/imu                sensor_msgs/Imu
+/flyrat/odometry/odometry          nav_msgs/Odometry，odometry_map -> imu_link
+/flyrat/odometry/path              nav_msgs/Path，transient local
+/flyrat/odometry/status            diagnostic_msgs/DiagnosticStatus，1 Hz
+/flyrat/odometry/reset             std_srvs/Trigger
+/tf                                odometry_map -> imu_link
+```
+
+状态消息包含 `state`、输入/处理/位姿发布/丢弃/失败帧数、IMU 样本数、
+`imu_age_s`、`tof_age_s`、`tof_rate_hz` 和模型路径。状态 `name` 为
+`flyrat_tio_odometry`，`hardware_id` 为 `tio_former`。
+
+### 3.3 实机 ToF 方向
+
+RK3566 Linux GPIO = `bank*32 + group*8 + pin`（A=0，B=1，C=2，D=3）。
+
+| Sensor ID | 方向 | INT | LPn | Linux GPIO |
+|---:|---|---|---|---|
+| 0 | 下 | 3B3 | 3B4 | 107 / 108 |
+| 1 | 后 | 3B0 | 3C2 | 104 / 114 |
+| 2 | 左 | 3A4 | 3A5 | 100 / 101 |
+| 3 | 右 | 3A1 | 3A2 | 97 / 98 |
+
+映射来自用户提供的 INT/LPn 接线，尚未通过逐个遮挡传感器做物理复核。
+
+## 4. 构建、运行、测试
+
+### 4.1 默认构建（不依赖 libtorch）
+
+```sh
+.script/build_libflyrat.sh --clean
+.script/build_flyrat_pilot.sh --clean
+ctest --test-dir libflyrat/build --output-on-failure
+```
+
+当前结果：9 个 C++ 测试全部通过。
+
+### 4.2 TIO 构建
+
+```sh
+cd research/tio_former
+python3 -m venv .venv-cpu
+.venv-cpu/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+cd ../..
+
+TORCH_CMAKE="$PWD/research/tio_former/.venv-cpu/lib/python3.12/site-packages/torch/share/cmake"
+
+cmake -S libflyrat -B libflyrat/build-tio \
+  -DFLYRAT_BUILD_TIO=ON -DFLYRAT_BUILD_TESTS=ON -DFLYRAT_BUILD_TOOLS=ON \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$TORCH_CMAKE"
+cmake --build libflyrat/build-tio -j"$(nproc)"
+ctest --test-dir libflyrat/build-tio --output-on-failure -R tio
+```
+
+`tio_bench` 只验证模型加载/推理链路，不代表精度。
+
+### 4.3 ROS 2 TIO 构建
+
+```sh
+bash -lc '
+  source /opt/ros/jazzy/setup.bash
+  cd flyrat_play/ros2_ws
+  colcon build --symlink-install \
+    --packages-select flyrat_sensors_interfaces flyrat_sensors flyrat_odometry \
+    --cmake-args -DCMAKE_BUILD_TYPE=Release -DFLYRAT_BUILD_TIO=ON \
+      -DCMAKE_PREFIX_PATH='"$TORCH_CMAKE"'
+'
+```
+
+### 4.4 实机一键启动
+
+```sh
+.script/bringup_real.sh start_foxglove:=true odometry_backend:=tio
+```
+
+注意：
+
+- 参数名是 `start_odometry`，不是旧的 `start_slam`；`start_odometry` 默认
+  为 `true`，通常不用写。
+- 默认后端是 `stereo`。要跑 TIO 必须显式写 `odometry_backend:=tio`。
+- `start_foxglove:=true` 启动 Foxglove Bridge，默认 `ws://<host>:8765`。
+
+第一次有效位姿需要 64 帧，约 4.3 s @15 Hz。
+
+### 4.5 无 Gazebo 回放
+
+```sh
+cd research/tio_former
+.venv/bin/python scripts/publish_processed_ros.py \
+  data/processed/test_corridor_0000.npz --rate 15 --sensor-order 1 2 3 0
+```
+
+另开终端启动节点后检查：
+
+```sh
+ros2 topic echo /flyrat/odometry/status --once
+ros2 topic echo /flyrat/odometry/odometry --once
+ros2 run tf2_ros tf2_echo odometry_map imu_link
+```
+
+### 4.6 Python 研究测试
+
+```sh
+cd research/tio_former
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
+```
+
+当前 47 项通过。
+
+## 5. 真机验证记录（2026-11-08）
+
+设备：RK3566，四颗 VL53L5CX（0x60/0x62/0x64/0x66），设备端 `tof_bench`
+10 s 结果：
+
+| Sensor | 帧数 | 实测频率 | 读取错误 | 平均读取 |
+|---:|---:|---:|---:|---:|
+| 0（下） | 151 | 15.1 Hz | 0 | 4.66 ms |
+| 1（后） | 152 | 15.2 Hz | 0 | 4.68 ms |
+| 2（左） | 150 | 15.0 Hz | 0 | 4.69 ms |
+| 3（右） | 148 | 14.8 Hz | 0 | 4.68 ms |
+
+TIO 节点实时状态（约 10 s）：
+
+```text
+state: TRACKING
+input_frames: 162
+processed_frames: 160
+pose_frames: 96
+dropped_frames: 2
+failed_frames: 0
+imu_samples: 2106
+```
+
+静止放桌面 20 s：末端约 `(0.9806, -0.0694, 0.0278) m`，最大位移约
+`0.9835 m`。**这是当前最重要的负结果。**
+
+原因按优先级：
+
+1. 下视传感器距桌面 0–5 mm，远超训练分布；
+2. 当前没有前向 ToF，模型 front 槽位喂的是后向数据；
+3. 模型只在 Gazebo 数据上训练，sim-to-real 差异明显；
+4. 真机 IMU 偏置/振动/安装误差与仿真不同。
+
+## 6. 下一步优先级
+
+### P0：先得到可信的实机基线
+
+1. 把无人机抬到离地约 1 m、四周无近距遮挡处，静止 30–60 s 重测零漂；
+2. 逐个遮挡/靠近传感器，观察 `/flyrat/sensors/tof_N`，确认 0/1/2/3 与
+   下/后/左/右的物理对应；
+3. 记录下视在空中的有效距离和 status 分布；
+4. 保存一份真实 ToF+IMU+GT（或至少静止/已知运动）数据，作为后续微调集。
+
+### P1：修正模型输入语义
+
+1. 首选加装前向 ToF，保持 front/left/right/down 训练布局；
+2. 若不加传感器，用 rear/left/right/down 重新生成数据、训练和导出；
+3. 重新导出后必须重跑 `test_tio_api`、ROS 回放和实机链路测试；
+4. 详情和现有 v2 负结果见 `report/model_v2_results.md`。
+
+### P2：工程化
+
+1. 优化 C++ 推理：当前每帧重算 64 帧窗口，开发机 CPU 约 9 ms；可改为增量
+   streaming cache 或降低重算范围；
+2. 评估 libtorch 在 RK3566/Buildroot 上的交叉编译、内存和延迟；
+3. 统一 ToF/IMU 时间基准，记录真实时间偏移；
+4. 把里程计接入 `flyrat_pilot` 时增加失效保护：状态非 `TRACKING`、IMU 超时、
+   ToF 丢帧过多时退出闭环。
+
+### P3：双目骨架
+
+双目后端仍是桩实现，和 TIO 是两条独立路线。若继续双目，按
+`odometry/overview.md` 的接入点实现，不要破坏现有 ROS 契约。
+
+## 7. 调试清单
+
+```sh
+# 设备是否在线
+adb devices
+
+# 设备端 ToF 频率（先停 forwarder，避免 I2C 争用）
+# 需要交叉编译的 tof_bench；参数见 docs/agent/hardware/sensor_forwarding.md
+
+# ROS 输入
+ros2 topic hz /flyrat/sensors/imu
+ros2 topic hz /flyrat/sensors/tof_0
+ros2 topic echo --once /flyrat/sensors/tof_0
+
+# TIO 状态
+ros2 topic echo /flyrat/odometry/status --once
+ros2 topic echo /flyrat/odometry/odometry --once
+ros2 run tf2_ros tf2_echo odometry_map imu_link
+```
+
+常见现象：
+
+- `NOT_INITIALIZED` 持续：没有收齐 4 路 ToF 或 IMU；看 status 的
+  `input_frames`/`imu_samples`。
+- `dropped_frames` 增长快：4×4@60 输入被限频，或 ApproximateTime 同步失败。
+- `failed_frames` 增长：模型推理异常或输入形状不对。
+- 状态 `TRACKING` 但位置漂移：先检查下视距离、front/rear 语义和 IMU。
+
+## 8. 不要做的事
+
+- 不要把 `warmup_frames` 降到很小来“加快出位姿”；窗口前部会零填充，模型
+  输入分布不匹配。
+- 不要把模型四元数顺序改成 `qx qy qz qw` 以外的格式；trajectory 输出是 TUM
+  顺序。
+- 不要修改 `libflyrat/configs/camera/uvc_640x480.yaml` 的数值来“试漂移”；
+  标定来自 Kalibr，改动会破坏双目路线。
+- 不要在没有前向 ToF 的情况下把 `sensor_order` 改成 `[0,1,2,3]` 来“对齐方向”；
+  那只是换错槽位，不会产生前向观测。
+- 不要修改 `docs/drone/` 或 `playground/`。

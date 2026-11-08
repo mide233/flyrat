@@ -13,6 +13,7 @@
    - 实机传感器 → [`hardware/sensor_forwarding.md`](hardware/sensor_forwarding.md)
    - 仿真 → [`simulation/betaflight_sitl_gazebo.md`](simulation/betaflight_sitl_gazebo.md)
    - 里程计 → [`odometry/overview.md`](odometry/overview.md)
+   - 开发交接 / 当前阻塞 → [`odometry/handoff.md`](odometry/handoff.md)
    - TIO-Former 接入 → [`odometry/tio_former.md`](odometry/tio_former.md)
    - 坐标系与变换 → [`odometry/coordinates.md`](odometry/coordinates.md)
    - 研究计划 → [`research/tio_former.md`](research/tio_former.md)
@@ -50,6 +51,9 @@
 - [`odometry/tio_former.md`](odometry/tio_former.md)
   TIO-Former ToF-惯性模型的 C++ 接口、TorchScript 导出、libtorch/ROS 构建、
   `tio_odometry_node` 话题契约、仿真回放和实机限制。
+- [`odometry/handoff.md`](odometry/handoff.md)
+  当前可运行/不可运行部分、代码地图、接口契约、实机测试结果、调试清单和
+  接手下一位开发者的优先级。
 
 ### 报告
 

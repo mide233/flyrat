@@ -606,6 +606,14 @@ bash -lc '
 TF，因此 Foxglove 配置不需要改。节点需要 64 帧（约 4.3 秒）ToF 才输出第一个
 有效位姿。
 
+注意参数名是 `start_odometry`（默认 `true`），不是旧的 `start_slam`；默认
+后端是 `stereo`，所以跑 TIO 必须显式写 `odometry_backend:=tio`。
+
+2026-11-08 真机验证结果：4 颗 ToF 设备端实测 14.8–15.2 Hz，TIO 节点能进入
+`TRACKING` 并发布 odometry/TF；但无人机静止放桌面 20 s 漂移约 0.98 m，
+主要受下视贴桌面、缺少前向 ToF 和仿真域差异影响。当前不能用于飞行闭环。
+完整记录见 [`odometry/handoff.md`](odometry/handoff.md)。
+
 实机 ToF 默认配置已改为 **8×8 @ 15 Hz**。`flyrat_sensor_forwarder` 的
 `--tof-resolution` / `--tof-rate` 可覆盖，8×8 最高 15 Hz。Onboard INT/LPn
 接线对应关系为：传感器 0=下、1=后、2=左、3=右；TIO 节点配置

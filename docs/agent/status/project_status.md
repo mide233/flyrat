@@ -1,6 +1,6 @@
 # 项目状态
 
-最后更新：2026-11-07
+最后更新：2026-11-08
 
 ## 1. 项目目标
 
@@ -120,10 +120,14 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   `/flyrat/sensors/imu`，发布与双目节点相同的 `/flyrat/odometry/*` 和
   `odometry_map -> imu_link` TF。
 - TIO 目标默认关闭；需要 `FLYRAT_BUILD_TIO=ON` 和 CPU libtorch。开发机已用
-  仿真序列验证端到端推理和 ROS 发布，`test_tio_api` 覆盖接口、warm-up 和
-  推理冒烟。
-- 尚未在实机 ToF 上验证精度、噪声和安装方向；也没有 RK3566 交叉编译和
-  机载性能数据。
+  仿真序列验证端到端推理和 ROS 发布，`test_tio_api` 覆盖接口、warm-up、
+  reset 和推理冒烟。
+- 2026-11-08 真机验证：四颗 ToF 设备端实测 14.8–15.2 Hz，0 读取错误；
+  `tio_odometry_node` 能进入 `TRACKING` 并发布 odometry/TF。
+- 真机静态放桌面 20 s 漂移约 0.98 m，当前不能用于飞行。主要原因是下视
+  传感器距桌面 0–5 mm、当前无前向 ToF（front 槽位接后向）以及仿真域差异。
+  完整记录见 [`odometry/handoff.md`](../odometry/handoff.md)。
+- 尚未完成实机精度/噪声验证、RK3566 交叉编译和机载性能评估。
 - 模型改进 v2（`hybrid` / `gated_fifo` / `hybrid_gated`）已完成 15/40-epoch
   筛选：40-epoch `hybrid_gated` ATE 0.4122 m，优于原 full 的 0.4316 m，
   但仍未超过 `naive_concat`（0.4013 m）和 `kv_only_no_fifo`（0.3925 m），
@@ -137,6 +141,8 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 |---|---:|---|
 | IMU | 200.07 Hz | MSP UART3，921600 |
 | ToF | 每颗 8×8 @ 15 Hz（配置） | 4 颗共用 i2c2 750 kHz；旧 4×4 实测约 57–58 Hz |
+| ToF 设备端实测 | 14.8–15.2 Hz | 2026-11-08，四颗各 10 s，0 读取错误 |
+| ToF 单帧读取 | 约 4.7 ms | 设备端 `tof_bench`，8×8 |
 | ToF 初始化 | 约 7.2 s | 从进程启动到 TCP 监听 |
 | 双目 | 60.04 Hz | 1280x480@60 MJPEG，单眼 640x480 |
 | adb 吞吐 | 约 30 MB/s | USB2 链路，`adb exec-out` 实测 |
@@ -146,7 +152,8 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 | ROS 2 IMU 输入 | 200.3–200.8 Hz | 开发机接收节点 |
 | ROS 2 双目输入 | 60.0 Hz | 左右各 640x480 mono8 |
 | ROS 2 里程计状态发布 | 1 Hz | `diagnostic_msgs` |
-| TIO-Former ROS 链路 | `TRACKING` | 仿真序列回放，开发机 CPU libtorch |
+| TIO-Former ROS 链路 | `TRACKING` | 真机 ToF+IMU，开发机 CPU libtorch |
+| TIO-Former 实机静态零漂 | 约 0.98 m / 20 s | 桌面测试，下视贴桌面；未通过飞行要求 |
 
 ## 4. 构建与运行
 
@@ -176,36 +183,55 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - 里程计 ROS 节点依赖 OpenCV，目前在开发机运行；泰山派没有 OpenCV，内存也
   只有 2 GB，能否上机仍需评估。
 - TIO-Former 后端依赖 libtorch，只在 Gazebo 前/左/右/下 4 向 ToF 数据上
-  训练和验证；实机为后/左/右/下，缺前向视角，真实噪声、安装方向、
-  RK3566 交叉编译与机载延迟均未验证。
+  训练和验证；实机 ToF/IMU 链路已通，但实机为后/左/右/下，缺前向视角，
+  静态零漂约 0.98 m / 20 s，真实噪声、安装方向复核、RK3566 交叉编译与
+  机载延迟仍未完成。
 
 ## 6. 最近提交
 
 ```text
-23b7974 refactor: remove ORB-SLAM3 and add odometry scaffold
-9f09ae4 docs: move all project documentation under docs/agent
-3f24857 docs: reorganize by topic and centralize build instructions
-60a8483 docs: describe ORB-SLAM3 module and measurements
-73a13b1 feat(slam): vendor headless ORB-SLAM3 with stereo facade
-f2ea59b fix(tof): define result-trimming macros in platform header
-39f5406 docs: record sensor forwarding status and ToF recovery
-2420f7e refactor(tof): hardcode the four sensor addresses
-9ec445d fix(hardware): recover ToF sensors at retained I2C addresses
-390874c feat(sensors): forward real IMU, ToF and stereo over adb
+4593a72 feat(sensors): configure real ToF 8x8@15Hz and direction mapping
+c9edd8d feat(research): add TIO model variants and C++/ROS backend
+3621ad7 feat(research): complete M5 seeds, LOSO and technical report
+877a554 feat(research): complete M4 training, ablations and robustness
+d4c7b77 feat(research): implement TIO-Former model and overfit smoke test
+4c73327 feat(research): generate full TIO-Former simulation dataset
+077b097 feat(research): scaffold TIO-Former simulation and M1 dataset pipeline
+910f78d refactor: remove ORB-SLAM3 and add odometry scaffold
 ```
 
 ## 7. 下一步
 
-1. 实现 `flyrat::odometry` 后端（例如特征点法或直接法视觉惯性里程计），先用
+### P0：TIO-Former 实机基线
+
+1. 把无人机抬到离地约 1 m、四周无近距遮挡处，静止 30–60 s 重测零漂，确认
+   桌面 0.98 m/20 s 的漂移有多少来自下视贴桌面。
+2. 逐个遮挡/靠近传感器，确认 0/1/2/3 与 下/后/左/右 的物理方向对应。
+3. 录一段真实 8×8 ToF + IMU 序列（含静止和已知运动），作为域适配/微调数据。
+4. 加装前向 ToF，或用 rear/left/right/down 重新生成数据并重训；重新导出
+   TorchScript 后重跑 C++/ROS 测试。
+
+### P1：工程化与机载可行性
+
+5. 优化 C++ 推理：当前每帧重算 64 帧窗口，开发机 CPU 约 9 ms；评估增量
+   streaming cache、线程/批处理和内存占用。
+6. 评估 libtorch 在 RK3566/Buildroot 上的交叉编译、延迟和 RSS。
+7. 统一 ToF/IMU 时间基准；确认 15 Hz ToF 与 200 Hz IMU 的时间对齐。
+8. 将传感器转发和里程计整合进正式 `flyrat_pilot`，加入 `TRACKING` 失效、
+   IMU 超时、ToF 丢帧过多时的保护。
+
+### P2：双目骨架
+
+9. 实现 `flyrat::odometry` 后端（特征点法或直接法视觉惯性里程计），先用
    已录制的双目/IMU 数据回放验证，再接入 `odometry_node`。
-2. 用真实运动验证双目内参、双目外参、IMU–相机外参和 Allan 噪声，检查轨迹
-   尺度、漂移和长期稳定性，并补充 ROS `CameraInfo`。
-3. 评估 ToF、双目、IMU 的时间对齐策略，必要时增加设备端统一时间戳。
-4. 将传感器转发和里程计整合进正式 `flyrat_pilot` 运行时，加入失效保护与
-   链路健康状态。
-5. 视 adb 带宽和算法需求，评估双目降到 30 Hz 或使用硬件编码的长期方案。
-6. 评估里程计在泰山派上的可行性（需要 OpenCV 和更大内存），或维持开发机运算。
-7. 为 TIO-Former 录实机 8×8 ToF + IMU 序列，验证传感器方向、真实噪声和
-   仿真到实机的泛化；再评估 libtorch 在 RK3566 上的交叉编译与延迟。
-8. 后端输出稳定位姿后，补充跟踪耗时、RSS、漂移等实测指标，并替换当前
-   “里程计骨架”占位状态。
+10. 用真实运动验证双目内参、双目外参、IMU–相机外参和 Allan 噪声，检查
+    轨迹尺度、漂移和长期稳定性，并补充 ROS `CameraInfo`。
+11. 视 adb 带宽和算法需求，评估双目降到 30 Hz 或使用硬件编码的长期方案。
+
+### P3：指标与文档
+
+12. 后端输出稳定位姿后，补充跟踪耗时、RSS、漂移等实测指标，并替换当前
+    “里程计骨架”占位状态。
+
+完整的代码地图、接口契约和调试清单见
+[`odometry/handoff.md`](../odometry/handoff.md)。

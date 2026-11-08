@@ -323,9 +323,14 @@ scene_id, seq_id, traj_type, split
   libtorch）和 ROS 2 `tio_odometry_node`，将导出的 TorchScript 模型
   `libflyrat/models/tio_former_window64.pt` 接入 `/flyrat/sensors/tof_0..3`
   与 `/flyrat/sensors/imu`，发布与骨架节点相同的 odometry/path/status/TF/reset
-  接口。仿真数据回放已验证 `TRACKING` 和有效里程计消息；默认构建不依赖
-  libtorch，真实 4×VL53L5CX 与机载部署仍未验证。说明见
+  接口。仿真回放和真实 4×VL53L5CX + IMU 都已验证 `TRACKING` 和有效里程计
+  消息；默认构建不依赖 libtorch，但机载部署仍未验证。说明见
   `docs/agent/odometry/tio_former.md`。
+- 真机验证（2026-11-08）：四颗 ToF 设备端实测 14.8–15.2 Hz，0 读取错误；
+  TIO 节点进入 `TRACKING`。但无人机静止放桌面 20 s 漂移约 0.98 m，主要受
+  下视距桌面 0–5 mm、缺少前向 ToF（front 槽位接后向）和仿真域差异影响。
+  当前模型不能用于飞行闭环；完整记录和下一步见
+  `docs/agent/odometry/handoff.md`。
 - 实机准备：`flyrat_sensor_forwarder` 默认改为 8×8 @ 15 Hz，并新增
   `--tof-resolution` / `--tof-rate`。由 INT/LPn 接线确定传感器 ID 为
   0=下、1=后、2=左、3=右；TIO 节点用 `sensor_order: [1,2,3,0]` 映射到模型

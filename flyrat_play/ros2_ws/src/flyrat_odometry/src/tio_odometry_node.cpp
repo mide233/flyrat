@@ -83,16 +83,19 @@ diagnostic_msgs::msg::KeyValue value(const std::string& key, const std::string& 
     return item;
 }
 
-TofGrid to_grid(const Tof& message)
+bool to_grid(const Tof& message, TofGrid& grid)
 {
-    TofGrid grid;
     const int resolution = static_cast<int>(message.resolution);
+    if (resolution != 4 && resolution != 8) {
+        return false;
+    }
     for (int cell = 0; cell < 64; ++cell) {
         int source = cell;
         if (resolution == 4) {
             source = (cell / 8 / 2) * 4 + (cell % 8 / 2);
-        } else if (resolution != 8) {
-            continue;
+        }
+        if (source < 0 || source >= static_cast<int>(message.zones.size())) {
+            return false;
         }
         const auto& zone = message.zones[source];
         const float range = static_cast<float>(zone.distance_mm) * 1e-3F;
@@ -100,7 +103,7 @@ TofGrid to_grid(const Tof& message)
         grid.range[cell] = valid ? range : 0.0F;
         grid.weight[cell] = valid ? 1.0F : 0.0F;
     }
-    return grid;
+    return true;
 }
 
 } // namespace
@@ -271,19 +274,29 @@ private:
             first, second, third, fourth
         };
         const double stamp = rclcpp::Time(first->header.stamp).seconds();
-        if (last_tof_stamp_ >= 0.0) {
+        if (!std::isfinite(stamp)) {
+            dropped_frames_.fetch_add(1);
+            return;
+        }
+        const double previous_stamp = last_tof_stamp_.load();
+        if (previous_stamp >= 0.0) {
             const double minimum_period = 0.8 / tof_rate_hz_;
-            const double delta = stamp - last_tof_stamp_;
-            if (delta >= 0.0 && delta < minimum_period) {
+            const double delta = stamp - previous_stamp;
+            if (delta <= 0.0 || delta < minimum_period) {
                 dropped_frames_.fetch_add(1);
                 return;
             }
         }
-        last_tof_stamp_ = stamp;
         PendingFrame frame;
         for (int index = 0; index < 4; ++index) {
-            frame.views[index] = to_grid(*messages[sensor_order_[index]]);
+            if (!to_grid(*messages[sensor_order_[index]], frame.views[index])) {
+                dropped_frames_.fetch_add(1);
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                    "dropping malformed ToF frame (resolution/zone count)");
+                return;
+            }
         }
+        last_tof_stamp_.store(stamp);
         frame.stamp = rclcpp::Time(first->header.stamp);
         input_frames_.fetch_add(1);
         {
@@ -411,8 +424,13 @@ private:
         status.level = diagnostic_level(state);
         status.message = state_name(state);
         if (state != odometry::State::kTracking) {
-            status.message += "; waiting for ToF/IMU";
+            status.message += "; no valid pose";
         }
+        const double now = get_clock()->now().seconds();
+        const double last_imu = last_imu_stamp_.load();
+        const double last_tof = last_tof_stamp_.load();
+        const double imu_age = last_imu > 0.0 ? now - last_imu : -1.0;
+        const double tof_age = last_tof >= 0.0 ? now - last_tof : -1.0;
         status.values.push_back(value("state", state_name(state)));
         status.values.push_back(value("input_frames", std::to_string(input_frames_.load())));
         status.values.push_back(value("processed_frames", std::to_string(processed_frames_.load())));
@@ -420,6 +438,9 @@ private:
         status.values.push_back(value("dropped_frames", std::to_string(dropped_frames_.load())));
         status.values.push_back(value("failed_frames", std::to_string(failed_frames_.load())));
         status.values.push_back(value("imu_samples", std::to_string(imu_count_.load())));
+        status.values.push_back(value("imu_age_s", std::to_string(imu_age)));
+        status.values.push_back(value("tof_age_s", std::to_string(tof_age)));
+        status.values.push_back(value("tof_rate_hz", std::to_string(tof_rate_hz_)));
         status.values.push_back(value("model", model_path_));
         status_pub_->publish(status);
     }
@@ -436,6 +457,8 @@ private:
             path_.poses.clear();
             last_path_publish_ = -1.0;
         }
+        state_.store(odometry::State::kNotInitialized);
+        last_tof_stamp_.store(-1.0);
         response->success = true;
         response->message = "TIO odometry reset";
     }
@@ -451,7 +474,7 @@ private:
     int path_max_poses_ = 1000;
     std::array<std::string, 4> tof_topics_;
     std::array<int, 4> sensor_order_ { 1, 2, 3, 0 };
-    double last_tof_stamp_ = -1.0;
+    std::atomic<double> last_tof_stamp_ { -1.0 };
 
     std::unique_ptr<TioOdometry> odometry_;
     std::mutex odometry_mutex_;

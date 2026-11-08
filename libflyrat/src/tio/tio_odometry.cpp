@@ -190,6 +190,16 @@ void TioOdometry::addImu(const odometry::ImuSample& sample)
     if (impl_->shutdown) {
         return;
     }
+    // The interpolation below assumes a sorted buffer.  Drop malformed or
+    // out-of-order samples instead of silently corrupting the IMU window.
+    if (!std::isfinite(sample.timestamp) || !sample.accel.allFinite() ||
+        !sample.gyro.allFinite()) {
+        return;
+    }
+    if (!impl_->imu_buffer.empty() &&
+        sample.timestamp < impl_->imu_buffer.back().timestamp) {
+        return;
+    }
     impl_->imu_buffer.push_back(sample);
     const double cutoff = sample.timestamp - impl_->options.imu_buffer_seconds;
     while (!impl_->imu_buffer.empty() && impl_->imu_buffer.front().timestamp < cutoff) {
@@ -205,6 +215,12 @@ odometry::Result TioOdometry::track(const std::vector<TofGrid>& views, double ti
     }
     if (views.size() != static_cast<std::size_t>(impl_->options.views)) {
         throw odometry::OdometryError("TIO track expects four ToF views");
+    }
+    if (!std::isfinite(timestamp)) {
+        throw odometry::OdometryError("TIO timestamp is not finite");
+    }
+    if (impl_->have_last_tof && timestamp <= impl_->last_tof_stamp) {
+        throw odometry::OdometryError("TIO timestamps must be strictly increasing");
     }
 
     std::array<float, 4 * 64> range {};
@@ -290,6 +306,7 @@ void TioOdometry::reset()
     impl_->have_last_tof = false;
     impl_->position.setZero();
     impl_->rotation.setIdentity();
+    impl_->imu_buffer.clear();
     impl_->tof_window.clear();
     impl_->weight_window.clear();
     impl_->imu_window.clear();

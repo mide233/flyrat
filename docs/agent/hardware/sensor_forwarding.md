@@ -217,6 +217,18 @@ ros2 topic echo --once /flyrat/sensors/tof_0
   `--tof-resolution 4 --tof-rate 60`，则约 57–58 Hz、`resolution=4`；
 - 左右图像各约 60 Hz，`1280x480` 模式下单眼 `640x480`。
 
+2026-11-08 设备端 `tof_bench` 实测（10 s，8×8@15）：
+
+| Sensor | 帧数 | 实测频率 | 读取错误 | 平均读取 |
+|---:|---:|---:|---:|---:|
+| 0（下） | 151 | 15.1 Hz | 0 | 4.66 ms |
+| 1（后） | 152 | 15.2 Hz | 0 | 4.68 ms |
+| 2（左） | 150 | 15.0 Hz | 0 | 4.69 ms |
+| 3（右） | 148 | 14.8 Hz | 0 | 4.68 ms |
+
+主机侧 `ros2 topic hz` 在 TIO 推理负载下可能读到约 13 Hz，这是测量进程丢消息，
+不是传感器实际频率；以设备端 `tof_bench` 或节点 `processed_frames` 为准。
+
 拔掉 adb 后 receiver 会每秒重连；重新执行 `adb forward` 后恢复。
 
 ## 6. 已知限制

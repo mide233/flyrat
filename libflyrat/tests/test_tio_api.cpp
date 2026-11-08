@@ -90,10 +90,34 @@ int main()
         }
     }
 
+    threw = false;
+    try {
+        odometry.track(views, 63.0 / 15.0);
+    } catch (const flyrat::odometry::OdometryError&) {
+        threw = true;
+    }
+    check(threw, "non-increasing timestamp is rejected");
+
+    odometry.reset();
+    for (int frame = 0; frame < 64; ++frame) {
+        const double stamp = 10.0 + static_cast<double>(frame) / 15.0;
+        flyrat::odometry::ImuSample imu;
+        imu.timestamp = stamp;
+        odometry.addImu(imu);
+        const auto result = odometry.track(views, stamp);
+        if (frame < 63) {
+            check(result.state == State::kNotInitialized,
+                "state returns to NOT_INITIALIZED after reset");
+        } else {
+            check(result.state == State::kTracking,
+                "state returns to TRACKING after reset warm-up");
+        }
+    }
+
     odometry.shutdown();
     threw = false;
     try {
-        odometry.track(views, 4.3);
+        odometry.track(views, 20.0);
     } catch (const flyrat::odometry::OdometryError&) {
         threw = true;
     }

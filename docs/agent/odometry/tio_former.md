@@ -2,8 +2,9 @@
 
 本页记录研究模型 TIO-Former 在 `libflyrat` / ROS 2 中的实验性接入。它是
 `research/tio_former/` 的推理后端，**不替代**双目/双目惯性骨架
-[`overview.md`](overview.md)。当前模型完全在 Gazebo 仿真数据上训练，尚未在
-实机飞行数据上验证。
+[`overview.md`](overview.md)。当前模型完全在 Gazebo 仿真数据上训练；实机
+ToF/IMU 链路已验证，但精度未通过。开发交接和优先级见
+[`handoff.md`](handoff.md)。
 
 ## 1. 组成
 
@@ -134,7 +135,8 @@ zone 的 `valid` 为真且距离在 `[0.015, 4.0] m` 时权重为 1，否则距�
 ```
 
 状态消息的 `name` 为 `flyrat_tio_odometry`，`hardware_id` 为 `tio_former`，
-并报告输入/处理/位姿发布/丢弃/失败帧数和 IMU 样本数。
+并报告输入/处理/位姿发布/丢弃/失败帧数、IMU 样本数、`imu_age_s`、
+`tof_age_s` 和 `tof_rate_hz`。
 
 ### 4.1 实机 ToF 方向映射
 
@@ -179,12 +181,29 @@ rear/left/right/down 布局的数据并重新训练/导出模型。节点启动�
 
 ```sh
 .script/bringup_real.sh odometry_backend:=tio
-.script/bringup_real.sh odometry_backend:=tio start_foxglove:=true
+.script/bringup_real.sh start_foxglove:=true odometry_backend:=tio
 ```
 
 `bringup_real.sh` 会把参数原样传给 `bringup.launch.py`。默认
 `odometry_backend:=stereo` 使用双目骨架；设为 `tio` 后启动
-`tio_odometry_node`，不再需要 `camera_config_path`。
+`tio_odometry_node`，不再需要 `camera_config_path`。启动参数是
+`start_odometry`（默认 `true`），不是旧的 `start_slam`；默认后端不是 TIO，
+必须显式写 `odometry_backend:=tio`。
+
+### 4.3 真机验证现状（2026-11-08）
+
+已用 RK3566 + 4×VL53L5CX 做实机链路测试：
+
+- 设备端 10 s 实测：传感器 0/1/2/3 分别为 15.1/15.2/15.0/14.8 Hz，
+  0 读取错误，单帧读取约 4.7 ms；
+- `tio_odometry_node` 能进入 `TRACKING`，发布 odometry/path/status/TF；
+- 约 10 s 状态：`input_frames=162`、`processed_frames=160`、
+  `pose_frames=96`、`dropped_frames=2`、`failed_frames=0`；
+- 但无人机静止放桌面 20 s 漂移约 **0.98 m**，不能用于飞行。
+
+主要原因是下视传感器距桌面 0–5 mm、当前没有前向 ToF（模型 front 槽位接
+后向数据）以及仿真到实机的域差异。完整记录和下一步见
+[`handoff.md`](handoff.md)。
 
 ## 5. 仿真回放
 
@@ -213,8 +232,10 @@ ros2 run tf2_ros tf2_echo odometry_map imu_link
 
 ## 6. 限制
 
-- 模型只在 4 向 VL53L5CX 仿真数据上训练，没有实机 ToF 噪声、反射率、
-  多径和安装误差验证。
+- 实机 ToF/IMU 链路已经验证，但模型精度没有通过：静态放桌面 20 s 漂移约
+  0.98 m。当前模型不能用于飞行闭环。
+- 模型只在 4 向 VL53L5CX 仿真数据上训练，没有完成实机 ToF 噪声、反射率、
+  多径和安装误差的域适配。
 - 训练数据使用前/左/右/下四向布局；当前实机是后/左/右/下，没有前向
   ToF，`sensor_order=[1,2,3,0]` 只是把后向数据填入 front 槽位，不能替代
   真正的前向视角。用于精度验证前应加装前向传感器，或重新训练

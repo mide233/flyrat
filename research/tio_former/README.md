@@ -45,6 +45,11 @@ The method uses 4× VL53L5CX 8×8 ToF arrays (front / left / right / down) and a
   [`docs/agent/odometry/tio_former.md`](../../docs/agent/odometry/tio_former.md)。
   当前 Python 测试 **47 项通过**，C++ 默认构建 9 项、TIO 构建另加
   `test_tio_api`。
+- **真机验证（2026-11-08）**：4 颗 VL53L5CX 设备端实测 14.8–15.2 Hz，
+  0 读取错误；TIO 节点能进入 `TRACKING` 并发布 odometry/TF。但静止放桌面
+  20 s 漂移约 **0.98 m**，当前不能用于飞行。主要原因是下视距桌面 0–5 mm、
+  没有前向 ToF（front 槽位接后向）和仿真域差异。交接记录见
+  [`docs/agent/odometry/handoff.md`](../../docs/agent/odometry/handoff.md)。
 
 ## 依赖
 
