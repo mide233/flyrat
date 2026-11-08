@@ -118,10 +118,10 @@ ros2 launch flyrat_odometry tio_odometry.launch.py
 ```
 
 `TofFrame` 的 8×8 或 4×4 分辨率都可接受；4×4 会最近邻上采样到 8×8。4×4
-只是兼容路径，模型训练使用 8×8，实机应尽量把设备 ToF 配成 8×8 @ 15 Hz。
+只是兼容路径，模型训练使用 8×8。`flyrat_sensor_forwarder` 默认已改为
+**8×8 @ 15 Hz**；节点还会按 `tof_rate_hz` 对过快到达的同步帧做节流，避免
+4×4@60 Hz 时把“每 66.7 ms 的增量”按 60 Hz 积分。
 zone 的 `valid` 为真且距离在 `[0.015, 4.0] m` 时权重为 1，否则距离和权重都为 0。
-`sensor_order` 参数把模型视角映射到传感器编号，默认 `[0,1,2,3]` 对应
-front/left/right/down。
 
 发布与双目节点相同的接口：
 
@@ -136,6 +136,33 @@ front/left/right/down。
 状态消息的 `name` 为 `flyrat_tio_odometry`，`hardware_id` 为 `tio_former`，
 并报告输入/处理/位姿发布/丢弃/失败帧数和 IMU 样本数。
 
+### 4.1 实机 ToF 方向映射
+
+RK3566 的 GPIO 编号为 `bank*32 + group*8 + pin`。当前实机 INT/LPn 接线：
+
+| 传感器 ID | 方向 | INT | LPn | Linux GPIO |
+|---:|---|---|---|---|
+| 0 | 下 | 3B3 | 3B4 | 107 / 108 |
+| 1 | 后 | 3B0 | 3C2 | 104 / 114 |
+| 2 | 左 | 3A4 | 3A5 | 100 / 101 |
+| 3 | 右 | 3A1 | 3A2 | 97 / 98 |
+
+`TofArray` 的默认 GPIO 数组与上表一致，`/flyrat/sensors/tof_0..3` 按传感器
+ID 发布。模型训练视角为 front/left/right/down，节点用
+`sensor_order: [1, 2, 3, 0]` 映射为：
+
+```text
+模型 front <- 传感器 1（实机后向）
+模型 left  <- 传感器 2（实机左向）
+模型 right <- 传感器 3（实机右向）
+模型 down  <- 传感器 0（实机下向）
+```
+
+**当前机架没有前向 ToF**，所以模型 front 槽位暂时喂后向数据。这会破坏模型
+学到的“前向”视角语义；用于实机精度验证前，应加装前向传感器，或重新生成
+rear/left/right/down 布局的数据并重新训练/导出模型。节点启动时会打印映射，
+并在 front 被喂后向时给出警告。
+
 主要参数（`config/tio_odometry.yaml`）：
 
 | 参数 | 默认值 | 说明 |
@@ -144,11 +171,11 @@ front/left/right/down。
 | `world_frame` / `body_frame` | `odometry_map` / `imu_link` | TF 坐标系 |
 | `warmup_frames` | `64` | 首帧位姿前的 ToF 帧数 |
 | `tof_rate_hz` / `imu_buffer_seconds` | `15` / `2.0` | 时间基准 |
-| `sensor_order` | `[0,1,2,3]` | 视角到传感器编号 |
+| `sensor_order` | `[1,2,3,0]` | 视角到传感器编号 |
 | `path_max_poses` / `path_publish_period` | `1000` / `0.2` | 轨迹发布 |
 | `trajectory_path` | 空 | 退出时写 TUM 轨迹 |
 
-### 4.1 一键 bringup
+### 4.2 一键 bringup
 
 ```sh
 .script/bringup_real.sh odometry_backend:=tio
@@ -162,12 +189,13 @@ front/left/right/down。
 ## 5. 仿真回放
 
 `research/tio_former/scripts/publish_processed_ros.py` 可以把一条处理后的 NPZ
-序列发布成 ROS 话题，用于无 Gazebo 的端到端检查：
+序列发布成 ROS 话题，用于无 Gazebo 的端到端检查。使用实机默认映射时，把
+仿真 front/left/right/down 分别发到 `tof_1/tof_2/tof_3/tof_0`：
 
 ```sh
 cd research/tio_former
 .venv/bin/python scripts/publish_processed_ros.py \
-  data/processed/test_corridor_0000.npz --rate 15 --sensor-order 0 1 2 3
+  data/processed/test_corridor_0000.npz --rate 15 --sensor-order 1 2 3 0
 ```
 
 另一个终端启动节点后检查：
@@ -187,8 +215,10 @@ ros2 run tf2_ros tf2_echo odometry_map imu_link
 
 - 模型只在 4 向 VL53L5CX 仿真数据上训练，没有实机 ToF 噪声、反射率、
   多径和安装误差验证。
-- 训练数据使用前/左/右/下四向布局；实机传感器安装与 `sensor_order` 必须
-  逐项核对，接错方向会直接破坏方向注意力。
+- 训练数据使用前/左/右/下四向布局；当前实机是后/左/右/下，没有前向
+  ToF，`sensor_order=[1,2,3,0]` 只是把后向数据填入 front 槽位，不能替代
+  真正的前向视角。用于精度验证前应加装前向传感器，或重新训练
+  rear/left/right/down 模型。
 - `warmup_frames=64` 意味着约 4.3 s 后才输出第一个有效位姿；这是保证输入
   分布与训练一致的必要代价。
 - 需要 libtorch；RK3566/Buildroot 上尚未做交叉编译和性能评估，不能把开发机

@@ -326,4 +326,9 @@ scene_id, seq_id, traj_type, split
   接口。仿真数据回放已验证 `TRACKING` 和有效里程计消息；默认构建不依赖
   libtorch，真实 4×VL53L5CX 与机载部署仍未验证。说明见
   `docs/agent/odometry/tio_former.md`。
+- 实机准备：`flyrat_sensor_forwarder` 默认改为 8×8 @ 15 Hz，并新增
+  `--tof-resolution` / `--tof-rate`。由 INT/LPn 接线确定传感器 ID 为
+  0=下、1=后、2=左、3=右；TIO 节点用 `sensor_order: [1,2,3,0]` 映射到模型
+  front/left/right/down。当前机架没有前向 ToF，front 槽位暂用后向数据，
+  精度验证前需加装前向传感器或重训 rear/left/right/down 模型。
 - 运行说明见 `research/tio_former/README.md`。

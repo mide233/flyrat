@@ -169,12 +169,29 @@ public:
                 "tof_topic_" + std::to_string(index), defaults[index]);
         }
         const auto sensor_order = declare_parameter<std::vector<int64_t>>(
-            "sensor_order", { 0, 1, 2, 3 });
+            "sensor_order", { 1, 2, 3, 0 });
         if (sensor_order.size() != 4) {
             throw std::runtime_error("sensor_order must contain four sensor ids");
         }
+        std::array<bool, 4> seen {};
         for (int index = 0; index < 4; ++index) {
-            sensor_order_[index] = static_cast<int>(sensor_order[index]);
+            const int id = static_cast<int>(sensor_order[index]);
+            if (id < 0 || id >= 4 || seen[id]) {
+                throw std::runtime_error(
+                    "sensor_order must be a permutation of 0..3");
+            }
+            seen[id] = true;
+            sensor_order_[index] = id;
+        }
+        RCLCPP_INFO(get_logger(),
+            "model views front/left/right/down <- ToF sensors %d/%d/%d/%d",
+            sensor_order_[0], sensor_order_[1], sensor_order_[2],
+            sensor_order_[3]);
+        if (sensor_order_[0] == 1) {
+            RCLCPP_WARN(get_logger(),
+                "model 'front' view is fed by sensor 1 (rear): the current "
+                "airframe has no front ToF; add a front sensor or retrain "
+                "with rear/left/right/down for correct real-flight use");
         }
 
         rclcpp::QoS tof_qos = rclcpp::SensorDataQoS();
@@ -253,6 +270,16 @@ private:
         const std::array<Tof::ConstSharedPtr, 4> messages {
             first, second, third, fourth
         };
+        const double stamp = rclcpp::Time(first->header.stamp).seconds();
+        if (last_tof_stamp_ >= 0.0) {
+            const double minimum_period = 0.8 / tof_rate_hz_;
+            const double delta = stamp - last_tof_stamp_;
+            if (delta >= 0.0 && delta < minimum_period) {
+                dropped_frames_.fetch_add(1);
+                return;
+            }
+        }
+        last_tof_stamp_ = stamp;
         PendingFrame frame;
         for (int index = 0; index < 4; ++index) {
             frame.views[index] = to_grid(*messages[sensor_order_[index]]);
@@ -423,7 +450,8 @@ private:
     double status_period_ = 1.0;
     int path_max_poses_ = 1000;
     std::array<std::string, 4> tof_topics_;
-    std::array<int, 4> sensor_order_ { 0, 1, 2, 3 };
+    std::array<int, 4> sensor_order_ { 1, 2, 3, 0 };
+    double last_tof_stamp_ = -1.0;
 
     std::unique_ptr<TioOdometry> odometry_;
     std::mutex odometry_mutex_;

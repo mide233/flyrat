@@ -170,6 +170,9 @@ struct SensorForwarder::Impl {
 
         if (config.enable_tof) {
             try {
+                std::cout << "sensor forwarder: ToF "
+                          << config.tof.resolution << "x" << config.tof.resolution
+                          << " @ " << config.tof.ranging_hz << " Hz\n";
                 tof = std::make_unique<hardware::TofArray>(config.tof);
                 tof->set_callback([this](const hardware::TofFrame& frame) {
                     on_tof(frame);

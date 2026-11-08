@@ -19,6 +19,14 @@
 namespace flyrat::pilot {
 
 struct SensorForwarderConfig {
+    SensorForwarderConfig()
+    {
+        // The TIO-Former backend expects 4 x 8x8 ToF views at 15 Hz. 8x8 is
+        // the VL53L5CX configuration used for the real-vehicle dataset.
+        tof.resolution = 8;
+        tof.ranging_hz = 15;
+    }
+
     std::string listen_address = "127.0.0.1";
     int listen_port = 5000;
 

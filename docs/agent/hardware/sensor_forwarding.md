@@ -54,8 +54,32 @@
 --camera-width 1280       整幅左右拼接宽度
 --camera-height 480
 --camera-fps 60
+--tof-resolution 8      4 或 8；默认 8
+--tof-rate 15           4x4 最高 60，8x8 最高 15；默认 15
 --no-imu / --no-tof / --no-stereo
 ```
+
+TIO-Former 需要 4 颗 ToF 都输出 **8×8 @ 15 Hz**，因此
+`flyrat_sensor_forwarder` 默认已改为 8×8、15 Hz。若要临时回到 4×4，
+可显式传 `--tof-resolution 4 --tof-rate 60`。
+
+ToF 的安装方向由 INT/LPn 的电气连接确定。RK3566 的 Linux GPIO 编号为
+`bank*32 + group*8 + pin`（A=0，B=1，C=2，D=3），当前实机对应关系为：
+
+| 传感器 ID | 方向 | INT | LPn | Linux GPIO |
+|---:|---|---|---|---|
+| 0 | 下 | 3B3 | 3B4 | 107 / 108 |
+| 1 | 后 | 3B0 | 3C2 | 104 / 114 |
+| 2 | 左 | 3A4 | 3A5 | 100 / 101 |
+| 3 | 右 | 3A1 | 3A2 | 97 / 98 |
+
+`TofArray` 的 `int_gpio` / `lpn_gpio` 数组顺序必须与上表一致：
+`int = {107, 104, 100, 97}`，`lpn = {108, 114, 101, 98}`。
+ROS 话题 `/flyrat/sensors/tof_0..3` 也按这个传感器 ID 发布。TIO-Former
+节点再通过 `sensor_order` 把它映射到模型的
+front/left/right/down 视角；当前实机没有前向 ToF，映射为
+`[1, 2, 3, 0]`（模型 front 槽位暂用后向传感器），详见
+[`../odometry/tio_former.md`](../odometry/tio_former.md)。
 
 VL53L5CX 的输出裁剪宏（`VL53L5CX_DISABLE_*`）统一写在
 `libflyrat/third_party/vl53l5cx/platform/platform.h`。这些宏会改变
@@ -154,7 +178,7 @@ w_body = C_gyro_i^T * inv(M_gyr) * (w_raw - A * a_gyro)
   `angular_velocity.z` 应为正；抬头时 `angular_velocity.y` 应为负；
   右侧下沉（向右滚转）时 `angular_velocity.x` 应为正。
   更完整的坐标链和调试步骤见
-  [`../slam/coordinates.md`](../slam/coordinates.md)。
+  [`../odometry/coordinates.md`](../odometry/coordinates.md)。
 
 这两个参数只做轴向映射，不包含安装角旋转；飞控板或 IMU 相对机体的安装角在
 `IMU.T_b_c1` 中处理，尺度/轴失准在 `imu_intrinsics.yaml` 中处理。
@@ -189,7 +213,8 @@ ros2 topic echo --once /flyrat/sensors/tof_0
 预期：
 
 - IMU 约 200 Hz；静止时 `linear_acceleration.z` 约 `+9.8 m/s²`；
-- 每颗 ToF 实测约 57–58 Hz（请求 60 Hz，受传感器实际帧周期限制）；
+- 每颗 ToF 约 15 Hz，`TofFrame.resolution=8`（8×8）；若显式使用
+  `--tof-resolution 4 --tof-rate 60`，则约 57–58 Hz、`resolution=4`；
 - 左右图像各约 60 Hz，`1280x480` 模式下单眼 `640x480`。
 
 拔掉 adb 后 receiver 会每秒重连；重新执行 `adb forward` 后恢复。

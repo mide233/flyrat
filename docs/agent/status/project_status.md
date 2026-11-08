@@ -27,7 +27,8 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 
 ### 2.2 实机硬件
 
-- `hardware::TofArray`：4 颗 VL53L5CX 共用 i2c2，4x4@60 Hz，裁剪结果块 128 B/帧。
+- `hardware::TofArray`：4 颗 VL53L5CX 共用 i2c2；支持 4×4@60 Hz 或
+  8×8@15 Hz。转发器默认 8×8@15 Hz，裁剪结果块 128 B/帧。
   - 地址固定为 `0x60/0x62/0x64/0x66`，不再支持单独配置。
   - 每次启动逐颗释放 LPn，自动探测残留地址并改回固定地址。
   - 不做任何 I2C 访问前先把四路 LPn 拉低，避免上电都处于 0x52 时冲突。
@@ -47,7 +48,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 设备端 `flyrat_sensor_forwarder`：
 
 - IMU：`MspInteract`，`MSP_RAW_IMU` 200 Hz。
-- ToF：4 颗 VL53L5CX，每颗约 57–58 Hz。
+- ToF：4 颗 VL53L5CX，每颗 8×8 @ 15 Hz（转发器默认；旧 4×4 实测约 57–58 Hz）。
 - 双目：相机原生 MJPEG，整幅左右拼接帧，不在设备端解码。
 - TCP 服务：`127.0.0.1:5000`，单客户端；双目队列满时丢旧帧，IMU/ToF 不阻塞。
 
@@ -111,8 +112,10 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - `research/tio_former/` 的仿真模型已导出为
   `libflyrat/models/tio_former_window64.pt`（TorchScript，4.6 MB）。
 - `flyrat::tio::TioOdometry` 在 C++ 中维护 64 帧 ToF/IMU 滑动窗口，调用
-  libtorch 推理并积分机体增量；输入为前/左/右/下 4 个 8×8 距离图和 16 个
-  IMU 样本/帧。
+  libtorch 推理并积分机体增量；模型输入为前/左/右/下 4 个 8×8 距离图和
+  16 个 IMU 样本/帧。实机传感器 ID 为 0=下、1=后、2=左、3=右，
+  `sensor_order: [1,2,3,0]` 把后向数据填入模型 front 槽位；当前机架没有
+  前向 ToF。
 - `tio_odometry_node` 订阅 `/flyrat/sensors/tof_0..3` 和
   `/flyrat/sensors/imu`，发布与双目节点相同的 `/flyrat/odometry/*` 和
   `odometry_map -> imu_link` TF。
@@ -133,7 +136,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 | 项目 | 实测值 | 说明 |
 |---|---:|---|
 | IMU | 200.07 Hz | MSP UART3，921600 |
-| ToF | 每颗 57–58 Hz | 4 颗 4x4，i2c2 750 kHz |
+| ToF | 每颗 8×8 @ 15 Hz（配置） | 4 颗共用 i2c2 750 kHz；旧 4×4 实测约 57–58 Hz |
 | ToF 初始化 | 约 7.2 s | 从进程启动到 TCP 监听 |
 | 双目 | 60.04 Hz | 1280x480@60 MJPEG，单眼 640x480 |
 | adb 吞吐 | 约 30 MB/s | USB2 链路，`adb exec-out` 实测 |
@@ -172,8 +175,9 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   漂移和长期稳定性。
 - 里程计 ROS 节点依赖 OpenCV，目前在开发机运行；泰山派没有 OpenCV，内存也
   只有 2 GB，能否上机仍需评估。
-- TIO-Former 后端依赖 libtorch，只在 Gazebo 4 向 ToF 数据上训练和验证；
-  实机噪声、安装方向、RK3566 交叉编译与机载延迟均未验证。
+- TIO-Former 后端依赖 libtorch，只在 Gazebo 前/左/右/下 4 向 ToF 数据上
+  训练和验证；实机为后/左/右/下，缺前向视角，真实噪声、安装方向、
+  RK3566 交叉编译与机载延迟均未验证。
 
 ## 6. 最近提交
 

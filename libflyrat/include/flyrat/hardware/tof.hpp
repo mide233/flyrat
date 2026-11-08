@@ -56,6 +56,12 @@ struct TofConfig {
     std::array<int, kTofMaxSensors> lpn_gpio { 108, 114, 101, 98 };
     // Optional interrupt lines. Set use_interrupts=false (default) to poll.
     std::array<int, kTofMaxSensors> int_gpio { 107, 104, 100, 97 };
+    // Sensor order on the current airframe:
+    //   0: down  (LPn 3B4/108, INT 3B3/107)
+    //   1: rear  (LPn 3C2/114, INT 3B0/104)
+    //   2: left  (LPn 3A5/101, INT 3A4/100)
+    //   3: right (LPn 3A2/98,  INT 3A1/97)
+    // The RK3566 Linux GPIO number is bank*32 + group*8 + pin.
     int resolution = 4; // 4 or 8
     int ranging_hz = 60; // 4x4 supports 60 Hz; 8x8 is capped at 15 Hz
     int poll_interval_ms = 2;

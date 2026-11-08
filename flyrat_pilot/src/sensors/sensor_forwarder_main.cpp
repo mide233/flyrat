@@ -39,6 +39,8 @@ void usage()
         << "  --camera-width N     default 1280 (full side-by-side width)\n"
         << "  --camera-height N    default 480\n"
         << "  --camera-fps N       default 60\n"
+        << "  --tof-resolution N   default 8 (4 or 8)\n"
+        << "  --tof-rate HZ        default 15 (4x4 up to 60, 8x8 up to 15)\n"
         << "  --no-imu --no-tof --no-stereo\n"
         << "  --help\n";
 }
@@ -86,6 +88,10 @@ int main(int argc, char** argv)
             config.camera.height = std::atoi(next("--camera-height").c_str());
         } else if (arg == "--camera-fps") {
             config.camera.fps = std::atoi(next("--camera-fps").c_str());
+        } else if (arg == "--tof-resolution") {
+            config.tof.resolution = std::atoi(next("--tof-resolution").c_str());
+        } else if (arg == "--tof-rate") {
+            config.tof.ranging_hz = std::atoi(next("--tof-rate").c_str());
         } else if (arg == "--no-imu") {
             config.enable_imu = false;
         } else if (arg == "--no-tof") {
@@ -100,6 +106,17 @@ int main(int argc, char** argv)
             usage();
             return 2;
         }
+    }
+
+    if (config.tof.resolution != 4 && config.tof.resolution != 8) {
+        std::cerr << "tof-resolution must be 4 or 8\n";
+        return 2;
+    }
+    const int max_tof_hz = config.tof.resolution == 4 ? 60 : 15;
+    if (config.tof.ranging_hz <= 0 || config.tof.ranging_hz > max_tof_hz) {
+        std::cerr << "tof-rate must be 1.." << max_tof_hz
+                  << " for resolution " << config.tof.resolution << '\n';
+        return 2;
     }
 
     std::signal(SIGINT, on_signal);

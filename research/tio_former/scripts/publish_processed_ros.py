@@ -23,12 +23,22 @@ def _args() -> argparse.Namespace:
     parser.add_argument("sequence")
     parser.add_argument("--frames", type=int, default=0)
     parser.add_argument("--rate", type=float, default=15.0)
+    parser.add_argument(
+        "--sensor-order",
+        nargs=4,
+        type=int,
+        default=[0, 1, 2, 3],
+        metavar=("FRONT", "LEFT", "RIGHT", "DOWN"),
+        help="sensor topic id fed to each model view (default: 0 1 2 3)",
+    )
     parser.add_argument("--no-sleep", action="store_true")
     return parser.parse_args()
 
 
 def main() -> int:
     args = _args()
+    if sorted(args.sensor_order) != [0, 1, 2, 3]:
+        raise SystemExit("--sensor-order must be a permutation of 0 1 2 3")
     data = np.load(args.sequence)
     frames = int(data["tof"].shape[0])
     if args.frames:
@@ -64,7 +74,9 @@ def main() -> int:
                 if delay > 0:
                     time.sleep(delay)
 
-        for view, publisher in enumerate(tof_pubs):
+        for view in range(4):
+            sensor_id = args.sensor_order[view]
+            publisher = tof_pubs[sensor_id]
             message = TofFrame()
             message.header.stamp = node.get_clock().now().to_msg()
             message.header.frame_id = (
@@ -72,8 +84,8 @@ def main() -> int:
                 "tof_left_link",
                 "tof_right_link",
                 "tof_down_link",
-            )[view]
-            message.sensor_id = view
+            )[sensor_id]
+            message.sensor_id = sensor_id
             message.resolution = 8
             ranges = data["tof"][frame, view].reshape(-1)
             weights = data["tof_weight"][frame, view].reshape(-1)

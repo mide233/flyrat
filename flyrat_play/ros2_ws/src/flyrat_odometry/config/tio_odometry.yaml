@@ -13,4 +13,12 @@ tio_odometry_node:
     tof_rate_hz: 15.0
     imu_buffer_seconds: 2.0
     # View index -> sensor id. The model expects front, left, right, down.
-    sensor_order: [0, 1, 2, 3]
+    # Physical ids from INT/LPn wiring:
+    #   0 = down  (INT 3B3 / LPn 3B4)
+    #   1 = rear  (INT 3B0 / LPn 3C2)
+    #   2 = left  (INT 3A4 / LPn 3A5)
+    #   3 = right (INT 3A1 / LPn 3A2)
+    # There is no front sensor on the current airframe, so the model "front"
+    # slot is fed by the rear sensor. Add a front ToF or retrain with
+    # rear/left/right/down for correct real-flight use.
+    sensor_order: [1, 2, 3, 0]

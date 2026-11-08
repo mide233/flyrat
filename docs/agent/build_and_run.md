@@ -559,7 +559,7 @@ bringup 仍在运行，按 `Ctrl-C` 结束。`ros2 bag info /path/to/bag` 可检
 
 ### 7.6 TIO-Former ToF 后端（实验）
 
-TIO-Former 使用前/左/右/下 4 颗 8×8 ToF 和 200 Hz IMU，模型从
+TIO-Former 模型训练使用前/左/右/下 4 颗 8×8 ToF 和 200 Hz IMU，模型从
 `research/tio_former/` 导出为 TorchScript。默认构建不会编译它；需要 CPU
 libtorch：
 
@@ -604,7 +604,14 @@ bash -lc '
 
 它和双目节点使用同一组 `/flyrat/odometry/*` 话题与 `odometry_map -> imu_link`
 TF，因此 Foxglove 配置不需要改。节点需要 64 帧（约 4.3 秒）ToF 才输出第一个
-有效位姿。ToF 视角顺序、`sensor_order`、参数和限制见
+有效位姿。
+
+实机 ToF 默认配置已改为 **8×8 @ 15 Hz**。`flyrat_sensor_forwarder` 的
+`--tof-resolution` / `--tof-rate` 可覆盖，8×8 最高 15 Hz。Onboard INT/LPn
+接线对应关系为：传感器 0=下、1=后、2=左、3=右；TIO 节点配置
+`sensor_order: [1,2,3,0]`，即模型 front 槽位暂时使用后向传感器。当前机架
+没有前向 ToF，做实机精度验证前应加装前向传感器，或重新训练
+rear/left/right/down 模型。ToF 视角顺序、`sensor_order`、参数和限制见
 [`odometry/tio_former.md`](odometry/tio_former.md)。
 
 ## 8. Docker 与 CI

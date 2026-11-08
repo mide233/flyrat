@@ -12,6 +12,7 @@
 #   .script/bringup_real.sh
 #   .script/bringup_real.sh start_foxglove:=true
 #   .script/bringup_real.sh start_odometry:=false
+#   .script/bringup_real.sh odometry_backend:=tio
 #   .script/bringup_real.sh record:=true record_imu_only:=true record_duration:=3h
 #   .script/bringup_real.sh camera_config_path:=/path/to/calibration.yaml
 #
