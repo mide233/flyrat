@@ -156,8 +156,31 @@ def _predict(model: TioFormer, arrays: dict, device: str) -> tuple[np.ndarray, n
     imu = torch.from_numpy(np.asarray(arrays["imu"], dtype=np.float32)).unsqueeze(0).to(device)
     previous = torch.cat([tof[:, :1], tof[:, :-1]], dim=1)
     previous_weight = torch.cat([weight[:, :1], weight[:, :-1]], dim=1)
+    camera = None
+    if model.config.camera:
+        from tio_former.data.torch_dataset import _decode_camera
+
+        height, width = model.config.camera_height, model.config.camera_width
+        if "camera_jpeg" in arrays and "camera_offset" in arrays:
+            frames = _decode_camera(
+                np.asarray(arrays["camera_jpeg"]),
+                np.asarray(arrays["camera_offset"]),
+                0,
+                tof.shape[1],
+                (height, width),
+            )
+        else:
+            frames = np.zeros((tof.shape[1], height, width), dtype=np.uint8)
+        camera = torch.from_numpy(frames).float().div_(255.0).unsqueeze(0).to(device)
     with torch.no_grad():
-        output = model(tof, imu, weight=weight, previous_tof=previous, previous_weight=previous_weight)
+        output = model(
+            tof,
+            imu,
+            weight=weight,
+            previous_tof=previous,
+            previous_weight=previous_weight,
+            camera=camera,
+        )
     return output["delta_p"].cpu().numpy(), output["delta_phi"].cpu().numpy()
 
 

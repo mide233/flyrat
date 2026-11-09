@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 from typing import Any, Iterator
 
 import numpy as np
 import torch
+from PIL import Image
 from torch.utils.data import Dataset
 
 from tio_former.data.dataset import load_sequence
@@ -28,6 +30,32 @@ def _increments(poses: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         delta_p[index] = (previous_rotation @ (positions[index] - positions[index - 1])).astype(np.float32)
         delta_phi[index] = so3_log(previous_rotation @ rotations[index]).astype(np.float32)
     return delta_p, delta_phi
+
+
+def _decode_camera(
+    blob: np.ndarray,
+    offsets: np.ndarray,
+    start: int,
+    end: int,
+    fallback: tuple[int, int],
+) -> np.ndarray:
+    """Decode JPEG slices into a [T, H, W] uint8 grayscale window."""
+    height, width = fallback
+    frames: list[np.ndarray] = []
+    for index in range(start, end):
+        begin, finish = int(offsets[index]), int(offsets[index + 1])
+        if finish > begin:
+            with Image.open(io.BytesIO(blob[begin:finish].tobytes())) as image:
+                array = np.asarray(image.convert("L"), dtype=np.uint8)
+            if array.shape[:2] != (height, width):
+                array = np.asarray(
+                    Image.fromarray(array).resize((width, height), Image.BILINEAR),
+                    dtype=np.uint8,
+                )
+            frames.append(array)
+        else:
+            frames.append(np.zeros((height, width), dtype=np.uint8))
+    return np.stack(frames, axis=0)
 
 
 def _augment_missing(
@@ -79,6 +107,7 @@ class SequenceWindows(Dataset):
         splits: list[str] | None = None,
         scenes: list[str] | None = None,
         exclude_scenes: list[str] | None = None,
+        use_camera: bool = False,
     ) -> None:
         self.root = Path(root)
         self.window_frames = window_frames
@@ -87,6 +116,9 @@ class SequenceWindows(Dataset):
         self.missing_probability = missing_probability
         self.missing_ratios = missing_ratios or [0.1, 0.3, 0.5]
         self.seed = seed
+        self.use_camera = use_camera
+        self.camera_size = (120, 160)
+        self.skipped_short_sequences = 0
         self.files: list[Path] = []
         if files is not None:
             self.files = [Path(path).expanduser().resolve() for path in files]
@@ -114,24 +146,37 @@ class SequenceWindows(Dataset):
         for file_index, path in enumerate(self.files):
             with np.load(path, allow_pickle=False) as data:
                 length = int(data["tof"].shape[0])
+                if window_frames is not None and length < window_frames:
+                    self.skipped_short_sequences += 1
+                    if cache:
+                        assert self.cache is not None
+                        self.cache.append({})
+                    continue
                 if cache:
                     tof = data["tof"].astype(np.float32)
                     weight = data["tof_weight"].astype(np.float32)
                     imu = data["imu"].astype(np.float32)
                     poses = data["gt_pose"].astype(np.float32)
                     delta_p, delta_phi = _increments(poses.astype(np.float64))
+                    entry = {
+                        "tof": tof,
+                        "weight": weight,
+                        "imu": imu,
+                        "poses": poses,
+                        "delta_p": delta_p,
+                        "delta_phi": delta_phi,
+                    }
+                    if self.use_camera and "camera_jpeg" in data:
+                        entry["camera_jpeg"] = data["camera_jpeg"]
+                        entry["camera_offset"] = data["camera_offset"]
+                        if "camera_height" in data and "camera_width" in data:
+                            self.camera_size = (
+                                int(np.asarray(data["camera_height"]).reshape(-1)[0]),
+                                int(np.asarray(data["camera_width"]).reshape(-1)[0]),
+                            )
                     assert self.cache is not None
-                    self.cache.append(
-                        {
-                            "tof": tof,
-                            "weight": weight,
-                            "imu": imu,
-                            "poses": poses,
-                            "delta_p": delta_p,
-                            "delta_phi": delta_phi,
-                        }
-                    )
-            if window_frames is None or length <= window_frames:
+                    self.cache.append(entry)
+            if window_frames is None:
                 self.windows.append((file_index, 0, length))
             else:
                 for start in range(0, length - window_frames + 1, self.stride):
@@ -158,6 +203,8 @@ class SequenceWindows(Dataset):
             poses = cached["poses"]
             delta_p = cached["delta_p"]
             delta_phi = cached["delta_phi"]
+            camera_blob = cached.get("camera_jpeg")
+            camera_offset = cached.get("camera_offset")
             if start == 0:
                 previous_frame = tof[0]
                 previous_weight_frame = weight[0]
@@ -171,6 +218,8 @@ class SequenceWindows(Dataset):
             imu = arrays["imu"][start:end].astype(np.float32)
             poses = arrays["gt_pose"].astype(np.float32)
             delta_p, delta_phi = _increments(poses.astype(np.float64))
+            camera_blob = arrays.get("camera_jpeg")
+            camera_offset = arrays.get("camera_offset")
             if start == 0:
                 previous_frame = tof[0]
                 previous_weight_frame = weight[0]
@@ -194,7 +243,7 @@ class SequenceWindows(Dataset):
         previous_weight[0] = previous_weight_frame if start else weight[0]
         previous[1:] = tof[:-1]
         previous_weight[1:] = weight[:-1]
-        return {
+        item = {
             "tof": torch.from_numpy(tof),
             "previous_tof": torch.from_numpy(previous),
             "weight": torch.from_numpy(weight),
@@ -204,6 +253,17 @@ class SequenceWindows(Dataset):
             "delta_phi": torch.from_numpy(delta_phi[start:end]),
             "gt_pose": torch.from_numpy(poses[start:end].astype(np.float32)),
         }
+        if self.use_camera:
+            if camera_blob is None or camera_offset is None:
+                camera = np.zeros((length, *self.camera_size), dtype=np.uint8)
+            else:
+                camera = _decode_camera(camera_blob, camera_offset, start, end, self.camera_size)
+            item["camera"] = torch.from_numpy(camera).float().div_(255.0)
+        return item
+
+
+def _collate(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
+    return {key: torch.stack([item[key] for item in batch], dim=0) for key in batch[0]}
 
 
 def iterate_batches(
@@ -227,5 +287,6 @@ def iterate_batches(
         num_workers=num_workers,
         pin_memory=pin_memory,
         persistent_workers=persistent_workers and num_workers > 0,
+        collate_fn=_collate,
     )
     yield from loader

@@ -45,6 +45,11 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument(
+        "--camera",
+        action="store_true",
+        help="Enable the forward mono camera encoder and load camera frames.",
+    )
+    parser.add_argument(
         "--exclude-scenes",
         default="",
         help="comma-separated scene names to exclude from train/val",
@@ -81,6 +86,7 @@ def _validate(model, loader, loss_config, device, amp_dtype) -> tuple[float, flo
                 weight=batch["weight"],
                 previous_tof=batch["previous_tof"],
                 previous_weight=batch["previous_weight"],
+                camera=batch.get("camera"),
             )
         loss, _ = compute_losses(
             {key: value.float() for key, value in output.items()},
@@ -103,6 +109,8 @@ def main() -> int:
     train_config = load_yaml(ROOT / args.train_config)
     model_dict = load_yaml(ROOT / args.model_config)
     model_dict.setdefault("model", {})["variant"] = args.variant
+    if args.camera:
+        model_dict["model"].setdefault("camera", {})["enabled"] = True
     model_config = ModelConfig.from_dict(model_dict)
     seed = int(args.seed if args.seed is not None else train_config.get("seed", 0))
     torch.manual_seed(seed)
@@ -137,6 +145,7 @@ def main() -> int:
         missing_ratios=list(missing_ratios),
         max_sequences=args.limit_train,
         exclude_scenes=exclude_scenes or None,
+        use_camera=args.camera,
     )
     val_set = SequenceWindows(
         ROOT / args.processed,
@@ -147,8 +156,15 @@ def main() -> int:
         augment=False,
         max_sequences=args.limit_val,
         exclude_scenes=exclude_scenes or None,
+        use_camera=args.camera,
     )
-    logger.info("dataset: %d train windows, %d val windows", len(train_set), len(val_set))
+    logger.info(
+        "dataset: %d train windows, %d val windows (skipped %d/%d short sequences)",
+        len(train_set),
+        len(val_set),
+        train_set.skipped_short_sequences,
+        val_set.skipped_short_sequences,
+    )
 
     train_loader = iter(
         iterate_batches(
@@ -234,6 +250,7 @@ def main() -> int:
                     weight=batch["weight"],
                     previous_tof=batch["previous_tof"],
                     previous_weight=batch["previous_weight"],
+                    camera=batch.get("camera"),
                 )
             loss, _ = compute_losses(
                 {key: value.float() for key, value in output.items()},

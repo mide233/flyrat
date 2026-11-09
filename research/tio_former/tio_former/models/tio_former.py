@@ -36,6 +36,11 @@ class ModelConfig:
     imu_channels: int = 6
     imu_conv_channels: tuple[int, ...] = (64, 128, 128)
     imu_kernel_size: int = 5
+    camera: bool = False
+    camera_channels: int = 2
+    camera_conv_channels: tuple[int, ...] = (16, 32, 64, 96)
+    camera_width: int = 160
+    camera_height: int = 120
     fusion_heads: int = 4
     fusion_dropout: float = 0.1
     streaming_layers: int = 2
@@ -55,6 +60,7 @@ class ModelConfig:
         model = config.get("model", config)
         tof = model.get("tof", {})
         imu = model.get("imu", {})
+        camera = model.get("camera", {})
         fusion = model.get("fusion", {})
         streaming = model.get("streaming", {})
         pose = model.get("pose_head", {})
@@ -72,6 +78,11 @@ class ModelConfig:
             imu_channels=_as_int(imu.get("input_channels"), 6),
             imu_conv_channels=tuple(imu.get("conv_channels", (64, 128, 128))),
             imu_kernel_size=_as_int(imu.get("kernel_size"), 5),
+            camera=bool(camera.get("enabled", False)),
+            camera_channels=_as_int(camera.get("input_channels"), 2),
+            camera_conv_channels=tuple(camera.get("conv_channels", (16, 32, 64, 96))),
+            camera_width=_as_int(camera.get("width"), 160),
+            camera_height=_as_int(camera.get("height"), 120),
             fusion_heads=_as_int(fusion.get("heads"), 4),
             fusion_dropout=float(fusion.get("dropout", 0.1)),
             streaming_layers=_as_int(streaming.get("layers"), 2),
@@ -106,6 +117,13 @@ class ModelConfig:
                     "input_channels": self.imu_channels,
                     "conv_channels": list(self.imu_conv_channels),
                     "kernel_size": self.imu_kernel_size,
+                },
+                "camera": {
+                    "enabled": self.camera,
+                    "input_channels": self.camera_channels,
+                    "conv_channels": list(self.camera_conv_channels),
+                    "width": self.camera_width,
+                    "height": self.camera_height,
                 },
                 "fusion": {
                     "heads": self.fusion_heads,
@@ -179,6 +197,50 @@ class ImuEncoder(nn.Module):
         # imu: [N, 6, K]
         features = self.cnn(imu)
         return self.out(features.mean(dim=-1))
+
+
+class CameraEncoder(nn.Module):
+    """Small strided CNN for a forward mono image (current + temporal delta)."""
+
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__()
+        layers: list[nn.Module] = []
+        in_channels = config.camera_channels
+        for out_channels in config.camera_conv_channels:
+            layers.extend(
+                [
+                    nn.Conv2d(in_channels, out_channels, 3, stride=2, padding=1),
+                    nn.GroupNorm(min(8, out_channels), out_channels),
+                    nn.GELU(),
+                ]
+            )
+            in_channels = out_channels
+        self.cnn = nn.Sequential(*layers)
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.out = nn.Linear(in_channels, config.feature_dim)
+
+    def forward(self, images: torch.Tensor) -> torch.Tensor:
+        # images: [N, 2, H, W]
+        return self.out(self.pool(self.cnn(images)).flatten(1))
+
+
+class ReliabilityGate(nn.Module):
+    """Soft IMU > camera > ToF prior that can be overridden by features."""
+
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__()
+        self.score = nn.Sequential(
+            nn.Linear(3 * config.feature_dim, 64),
+            nn.GELU(),
+            nn.Linear(64, 3),
+        )
+        self.register_buffer("prior", torch.tensor([1.5, 0.0, -1.0]))
+
+    def forward(
+        self, imu_token: torch.Tensor, camera_token: torch.Tensor, tof_token: torch.Tensor
+    ) -> torch.Tensor:
+        logits = self.score(torch.cat([imu_token, camera_token, tof_token], dim=-1))
+        return torch.softmax(logits + self.prior, dim=-1)
 
 
 class ViewTransformer(nn.Module):
@@ -507,6 +569,13 @@ class TioFormer(nn.Module):
         self.imu_encoder = (
             None if config.variant == "tof_only" else ImuEncoder(config)
         )
+        self.camera_encoder = CameraEncoder(config) if config.camera else None
+        self.reliability_gate = ReliabilityGate(config) if config.camera else None
+        self.camera_out = (
+            nn.Linear(2 * config.feature_dim, config.feature_dim)
+            if config.camera
+            else None
+        )
         self.fusion = (
             CrossViewFusion(
                 config,
@@ -608,7 +677,27 @@ class TioFormer(nn.Module):
             imu.reshape(batch * length, samples, channels).transpose(1, 2)
         )
 
-    def _fused_features(self, tof, imu, weight, previous_tof, previous_weight):
+    def _camera_tokens(
+        self, camera: torch.Tensor, previous_camera: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        # camera: [B,T,H,W] or [B,T,1,H,W] in 0..255 / 0..1.
+        batch, length = camera.shape[0], camera.shape[1]
+        if camera.ndim == 4:
+            camera = camera.unsqueeze(2)
+        camera = camera.float()
+        if previous_camera is None:
+            previous = torch.cat([camera[:, :1], camera[:, :-1]], dim=1)
+        else:
+            previous = previous_camera.float()
+            if previous.ndim == 4:
+                previous = previous.unsqueeze(2)
+        channels = torch.cat([camera, camera - previous], dim=2)
+        flat = channels.reshape(batch * length, 2, camera.shape[-2], camera.shape[-1])
+        return self.camera_encoder(flat).reshape(batch * length, -1)
+
+    def _fused_features(
+        self, tof, imu, weight, previous_tof, previous_weight, camera=None, previous_camera=None
+    ):
         if self.variant == "imu_only":
             return self._imu_tokens(imu)
         view_tokens = self._view_tokens(tof, weight, previous_tof, previous_weight)
@@ -617,7 +706,18 @@ class TioFormer(nn.Module):
         imu_tokens = self._imu_tokens(imu)
         if self.variant == "naive_concat":
             return self.concat_proj(torch.cat([view_tokens.mean(dim=1), imu_tokens], dim=-1))
-        return self.fusion(imu_tokens, view_tokens)
+        base = self.fusion(imu_tokens, view_tokens)
+        if camera is None or self.camera_encoder is None:
+            return base
+        tof_token = view_tokens.mean(dim=1)
+        camera_token = self._camera_tokens(camera, previous_camera)
+        weights = self.reliability_gate(imu_tokens, camera_token, tof_token)
+        weighted = (
+            weights[:, 0:1] * imu_tokens
+            + weights[:, 1:2] * camera_token
+            + weights[:, 2:3] * tof_token
+        )
+        return self.camera_out(torch.cat([base, weighted], dim=-1))
 
     def _fused_features_pair(self, tof, imu, weight, previous_tof, previous_weight):
         """Position branch = concat/local; rotation branch = directional attention."""
@@ -636,6 +736,8 @@ class TioFormer(nn.Module):
         weight: torch.Tensor | None = None,
         previous_tof: torch.Tensor | None = None,
         previous_weight: torch.Tensor | None = None,
+        camera: torch.Tensor | None = None,
+        previous_camera: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         """Run a full sequence.
 
@@ -660,7 +762,7 @@ class TioFormer(nn.Module):
                 "delta_phi": rotation_motion[..., 3:],
             }
         features = self._fused_features(
-            tof, imu, weight, previous_tof, previous_weight
+            tof, imu, weight, previous_tof, previous_weight, camera, previous_camera
         )
         hidden = self.streaming(features.reshape(batch, length, -1))
         motion = self.pose_head(hidden)
@@ -674,6 +776,8 @@ class TioFormer(nn.Module):
         weight: torch.Tensor | None = None,
         previous_tof: torch.Tensor | None = None,
         previous_weight: torch.Tensor | None = None,
+        camera: torch.Tensor | None = None,
+        previous_camera: torch.Tensor | None = None,
     ) -> tuple[dict[str, torch.Tensor], list[LayerState]]:
         """One-frame streaming forward.  ``tof``/``imu`` have T=1."""
         if tof.shape[1] != 1:
@@ -702,7 +806,7 @@ class TioFormer(nn.Module):
                 (position_states, rotation_states),
             )
         fused = self._fused_features(
-            tof, imu, weight, previous_tof, previous_weight
+            tof, imu, weight, previous_tof, previous_weight, camera, previous_camera
         ).unsqueeze(1)
         if states is None:
             states = self.streaming.init_state(batch, fused.shape[-1], fused.device, fused.dtype)

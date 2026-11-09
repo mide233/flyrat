@@ -17,6 +17,38 @@ from pathlib import Path
 
 import numpy as np
 
+
+def _resize_gray(image: np.ndarray, width: int, height: int) -> np.ndarray:
+    if image.shape[1] == width and image.shape[0] == height:
+        return image
+    try:
+        import cv2
+
+        return cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
+    except ImportError:
+        from PIL import Image
+
+        return np.asarray(Image.fromarray(image, mode="L").resize((width, height), Image.BILINEAR))
+
+
+def _encode_jpeg(image: np.ndarray, quality: int) -> bytes:
+    """Encode a mono image, preferring OpenCV (system Python) over Pillow."""
+    try:
+        import cv2
+
+        ok, buffer = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+        if not ok:
+            raise ValueError("cv2.imencode failed")
+        return bytes(buffer.tobytes())
+    except ImportError:
+        from PIL import Image
+
+        import io
+
+        buffer = io.BytesIO()
+        Image.fromarray(image, mode="L").save(buffer, format="JPEG", quality=quality)
+        return buffer.getvalue()
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -45,6 +77,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sensors-config",
         default=str(ROOT / "configs/sim/sensors.yaml"),
+    )
+    parser.add_argument("--camera-quality", type=int, default=85)
+    parser.add_argument("--camera-width", type=int, default=160)
+    parser.add_argument("--camera-height", type=int, default=120)
+    parser.add_argument(
+        "--camera",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Encode the recorded forward camera into the dataset.",
     )
     return parser.parse_args()
 
@@ -174,6 +215,45 @@ def main() -> int:
         int(sensors["imu"].get("samples_per_tof", 16)),
     )
 
+    camera_arrays: dict[str, np.ndarray] = {}
+    camera_meta: dict[str, object] = {"camera": False}
+    if args.camera and "camera_image" in arrays and "t_camera" in arrays:
+        camera_images = np.asarray(arrays["camera_image"], dtype=np.uint8)
+        camera_stamp = np.asarray(arrays["t_camera"], dtype=np.float64)
+        camera_indices = _nearest_indices(camera_stamp, gt_stamp[keep], tolerance)
+        valid_camera = camera_indices >= 0
+        if not np.all(valid_camera):
+            logger.warning(
+                "missing camera frame for %d/%d ToF frames", int((~valid_camera).sum()), valid_camera.size
+            )
+        encoded: list[bytes] = []
+        offsets = [0]
+        for frame_index, camera_index in enumerate(camera_indices):
+            if camera_index < 0:
+                encoded.append(b"")
+            else:
+                resized = _resize_gray(
+                    camera_images[camera_index], int(args.camera_width), int(args.camera_height)
+                )
+                encoded.append(_encode_jpeg(resized, int(args.camera_quality)))
+            offsets.append(offsets[-1] + len(encoded[-1]))
+        blob = np.frombuffer(b"".join(encoded), dtype=np.uint8)
+        camera_arrays = {
+            "camera_jpeg": blob,
+            "camera_offset": np.asarray(offsets, dtype=np.int64),
+            "camera_frame_valid": valid_camera.astype(np.uint8),
+        }
+        camera_meta = {
+            "camera": True,
+            "camera_source_width": int(camera_images.shape[2]),
+            "camera_source_height": int(camera_images.shape[1]),
+            "camera_width": int(args.camera_width),
+            "camera_height": int(args.camera_height),
+            "camera_jpeg_quality": int(args.camera_quality),
+            "camera_frames": int(len(camera_images)),
+            "camera_missing_frames": int((~valid_camera).sum()),
+        }
+
     out_arrays = {
         "tof": tof.astype(np.float32),
         "tof_ideal": tof_ideal.astype(np.float32),
@@ -185,6 +265,7 @@ def main() -> int:
         "t_tof": np.asarray(t_tof, dtype=np.float64),
         "t_imu": np.asarray(imu_times, dtype=np.float64),
     }
+    out_arrays.update(camera_arrays)
     metadata = {
         "scene": args.scene,
         "kind": args.kind,
@@ -201,6 +282,7 @@ def main() -> int:
         "path_length_m": float(trajectory.path_length),
         "sensors_config": str(Path(args.sensors_config).resolve()),
     }
+    metadata.update(camera_meta)
     save_sequence(args.out, out_arrays, metadata)
     logger.info(
         "wrote %s: %d frames, %.2f s, %.2f m",

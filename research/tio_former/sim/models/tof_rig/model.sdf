@@ -83,8 +83,28 @@
       </sensor>
     </link>
 
+    <link name="camera_front_link">
+      <pose>0.06 0 0 0 0 0</pose>
+      <gravity>false</gravity>
+      <sensor name="camera_front" type="camera">
+        <always_on>true</always_on>
+        <update_rate>15</update_rate>
+        <visualize>false</visualize>
+        <topic>/tio/camera_front</topic>
+        <camera>
+          <horizontal_fov>1.0471975511965976</horizontal_fov>
+          <image><width>320</width><height>240</height><format>L8</format></image>
+          <clip><near>0.05</near><far>30.0</far></clip>
+          <noise><type>none</type></noise>
+        </camera>
+      </sensor>
+    </link>
+
     <joint name="front_joint" type="fixed">
       <parent>base_link</parent><child>tof_front_link</child>
+    </joint>
+    <joint name="camera_front_joint" type="fixed">
+      <parent>base_link</parent><child>camera_front_link</child>
     </joint>
     <joint name="left_joint" type="fixed">
       <parent>base_link</parent><child>tof_left_link</child>

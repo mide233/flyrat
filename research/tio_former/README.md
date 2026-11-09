@@ -152,6 +152,28 @@ python3 scripts/generate_dataset.py --workers 3
 python3 scripts/build_dataset_index.py
 ```
 
+### 前向单目相机（P1）
+
+`sim/models/tof_rig/model.sdf` 现在包含一个前向 `320×240 @ 15 Hz` 单目相机
+（`/tio/camera_front`，L8）。录制时按 15 Hz 与 ToF/GT 对齐，后处理把每帧
+缩放到 `160×120` 并以 JPEG q85 存入 NPZ：
+
+- `camera_jpeg`：所有帧的 JPEG 字节拼接（uint8）
+- `camera_offset`：`T+1` 个偏移，用于切片
+- `camera_frame_valid`：该 ToF 帧是否有对齐的相机帧
+
+这些字段是可选的，不进入 `REQUIRED_ARRAYS`，旧数据集仍可直接加载。
+训练时加 `--camera` 会启用 `CameraEncoder` 和可靠性 gate：
+
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/train.py \
+  --processed data_v3/processed --out checkpoints_cam --run-name seed0 \
+  --camera --epochs 60 --workers 8
+```
+
+gate 使用 IMU > camera > ToF 的软先验，但权重可学习，相机可以在静态漂移时
+压过 IMU/ToF。
+
 结果写入 `data/processed/`、`data/index.csv`、`data/splits.json`、
 `data/stats.json`、`data/report.md`。数据目录不提交。
 

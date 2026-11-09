@@ -41,6 +41,24 @@ class ExportWrapper(torch.nn.Module):
         return output["delta_p"], output["delta_phi"]
 
 
+class CameraExportWrapper(torch.nn.Module):
+    def __init__(self, model: TioFormer) -> None:
+        super().__init__()
+        self.model = model
+
+    def forward(self, tof, imu, weight, previous_tof, previous_weight, camera, previous_camera):
+        output = self.model(
+            tof,
+            imu,
+            weight=weight,
+            previous_tof=previous_tof,
+            previous_weight=previous_weight,
+            camera=camera,
+            previous_camera=previous_camera,
+        )
+        return output["delta_p"], output["delta_phi"]
+
+
 def _args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", default="checkpoints/main_imu/seed0/best.pt")
@@ -69,15 +87,26 @@ def main() -> int:
     previous_tof = torch.zeros_like(tof)
     previous_weight = torch.zeros_like(tof)
 
-    wrapper = ExportWrapper(model).eval()
-    with torch.no_grad():
-        reference = wrapper(tof, imu, weight, previous_tof, previous_weight)
-        traced = torch.jit.trace(
-            wrapper,
-            (tof, imu, weight, previous_tof, previous_weight),
-            strict=False,
+    camera = None
+    previous_camera = None
+    inputs = (tof, imu, weight, previous_tof, previous_weight)
+    if model_config.camera:
+        camera = torch.zeros(
+            1,
+            args.window,
+            model_config.camera_height,
+            model_config.camera_width,
+            dtype=torch.float32,
         )
-        exported = traced(tof, imu, weight, previous_tof, previous_weight)
+        previous_camera = torch.zeros_like(camera)
+        wrapper = CameraExportWrapper(model).eval()
+        inputs = inputs + (camera, previous_camera)
+    else:
+        wrapper = ExportWrapper(model).eval()
+    with torch.no_grad():
+        reference = wrapper(*inputs)
+        traced = torch.jit.trace(wrapper, inputs, strict=False)
+        exported = traced(*inputs)
     difference = max(
         float((a - b).abs().max()) for a, b in zip(reference, exported)
     )
@@ -100,6 +129,9 @@ def main() -> int:
         "parameters": model.count_parameters(),
         "trace_max_abs_difference": difference,
         "view_order": ["front", "left", "right", "down"],
+        "camera": bool(model_config.camera),
+        "camera_width": model_config.camera_width if model_config.camera else 0,
+        "camera_height": model_config.camera_height if model_config.camera else 0,
     }
     output.with_suffix(".json").write_text(
         json.dumps(metadata, indent=2), encoding="utf-8"

@@ -38,6 +38,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--gz", default="/usr/bin/gz")
     parser.add_argument("--no-realtime", action="store_true")
+    parser.add_argument(
+        "--camera",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Record the forward mono camera (default: enabled).",
+    )
     return parser.parse_args()
 
 
@@ -60,6 +66,9 @@ def main() -> int:
     depth_t: dict[str, list[float]] = {view: [] for view in VIEWS}
     gt: list[tuple[float, np.ndarray]] = []
     first_gt = {"t": None}
+    camera: list[np.ndarray] = []
+    camera_t: list[float] = []
+    camera_shape = {"width": 0, "height": 0}
 
     def make_image_callback(view: str):
         def callback(msg, *_unused):
@@ -74,6 +83,19 @@ def main() -> int:
             depth_t[view].append(stamp)
 
         return callback
+
+    def camera_callback(msg, *_unused):
+        width = int(msg.width)
+        height = int(msg.height)
+        expected = width * height
+        if len(msg.data) < expected:
+            return
+        array = np.frombuffer(msg.data, dtype=np.uint8, count=expected).reshape(height, width)
+        stamp = float(msg.header.stamp.sec) + 1e-9 * float(msg.header.stamp.nsec)
+        camera.append(array.copy())
+        camera_t.append(stamp)
+        camera_shape["width"] = width
+        camera_shape["height"] = height
 
     def gt_callback(msg, *_unused):
         if not msg.pose:
@@ -99,6 +121,8 @@ def main() -> int:
     for view in VIEWS:
         node.subscribe(image_pb.Image, f"/tio/tof_{view}", make_image_callback(view))
     node.subscribe(pose_v_pb.Pose_V, "/tio/gt", gt_callback)
+    if args.camera:
+        node.subscribe(image_pb.Image, "/tio/camera_front", camera_callback)
 
     env = os.environ.copy()
     env.pop("GZ_CONFIG_PATH", None)
@@ -181,8 +205,13 @@ def main() -> int:
     counts = {view: len(depth[view]) for view in VIEWS}
     logger.info("frames: %s, gt: %d", counts, len(gt))
     if min(counts.values()) == 0:
-        logger.error("at least one camera produced no frames; see %s", log_path)
+        logger.error("at least one depth camera produced no frames; see %s", log_path)
         return 2
+    if args.camera:
+        logger.info("camera frames: %d (%dx%d)", len(camera), camera_shape["width"], camera_shape["height"])
+        if not camera:
+            logger.error("mono camera produced no frames; see %s", log_path)
+            return 2
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -193,6 +222,11 @@ def main() -> int:
     for view in VIEWS:
         arrays[f"depth_{view}"] = np.stack(depth[view]).astype(np.float32)
         arrays[f"t_{view}"] = np.asarray(depth_t[view], dtype=np.float64)
+    if args.camera:
+        arrays["camera_image"] = np.stack(camera).astype(np.uint8)
+        arrays["t_camera"] = np.asarray(camera_t, dtype=np.float64)
+        arrays["camera_width"] = np.asarray(camera_shape["width"], dtype=np.int32)
+        arrays["camera_height"] = np.asarray(camera_shape["height"], dtype=np.int32)
     np.savez_compressed(out_path, **arrays)
     metadata = {
         "world": str(Path(args.world).resolve()),
@@ -200,6 +234,9 @@ def main() -> int:
         "views": list(VIEWS),
         "duration_s": float(gt[-1][0] - gt[0][0]),
         "counts": counts,
+        "camera_frames": len(camera),
+        "camera_width": int(camera_shape["width"]),
+        "camera_height": int(camera_shape["height"]),
         "gt_count": len(gt),
         "gazebo_log": str(log_path),
     }

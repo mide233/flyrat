@@ -9,6 +9,12 @@ model:
     view_ffn_dim: 256
     view_dropout: 0.1
     view_embedding: true
+  camera:
+    enabled: false
+    input_channels: 2
+    conv_channels: [16, 32, 64, 96]
+    width: 160
+    height: 120
   imu:
     input_channels: 6
     conv_channels: [64, 128, 128]
