@@ -31,6 +31,8 @@ FIELDS = [
     "valid_ratio",
     "range_min_m",
     "range_max_m",
+    "camera",
+    "camera_missing_frames",
     "file",
 ]
 
@@ -66,6 +68,8 @@ def _record(path: Path) -> dict[str, Any]:
         "valid_ratio": valid_ratio,
         "range_min_m": range_min,
         "range_max_m": range_max,
+        "camera": int(bool(metadata.get("camera", False))),
+        "camera_missing_frames": int(metadata.get("camera_missing_frames", 0)),
         "file": str(path.relative_to(ROOT)),
     }
 
