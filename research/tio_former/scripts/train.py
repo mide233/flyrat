@@ -66,10 +66,12 @@ def _lr_lambda(step: int, *, warmup_steps: int, total_steps: int, min_ratio: flo
 
 
 @torch.no_grad()
-def _validate(model, loader, loss_config, device, amp_dtype) -> float:
+def _validate(model, loader, loss_config, device, amp_dtype) -> tuple[float, float]:
     model.eval()
     total_loss = 0.0
     batches = 0
+    predicted_step = 0.0
+    target_step = 0.0
     for batch in loader:
         batch = {key: value.to(device) for key, value in batch.items()}
         with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=amp_dtype is not None):
@@ -88,8 +90,11 @@ def _validate(model, loader, loss_config, device, amp_dtype) -> float:
         )
         total_loss += float(loss)
         batches += 1
+        predicted_step += float(output["delta_p"].float().norm(dim=-1).sum())
+        target_step += float(batch["delta_p"].float().norm(dim=-1).sum())
     model.train()
-    return total_loss / max(1, batches)
+    path_ratio = predicted_step / max(target_step, 1e-9)
+    return total_loss / max(1, batches), path_ratio
 
 
 def main() -> int:
@@ -192,7 +197,9 @@ def main() -> int:
         encoding="utf-8",
     )
     metrics_path = out_dir / "metrics.jsonl"
+    best_score = float("inf")
     best_val = float("inf")
+    best_path_ratio = float("nan")
     best_epoch = -1
     stale_epochs = 0
     early_stop = int(training_config.get("early_stop_patience", 15))
@@ -260,7 +267,7 @@ def main() -> int:
                 if args.max_steps is not None and global_step >= args.max_steps:
                     break
 
-        val_loss = _validate(
+        val_loss, val_path_ratio = _validate(
             model,
             iterate_batches(
                 val_set,
@@ -274,21 +281,27 @@ def main() -> int:
             args.device,
             amp_dtype,
         )
+        ratio_penalty = float(training_config.get("path_ratio_penalty", 0.5))
+        selection_score = val_loss + ratio_penalty * abs(math.log(max(val_path_ratio, 1e-9)))
         record = {
             "epoch": epoch,
             "global_step": global_step,
             "train_loss": epoch_loss / steps_per_epoch,
             "val_loss": val_loss,
+            "val_path_ratio": val_path_ratio,
+            "selection_score": selection_score,
             "lr": optimizer.param_groups[0]["lr"],
             "elapsed_s": time.time() - started,
         }
         with metrics_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
         logger.info(
-            "epoch %d | train %.6f | val %.6f | lr %.3e",
+            "epoch %d | train %.6f | val %.6f | path ratio %.3f | score %.6f | lr %.3e",
             epoch,
             record["train_loss"],
             val_loss,
+            val_path_ratio,
+            selection_score,
             record["lr"],
         )
         state = {
@@ -298,11 +311,15 @@ def main() -> int:
             "epoch": epoch,
             "global_step": global_step,
             "val_loss": val_loss,
+            "val_path_ratio": val_path_ratio,
+            "selection_score": selection_score,
             "seed": seed,
         }
         torch.save(state, out_dir / "last.pt")
-        if val_loss < best_val:
+        if selection_score < best_score:
+            best_score = selection_score
             best_val = val_loss
+            best_path_ratio = val_path_ratio
             best_epoch = epoch
             stale_epochs = 0
             torch.save(state, out_dir / "best.pt")
@@ -315,7 +332,14 @@ def main() -> int:
             logger.info("early stopping after %d stale epochs", stale_epochs)
             break
 
-    logger.info("done: best epoch %d val %.6f -> %s", best_epoch, best_val, out_dir / "best.pt")
+    logger.info(
+        "done: best epoch %d val %.6f path-ratio %.3f score %.6f -> %s",
+        best_epoch,
+        best_val,
+        best_path_ratio,
+        best_score,
+        out_dir / "best.pt",
+    )
     return 0
 
 
