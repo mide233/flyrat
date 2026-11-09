@@ -30,7 +30,8 @@ The method uses 4× VL53L5CX 8×8 ToF arrays (front / left / right / down) and a
   paper-style 表格/图。3 seeds 平均 **ATE 0.4073 ± 0.0218 m /
   RPEp 0.0179 ± 0.0005 m / RPER 0.315 ± 0.061° / EDR 8.98 ± 0.43%**；
   LOSO 平均 ATE **0.4652 m**。完整报告见 `report/m5_report.md`，
-  M4 结果表见 `report/m4_results.md`。
+  M4 结果表见 `report/m4_results.md`。最佳 seed 的轨迹/精度可视化和
+  失效分析见 `report/best_model/analysis.md`。
 - **模型改进筛选（v2）**：新增 `hybrid`、`gated_fifo`、`hybrid_gated`、
   `hybrid_split`。15-epoch 筛选中 `hybrid_gated` ATE 0.4208 m；40-epoch 复核
   0.4122 m，优于原 full 的 0.4316 m，但仍未超过 `naive_concat`（0.4013 m）和
@@ -216,6 +217,18 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/run_loso.py --epochs 1
 ```
 
 完整中文技术报告见 `report/m5_report.md`。
+
+最佳 seed 的轨迹与失效分析：
+
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/analyze_best_model.py \
+  --eval runs/eval_main_imu_seed1 \
+  --split-eval train=runs/eval_best_train \
+  --split-eval val=runs/eval_best_val \
+  --out report/best_model
+```
+
+结果见 `report/best_model/analysis.md`，重点是速度相关的平移尺度塌缩。
 
 ## C++ / ROS 2 接入（实验）
 

@@ -310,6 +310,11 @@ scene_id, seq_id, traj_type, split
   `train.py --exclude-scenes` 与 `evaluate.py --scenes`。中文技术报告
   `report/m5_report.md` 汇总方法、数据、主结果、消融、鲁棒性、LOSO、
   实时性与局限；M5 结果表与图在 `report/`。测试 47 项通过。
+- 最佳模型诊断：seed1 测试 ATE 0.3788 m、EDR 8.42%，但预测轨迹长度只有
+  GT 的 0.567；逐序列 oracle 尺度修正后 ATE 降至 0.2003 m。模型输出近似
+  恒定单步位移（train/val/test 预测步长 1.24/1.32/1.44 cm，GT
+  1.16/2.17/2.74 cm），说明速度相关的平移尺度塌缩是主要误差来源。
+  图表与中文分析见 `research/tio_former/report/best_model/analysis.md`。
 - 模型改进 v2：新增 `hybrid`、`gated_fifo`、`hybrid_gated` 三个变体，用
   可学习 gate 分别控制 cross-attention 和 Chunk-FIFO summary 分支，使模型
   从 `naive_concat` / `kv_only_no_fifo` 结构出发再学习增强。15-epoch 筛选
