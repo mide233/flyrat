@@ -93,7 +93,10 @@ def main() -> int:
     logger = get_logger("build_dataset_index")
     dataset = load_yaml(args.dataset)["dataset"]
     generation = load_yaml(args.generation)["generation"]
-    processed = Path(args.processed or (ROOT / dataset["processed_dir"]))
+    # Prefer the generation config's processed_dir so versioned datasets
+    # (e.g. generation_v3.yaml -> data_v3/processed) do not silently index v2.
+    processed_dir = generation.get("processed_dir", dataset["processed_dir"])
+    processed = Path(args.processed or (ROOT / processed_dir))
     out_path = Path(args.out or (ROOT / generation.get("index_path", "data/index.csv")))
     files = sorted(processed.rglob("*.npz"))
     if not files:
