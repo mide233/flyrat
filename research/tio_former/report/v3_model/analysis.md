@@ -124,3 +124,5 @@ done
 - 当前 3-seed 平均 ATE 0.0879 m、EDR 2.52%，显著优于 v2，并通过全部 v3 gate。
 - 下一步是在净空真实环境复测 TIO ROS 链路，重点看慢速段（<0.2 m/s）
   和静止漂移；仿真域过拟合仍是实机部署的主要风险。
+- 逐序列轨迹、精度分布和剩余失效因素见
+  [best_model/analysis.md](../best_model/analysis.md)。

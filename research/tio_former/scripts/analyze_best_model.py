@@ -554,7 +554,7 @@ def _plot_speed_scale(
     ax.set_xticks(xpos)
     ax.set_xticklabels(names)
     ax.set_ylabel("mean step (cm)")
-    ax.set_title("Model predicts a nearly constant step length")
+    ax.set_title("Mean step length by split")
     ax.grid(axis="y", alpha=0.25)
     ax.legend(frameon=False)
 
@@ -583,11 +583,11 @@ def _plot_speed_scale(
     ax.set_xticklabels(labels)
     ax.set_xlabel("GT speed (m/s)")
     ax.set_ylabel("mean ATE (m)")
-    ax.set_title("Scale correction removes much of the error")
+    ax.set_title("Oracle per-sequence scale diagnostic")
     ax.grid(axis="y", alpha=0.25)
     ax.legend(frameon=False)
 
-    fig.suptitle("Diagnosis: speed-dependent scale collapse", fontsize=13)
+    fig.suptitle("Speed and scale diagnostics", fontsize=13)
     _save(fig, out / "speed_scale.png")
 
 
@@ -674,44 +674,41 @@ def _plot_view_validity(records: list[dict[str, Any]], out: Path) -> None:
 
 
 def _plot_ablation(records: list[dict[str, Any]], out: Path) -> None:
-    baseline = _summary(ROOT / "runs/eval_main_imu")
-    best = _summary(ROOT / "runs/eval_main_imu_seed1")
-    hybrid = _summary(ROOT / "runs/eval_main_v2")
-    drop_all = _summary(ROOT / "runs/eval_main_imu_dropall")
-    ablations = json.loads((ROOT / "runs/ablations_imu/summary.json").read_text(encoding="utf-8"))
-    ablations = {row["variant"]: row for row in ablations}
-
+    v2_best = _summary(ROOT / "runs/eval_main_imu_seed1")
+    v3_best = _summary(ROOT / "runs_v3/eval_seed1")
+    v2_seeds = json.loads((ROOT / "runs/seeds_summary.json").read_text(encoding="utf-8"))
+    v3_seeds = json.loads((ROOT / "runs_v3/seeds_summary.json").read_text(encoding="utf-8"))
     rows = [
-        ("best seed1", best["metrics"]["ate_m"], best["metrics"]["end_drift_percent"], "best"),
-        ("full seed0", baseline["metrics"]["ate_m"], baseline["metrics"]["end_drift_percent"], "full"),
-        ("hybrid_gated", hybrid["metrics"]["ate_m"], hybrid["metrics"]["end_drift_percent"], "variant"),
-        ("naive_concat", ablations["naive_concat"]["ate_m_mean"], ablations["naive_concat"]["end_drift_percent_mean"], "ablation"),
-        ("kv_only_no_fifo", ablations["kv_only_no_fifo"]["ate_m_mean"], ablations["kv_only_no_fifo"]["end_drift_percent_mean"], "ablation"),
-        ("imu_only", ablations["imu_only"]["ate_m_mean"], ablations["imu_only"]["end_drift_percent_mean"], "ablation"),
-        ("memoryless", ablations["memoryless"]["ate_m_mean"], ablations["memoryless"]["end_drift_percent_mean"], "ablation"),
-        ("tof_only", ablations["tof_only"]["ate_m_mean"], ablations["tof_only"]["end_drift_percent_mean"], "ablation"),
-        ("no ToF (seed0)", drop_all["metrics"]["ate_m"], drop_all["metrics"]["end_drift_percent"], "drop"),
+        ("v2 best", v2_best["metrics"]["ate_m"], v2_best["metrics"]["end_drift_percent"], "v2"),
+        ("v2 3-seed mean", v2_seeds["aggregate"]["ate_m"]["mean"], v2_seeds["aggregate"]["end_drift_percent"]["mean"], "v2mean"),
+        ("v3 best", v3_best["metrics"]["ate_m"], v3_best["metrics"]["end_drift_percent"], "v3"),
+        ("v3 3-seed mean", v3_seeds["aggregate"]["ate_m"]["mean"], v3_seeds["aggregate"]["end_drift_percent"]["mean"], "v3mean"),
     ]
     palette = {
-        "best": "#2e8b57",
-        "full": "#3b6ea8",
-        "variant": "#8a5a9e",
-        "ablation": "#c46a3a",
-        "drop": "#777777",
+        "v2": "#c46a3a",
+        "v2mean": "#d9a07f",
+        "v3": "#2e8b57",
+        "v3mean": "#8fbc9a",
     }
     labels = [row[0] for row in rows]
-    fig, axes = plt.subplots(1, 2, figsize=(14.0, 5.2))
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.8))
     for ax, metric_index, ylabel in zip(axes, (1, 2), ("ATE (m)", "EDR (%)")):
         values = [row[metric_index] for row in rows]
         ax.bar(labels, values, color=[palette[row[3]] for row in rows], alpha=0.9)
         for index, value in enumerate(values):
-            ax.text(index, value + (0.008 if metric_index == 1 else 0.15), f"{value:.3f}" if metric_index == 1 else f"{value:.1f}", ha="center", fontsize=7.5)
+            ax.text(
+                index,
+                value + (0.008 if metric_index == 1 else 0.15),
+                f"{value:.3f}" if metric_index == 1 else f"{value:.1f}",
+                ha="center",
+                fontsize=8,
+            )
         ax.set_ylabel(ylabel)
-        ax.tick_params(axis="x", rotation=35, labelsize=8)
+        ax.tick_params(axis="x", rotation=20, labelsize=8)
         ax.grid(axis="y", alpha=0.25)
-    axes[0].set_title("ATE: best model vs ablations")
-    axes[1].set_title("EDR: best model vs ablations")
-    fig.suptitle("Architecture is not the bottleneck (ablations are 15 epochs unless noted)", fontsize=12)
+    axes[0].set_title("ATE: v2 vs v3.1")
+    axes[1].set_title("EDR: v2 vs v3.1")
+    fig.suptitle("v3.1 speed-balanced data removes the scale-collapse error", fontsize=12)
     _save(fig, out / "ablation.png")
 
 
