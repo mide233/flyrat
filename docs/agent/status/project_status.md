@@ -133,6 +133,13 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   且 RPER 0.757° 明显差于 full 的 0.257°。位置/旋转双分支 `hybrid_split`
   15-epoch ATE 0.4350 m、RPER 0.837°，没有改善。结论为负结果，当前导出
   模型仍为原 full 模型。
+- 数据集 v3.1（2026-11-09）：修正 train/val/test 速度分布、关闭合成
+  status=10、加入 dropout 和垂直运动，共 894 序列 / 22,927.5 s /
+  6,229.5 m / 344,829 帧。seed 0 在 epoch 60 取得测试 ATE 0.0880 m、
+  RPEp 0.00353 m、RPER 0.193°、EDR 2.44%，路径比 0.992，
+  |speed–ATE| 0.344，v3 gate 全部通过。结果见
+  [`research/tio_former/report/v3_model/analysis.md`](../../research/tio_former/report/v3_model/analysis.md)。
+  该结果仍为四个 Gazebo 场景的仿真值，实机域差距尚未验证。
 
 ## 3. 实测指标
 
@@ -152,6 +159,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 | ROS 2 里程计状态发布 | 1 Hz | `diagnostic_msgs` |
 | TIO-Former ROS 链路 | `TRACKING` | 真机 ToF+IMU，开发机 CPU libtorch |
 | TIO-Former 实机静态零漂 | 约 0.98 m / 20 s | 2026-11-08 旧布局桌面测试；未通过飞行要求 |
+| TIO-Former v3.1 仿真测试 | ATE 0.088 m / EDR 2.44% | seed0，141 条 test，四个 Gazebo 场景 |
 
 ## 4. 构建与运行
 

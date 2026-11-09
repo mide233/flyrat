@@ -27,9 +27,11 @@ training:
   amp: true
   amp_dtype: bfloat16
   early_stopping_patience: 15
-  # Checkpoint score = val_loss + penalty * |log(predicted/GT path length)|.
-  # This prevents selecting a low-loss model whose translation scale collapsed.
+  # Checkpoint score penalises |log(predicted/GT path length)| only outside
+  # the acceptable [1/tolerance, tolerance] band. This avoids rejecting a
+  # low-loss model merely because its ratio is 1.08.
   path_ratio_penalty: 0.5
+  path_ratio_tolerance: 1.2
   log_every: 50
   validate_every_epochs: 1
   save_top_k: 3

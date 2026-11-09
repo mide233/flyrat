@@ -213,7 +213,7 @@ cd research/tio_former
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
 ```
 
-当前 47 项通过。
+当前 50 项通过。
 
 ## 5. 真机验证记录（2026-11-08）
 

@@ -282,7 +282,13 @@ def main() -> int:
             amp_dtype,
         )
         ratio_penalty = float(training_config.get("path_ratio_penalty", 0.5))
-        selection_score = val_loss + ratio_penalty * abs(math.log(max(val_path_ratio, 1e-9)))
+        ratio_tolerance = float(training_config.get("path_ratio_tolerance", 1.2))
+        log_ratio_error = abs(math.log(max(val_path_ratio, 1e-9)))
+        # Only penalise path ratios outside the acceptable [1/tol, tol] band.
+        # A plain |log| penalty rejects low-loss checkpoints at ratio 1.08,
+        # which are still well inside the deployment gate 0.80-1.20.
+        excess_ratio_error = max(0.0, log_ratio_error - math.log(max(ratio_tolerance, 1.0)))
+        selection_score = val_loss + ratio_penalty * excess_ratio_error
         record = {
             "epoch": epoch,
             "global_step": global_step,

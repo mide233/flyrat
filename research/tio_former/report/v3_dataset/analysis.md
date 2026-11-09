@@ -75,7 +75,9 @@ val/test 的 KS 偏大主要来自形状差异，而不是均值/步长：两组
 4. **垂直运动不足**：高度范围 0.6–2.2 m，垂直 jitter 0.45 m。
 5. **轨迹加速度过大**：重定时后检查峰值加速度，超过 12 m/s² 的轨迹拒绝。
 6. **checkpoint 只看 val loss**：改为
-   `val_loss + 0.5 * |log(pred/GT path ratio)|`，避免选中尺度塌缩模型。
+   `val_loss + 0.5 * max(0, |log(ratio)| - log(1.2))`，只惩罚超出
+   `[0.83, 1.2]` 的尺度误差，避免选中尺度塌缩模型，同时不因 ratio=1.08
+   而丢掉低 loss checkpoint。
 
 ## 5. 场景与视角
 
@@ -116,3 +118,9 @@ python3 scripts/audit_dataset_v3.py
 # 分布图
 .venv/bin/python scripts/plot_v3_dataset.py
 ```
+
+## 7. 训练结果
+
+v3.1 seed 0 在修正 checkpoint 选择后取得测试 ATE 0.0880 m、EDR 2.44%，
+路径比 0.992，v3 gate 全部通过。详细结果、分场景/分速度表和图见
+[`../v3_model/analysis.md`](../v3_model/analysis.md)。

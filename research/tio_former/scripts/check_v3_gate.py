@@ -63,18 +63,20 @@ def main() -> int:
     ratio = float(np.mean([row["path_ratio"] for row in rows]))
     speed = np.array([row["speed_mps"] for row in rows])
     speed_ate_corr = float(np.corrcoef(speed, [row["ate_m"] for row in rows])[0, 1])
+    speed_ate_abs = abs(speed_ate_corr)
     result = {
         "eval": str(eval_dir),
         "sequences": len(rows),
         "ate_m": ate,
         "path_ratio": ratio,
-        "speed_ate_correlation": speed_ate_corr,
+        "speed_ate_correlation": speed_ate_abs,
+        "speed_ate_correlation_signed": speed_ate_corr,
         "end_drift_percent": float(summary["metrics"]["end_drift_percent"]),
         "targets": TARGETS,
         "pass": {
             "ate": ate <= TARGETS["ate_m"],
             "path_ratio": TARGETS["path_ratio_min"] <= ratio <= TARGETS["path_ratio_max"],
-            "speed_ate_correlation": speed_ate_corr <= TARGETS["speed_ate_correlation"],
+            "speed_ate_correlation": speed_ate_abs <= TARGETS["speed_ate_correlation"],
         },
     }
     result["pass"]["all"] = all(result["pass"].values())
@@ -84,7 +86,7 @@ def main() -> int:
 
     print(
         f"sequences={len(rows)} ATE={ate:.4f} m path_ratio={ratio:.3f} "
-        f"speed-ATE r={speed_ate_corr:+.3f}"
+        f"speed-ATE |r|={speed_ate_abs:.3f} (signed {speed_ate_corr:+.3f})"
     )
     for name, passed in result["pass"].items():
         print(f"  {name}: {'PASS' if passed else 'FAIL'}")

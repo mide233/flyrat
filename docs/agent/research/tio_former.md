@@ -273,7 +273,7 @@ scene_id, seq_id, traj_type, split
 ## 9. 当前进度
 
 - M0 完成：目录、配置、SE(3)/ToF/轨迹/IMU 工具、NPZ 数据容器和测试。
-  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q` 共 47 项通过。
+  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q` 共 50 项通过。
 - M1 完成：四个场景生成器、4 向 ToF rig、Gazebo 轨迹播放插件、
   单序列 headless 录制与 8×8 后处理。
 - M1 实测（`corridor_demo`）：182 帧、12.07 s、1.80 m；4×8×8 @ 15 Hz；
@@ -309,7 +309,7 @@ scene_id, seq_id, traj_type, split
   `scripts/aggregate_seeds.py`、`scripts/run_loso.py`，场景过滤支持
   `train.py --exclude-scenes` 与 `evaluate.py --scenes`。中文技术报告
   `report/m5_report.md` 汇总方法、数据、主结果、消融、鲁棒性、LOSO、
-  实时性与局限；M5 结果表与图在 `report/`。测试 47 项通过。
+  实时性与局限；M5 结果表与图在 `report/`。测试 50 项通过。
 - 最佳模型诊断：seed1 测试 ATE 0.3788 m、EDR 8.42%，但预测轨迹长度只有
   GT 的 0.567；逐序列 oracle 尺度修正后 ATE 降至 0.2003 m。模型输出近似
   恒定单步位移（train/val/test 预测步长 1.24/1.32/1.44 cm，GT
@@ -324,6 +324,18 @@ scene_id, seq_id, traj_type, split
   gate 基本未打开。位置/旋转双分支 `hybrid_split` 15-epoch ATE 0.4350 m、
   RPER 0.837°，没有改善。结论为负结果，保留原 full 模型与导出模型。结果记录在
   `report/model_v2_results.md`。
+- 数据集 v3.1：按诊断结论重做数据分布，统一 train/val/test 速度 bin 并按目标速度
+  重定时；共 **894 序列 / 22,927.5 s / 6,229.5 m / 344,829 帧**，split
+  **618/135/141**，平均速度 **0.315/0.316/0.308 m/s**，平均步长
+  2.10/2.11/2.05 cm。关闭合成 `status=10`，加入 3% dropout + 2% reflectivity
+  dropout，并增加 0.6–2.2 m 垂直运动。审计通过平均速度偏移 2.56%、最小速度
+  bin 77 条、test 路径 4–7 m、有效 ToF 0.783、无重复轨迹；仅 val–test KS
+  0.173 未达 <0.1，属于分布形状的采样差异。分布图与审计见
+  `research/tio_former/report/v3_dataset/analysis.md`。训练改为按
+  `val_loss + 0.5*max(0, |log(val_path_ratio)| - log 1.2)` 选 checkpoint。
+  seed 0 在 epoch 60 取得测试 **ATE 0.0880 m / RPEp 0.00353 m /
+  RPER 0.193° / EDR 2.44%**，路径比 0.992，|speed–ATE| 0.344，v3 gate
+  全部通过；结果见 `research/tio_former/report/v3_model/analysis.md`。
 - C++/ROS 接入（实验性）：新增 `flyrat::tio`（`FLYRAT_BUILD_TIO`，CPU
   libtorch）和 ROS 2 `tio_odometry_node`，将导出的 TorchScript 模型
   `libflyrat/models/tio_former_window64.pt` 接入 `/flyrat/sensors/tof_0..3`

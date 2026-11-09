@@ -32,6 +32,15 @@ The method uses 4× VL53L5CX 8×8 ToF arrays (front / left / right / down) and a
   LOSO 平均 ATE **0.4652 m**。完整报告见 `report/m5_report.md`，
   M4 结果表见 `report/m4_results.md`。最佳 seed 的轨迹/精度可视化和
   失效分析见 `report/best_model/analysis.md`。
+- **v3.1 数据与训练**：重做速度/步长分布，统一 train/val/test 的 5 个速度 bin
+  并按目标速度重定时；共 **894 序列 / 22,927.5 s / 6,229.5 m / 344,829 帧**，
+  split **618/135/141**，平均速度 0.315/0.316/0.308 m/s。关闭合成 status=10，
+  加入 3% dropout + 2% reflectivity dropout，增加 0.6–2.2 m 垂直运动。
+  审计除 val–test KS=0.173 外均通过。旧 checkpoint 选择规则曾误选 epoch 7
+  （ATE 0.5184 m）；修复为只惩罚 `[0.83,1.2]` 之外的尺度误差后，seed 0
+  在 epoch 60 取得测试 **ATE 0.0880 m / RPEp 0.00353 m / RPER 0.193° /
+  EDR 2.44%**，路径比 0.992，|speed–ATE| 0.344，v3 gate 全部通过。
+  结果与图见 `report/v3_model/analysis.md`。
 - **模型改进筛选（v2）**：新增 `hybrid`、`gated_fifo`、`hybrid_gated`、
   `hybrid_split`。15-epoch 筛选中 `hybrid_gated` ATE 0.4208 m；40-epoch 复核
   0.4122 m，优于原 full 的 0.4316 m，但仍未超过 `naive_concat`（0.4013 m）和
@@ -44,7 +53,7 @@ The method uses 4× VL53L5CX 8×8 ToF arrays (front / left / right / down) and a
   `/flyrat/odometry/*` 与 `odometry_map -> imu_link`。开发机已用仿真序列
   跑通端到端链路；尚未做实机精度验证或 RK3566 部署。详见
   [`docs/agent/odometry/tio_former.md`](../../docs/agent/odometry/tio_former.md)。
-  当前 Python 测试 **47 项通过**，C++ 默认构建 9 项、TIO 构建另加
+  当前 Python 测试 **50 项通过**，C++ 默认构建 9 项、TIO 构建另加
   `test_tio_api`。
 - **真机验证（2026-11-08，旧布局）**：4 颗 VL53L5CX 设备端实测 14.8–15.2 Hz，
   0 读取错误；TIO 节点能进入 `TRACKING` 并发布 odometry/TF。但静止放桌面
