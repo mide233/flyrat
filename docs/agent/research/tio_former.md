@@ -336,6 +336,11 @@ scene_id, seq_id, traj_type, split
   3 seeds 取得测试 **ATE 0.0879 ± 0.0025 m / RPEp 0.00363 m /
   RPER 0.175° / EDR 2.52%**，路径比约 1.00，三个 seed 的 v3 gate
   全部通过；结果见 `research/tio_former/report/v3_model/analysis.md`。
+- P1 前向单目相机（2026-11-09）：仿真 `tof_rig` 增加 320×240@15 Hz L8 相机，
+  数据集可选保存 `camera_jpeg`/`camera_offset`（160×120 JPEG q85）；模型增加
+  `CameraEncoder` 与 IMU>camera>ToF 的软先验可靠性 gate。C++ `TioOdometry`
+  和 ROS `tio_odometry_node` 支持可选 160×120 相机输入，需导出带相机的
+  TorchScript 并设置 `camera_enabled: true`。真实相机仍未标定。
 - C++/ROS 接入（实验性）：新增 `flyrat::tio`（`FLYRAT_BUILD_TIO`，CPU
   libtorch）和 ROS 2 `tio_odometry_node`，将导出的 TorchScript 模型
   `libflyrat/models/tio_former_window64.pt` 接入 `/flyrat/sensors/tof_0..3`

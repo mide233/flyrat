@@ -140,6 +140,10 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   三个 seed 的 |speed–ATE| 均在 0.34–0.47，v3 gate 全部通过。结果见
   [`research/tio_former/report/v3_model/analysis.md`](../../research/tio_former/report/v3_model/analysis.md)。
   该结果仍为四个 Gazebo 场景的仿真值，实机域差距尚未验证。
+- P1 前向单目相机：仿真数据集可记录 320×240@15 Hz 单目图像（存为
+  160×120 JPEG），模型增加 CameraEncoder 与可靠性 gate；C++/ROS TIO
+  后端已支持可选相机输入，但需重新导出带相机模型并开启
+  `camera_enabled`。真实相机仍未标定。
 
 ## 3. 实测指标
 
