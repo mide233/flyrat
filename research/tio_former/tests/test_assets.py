@@ -16,6 +16,8 @@ def test_required_configs_exist() -> None:
         "sim/trajectory.yaml",
         "data/dataset.yaml",
         "data/generation.yaml",
+        "data/generation_v3.yaml",
+        "sim/sensors_v3.yaml",
         "model/base.yaml",
         "train/default.yaml",
         "eval/main.yaml",
@@ -42,6 +44,21 @@ def test_scene_bounds_are_valid() -> None:
         for axis in ("x", "y", "z"):
             low, high = scene["bounds"][axis]
             assert high > low
+
+
+def test_v3_generation_and_sensor_config() -> None:
+    generation = load_yaml(ROOT / "configs/data/generation_v3.yaml")["generation"]
+    bins = generation["speed_bins"]
+    assert abs(sum(float(bin_["weight"]) for bin_ in bins) - 1.0) < 1e-6
+    assert generation["target_seconds"] >= 20_000.0
+    assert generation["processed_dir"] == "data_v3/processed"
+    assert generation["trajectory_dir"] == "trajectories_v3"
+    assert all(float(bin_["min"]) >= 0.1 for bin_ in bins)
+
+    sensors = load_yaml(ROOT / "configs/sim/sensors_v3.yaml")
+    assert sensors["tof_sim"]["new_target_probability"] == 0.0
+    assert sensors["tof_sim"]["dropout_probability"] > 0.0
+    assert sensors["tof_sim"]["reflectivity_dropout"] > 0.0
 
 
 def test_scene_layout_has_obstacles_and_meshes() -> None:
