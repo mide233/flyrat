@@ -234,7 +234,7 @@ class ReliabilityGate(nn.Module):
             nn.GELU(),
             nn.Linear(64, 3),
         )
-        self.register_buffer("prior", torch.tensor([1.5, 0.0, -1.0]))
+        self.register_buffer("prior", torch.tensor([1.0, 0.0, -0.5]))
 
     def forward(
         self, imu_token: torch.Tensor, camera_token: torch.Tensor, tof_token: torch.Tensor
