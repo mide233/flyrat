@@ -73,6 +73,8 @@ struct MonoJpegSource::Impl {
     std::atomic<std::int64_t> last_stamp_us { 0 };
     bool have_sequence = false;
     std::uint32_t last_sequence = 0;
+    bool have_published = false;
+    std::chrono::steady_clock::time_point next_publish {};
     std::string last_error;
 
     void open_device()
@@ -200,13 +202,40 @@ struct MonoJpegSource::Impl {
 
     void publish(MonoJpegFrame frame, const v4l2_buffer& meta)
     {
+        auto stamp = to_time_point(meta.timestamp);
+        if (stamp.time_since_epoch().count() == 0) {
+            stamp = std::chrono::steady_clock::now();
+        }
+
         if (have_sequence && meta.sequence > last_sequence + 1) {
             dropped += meta.sequence - last_sequence - 1;
         }
         last_sequence = meta.sequence;
         have_sequence = true;
+
+        // Some UVC cameras only expose 120/210 Hz modes even when a lower
+        // frame rate is requested. Drop frames after capture so the host sees
+        // a stable 15 Hz stream instead of a flood of stale frames.
+        const auto interval = std::chrono::microseconds(
+            1000000 / std::max(config.fps, 1));
+        if (!have_published) {
+            have_published = true;
+            next_publish = stamp + interval;
+        } else {
+            if (stamp < next_publish) {
+                ++dropped;
+                return;
+            }
+            next_publish += interval;
+            // If the camera was paused or stalled for more than one interval,
+            // resynchronise instead of emitting a burst.
+            if (next_publish <= stamp) {
+                next_publish = stamp + interval;
+            }
+        }
+
         frame.sequence = meta.sequence;
-        frame.stamp = to_time_point(meta.timestamp);
+        frame.stamp = stamp;
 
         const auto stamp_us = std::chrono::duration_cast<std::chrono::microseconds>(
             frame.stamp.time_since_epoch()).count();
@@ -311,6 +340,8 @@ void MonoJpegSource::start()
     impl_->last_stamp_us = 0;
     impl_->have_sequence = false;
     impl_->last_sequence = 0;
+    impl_->have_published = false;
+    impl_->next_publish = {};
     {
         std::lock_guard<std::mutex> lock(impl_->mutex);
         impl_->last_error.clear();

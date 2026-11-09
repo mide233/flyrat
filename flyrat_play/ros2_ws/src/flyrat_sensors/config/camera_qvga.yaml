@@ -1,0 +1,18 @@
+# QVGA monochrome camera parameters for the real-vehicle sensor receiver.
+#
+# The forward camera is captured at 320x240 MJPEG and decoded to mono8.
+# Fill in the calibration values after running a mono calibration (for example
+# a checkerboard with OpenCV or Kalibr). Until camera_calibrated is true, the
+# receiver publishes a zero camera_info matrix and logs a warning.
+sensor_receiver:
+  ros__parameters:
+    camera_frame_id: camera_front_optical_frame
+    camera_calibrated: false
+    camera_calibrated_width: 320
+    camera_calibrated_height: 240
+    camera_distortion_model: plumb_bob
+    camera_fx: 0.0
+    camera_fy: 0.0
+    camera_cx: 159.5
+    camera_cy: 119.5
+    camera_d: [0.0, 0.0, 0.0, 0.0, 0.0]

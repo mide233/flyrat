@@ -108,12 +108,12 @@ int main()
 
     const std::uint8_t jpeg[] = { 0xFF, 0xD8, 0x00, 0x11, 0xFF, 0xD9 };
     const std::vector<std::uint8_t> camera_payload = encode_jpeg(
-        640, 480, jpeg, sizeof(jpeg));
+        320, 240, jpeg, sizeof(jpeg));
     check(camera_payload.size() == 8 + sizeof(jpeg), "camera payload size");
     JpegView view;
     check(decode_jpeg(camera_payload.data(), camera_payload.size(), view),
         "decode camera header");
-    check(view.width == 640 && view.height == 480, "camera dimensions");
+    check(view.width == 320 && view.height == 240, "camera dimensions");
     check(view.size == sizeof(jpeg) && view.jpeg[0] == 0xFF && view.jpeg[1] == 0xD8,
         "camera JPEG bytes");
     check(!decode_jpeg(camera_payload.data(), 7, view),

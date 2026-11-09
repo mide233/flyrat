@@ -6,6 +6,7 @@
 #include <string>
 
 #include "flyrat/hardware/imu.hpp"
+#include "flyrat/hardware/mono_jpeg_source.hpp"
 #include "flyrat/hardware/stereo_camera.hpp"
 #include "flyrat/hardware/tof.hpp"
 
@@ -60,6 +61,11 @@ int main()
     check(stereo_frame.left.size() == stereo_frame.right.size(), "stereo eye buffers");
     check(stereo_frame.format == flyrat::hardware::StereoPixelFormat::kNv12,
         "stereo NV12 frame format");
+
+    flyrat::hardware::MonoJpegConfig mono;
+    check(mono.width == 320 && mono.height == 240, "mono QVGA defaults");
+    check(mono.fps == 15, "mono 15 Hz default");
+    check(mono.device == "/dev/video10", "mono default device");
 
     if (g_failures != 0) {
         std::printf("%d hardware header check(s) failed\n", g_failures);

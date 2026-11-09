@@ -26,6 +26,7 @@
 #include <opencv2/imgcodecs.hpp>
 
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 
@@ -100,6 +101,29 @@ public:
         tof_frame_prefix_ = declare_parameter<std::string>("tof_frame_id", "tof_");
         camera_frame_id_ = declare_parameter<std::string>(
             "camera_frame_id", "camera_front_optical_frame");
+        camera_calibrated_ = declare_parameter<bool>("camera_calibrated", false);
+        camera_calibrated_width_ = declare_parameter<int>(
+            "camera_calibrated_width", 320);
+        camera_calibrated_height_ = declare_parameter<int>(
+            "camera_calibrated_height", 240);
+        camera_fx_ = declare_parameter<double>("camera_fx", 0.0);
+        camera_fy_ = declare_parameter<double>("camera_fy", 0.0);
+        camera_cx_ = declare_parameter<double>("camera_cx", 159.5);
+        camera_cy_ = declare_parameter<double>("camera_cy", 119.5);
+        camera_distortion_model_ = declare_parameter<std::string>(
+            "camera_distortion_model", "plumb_bob");
+        camera_d_ = declare_parameter<std::vector<double>>(
+            "camera_d", std::vector<double> { 0.0, 0.0, 0.0, 0.0, 0.0 });
+        if (camera_calibrated_ &&
+            (camera_fx_ <= 0.0 || camera_fy_ <= 0.0 ||
+                camera_calibrated_width_ <= 0 || camera_calibrated_height_ <= 0)) {
+            throw std::runtime_error(
+                "camera calibration is enabled but fx/fy or calibration size is invalid");
+        }
+        if (!camera_calibrated_) {
+            RCLCPP_WARN(get_logger(),
+                "camera intrinsics are not calibrated; publishing zero camera_info");
+        }
         acc_lsb_per_g_ = declare_parameter<double>("acc_lsb_per_g", 2048.0);
         gyro_lsb_per_dps_ = declare_parameter<double>("gyro_lsb_per_dps", 16.4);
         imu_accel_axis_ = declare_parameter<std::string>("imu_accel_axis", "none");
@@ -187,6 +211,8 @@ public:
             "/flyrat/sensors/imu", qos);
         camera_pub_ = create_publisher<sensor_msgs::msg::Image>(
             "/flyrat/sensors/camera/image_raw", qos);
+        camera_info_pub_ = create_publisher<sensor_msgs::msg::CameraInfo>(
+            "/flyrat/sensors/camera/camera_info", qos);
         for (int i = 0; i < std::max(tof_count, 0); ++i) {
             tof_pubs_.push_back(create_publisher<flyrat_sensors_interfaces::msg::TofFrame>(
                 "/flyrat/sensors/tof_" + std::to_string(i), qos));
@@ -453,6 +479,37 @@ private:
         fill_image(msg, decoded, "mono8", stamp_for(header.device_time_ns),
             camera_frame_id_);
         camera_pub_->publish(msg);
+
+        sensor_msgs::msg::CameraInfo info;
+        info.header = msg.header;
+        info.height = msg.height;
+        info.width = msg.width;
+        info.distortion_model = camera_distortion_model_;
+        info.d = camera_d_;
+        double fx = 0.0;
+        double fy = 0.0;
+        double cx = 0.0;
+        double cy = 0.0;
+        if (camera_calibrated_) {
+            const double sx = static_cast<double>(decoded.cols) /
+                static_cast<double>(camera_calibrated_width_);
+            const double sy = static_cast<double>(decoded.rows) /
+                static_cast<double>(camera_calibrated_height_);
+            fx = camera_fx_ * sx;
+            fy = camera_fy_ * sy;
+            cx = camera_cx_ * sx;
+            cy = camera_cy_ * sy;
+        }
+        info.k = { fx, 0.0, cx,
+            0.0, fy, cy,
+            0.0, 0.0, 1.0 };
+        info.r = { 1.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, 1.0 };
+        info.p = { fx, 0.0, cx, 0.0,
+            0.0, fy, cy, 0.0,
+            0.0, 0.0, 1.0, 0.0 };
+        camera_info_pub_->publish(info);
         ++camera_count_;
     }
 
@@ -462,6 +519,15 @@ private:
     std::string imu_frame_id_;
     std::string tof_frame_prefix_;
     std::string camera_frame_id_;
+    bool camera_calibrated_ = false;
+    int camera_calibrated_width_ = 320;
+    int camera_calibrated_height_ = 240;
+    double camera_fx_ = 0.0;
+    double camera_fy_ = 0.0;
+    double camera_cx_ = 159.5;
+    double camera_cy_ = 119.5;
+    std::string camera_distortion_model_ = "plumb_bob";
+    std::vector<double> camera_d_ { 0.0, 0.0, 0.0, 0.0, 0.0 };
     double acc_lsb_per_g_ = 2048.0;
     double gyro_lsb_per_dps_ = 16.4;
     std::string imu_accel_axis_ = "none";
@@ -483,6 +549,7 @@ private:
     std::vector<rclcpp::Publisher<flyrat_sensors_interfaces::msg::TofFrame>::SharedPtr>
         tof_pubs_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr camera_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_pub_;
 
     std::thread thread_;
     std::atomic<bool> stop_ { false };

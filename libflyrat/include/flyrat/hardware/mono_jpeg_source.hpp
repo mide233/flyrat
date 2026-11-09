@@ -4,8 +4,9 @@
 //
 // This source deliberately does not decode the JPEG. The sensor forwarder
 // sends the camera's native MJPEG frames to the development machine, where
-// OpenCV decodes them. At 640x480@60 MJPEG uses well under 1 MB/s, which is
-// important because the adb tunnel tops out near 30 MB/s.
+// OpenCV decodes them. QVGA (320x240) mono frames are small enough for the
+// adb tunnel, and the capture loop throttles to the requested output rate
+// because some UVC cameras only advertise high-speed modes (120/210 Hz).
 #pragma once
 
 #include <chrono>
@@ -21,9 +22,9 @@ namespace flyrat::hardware {
 
 struct MonoJpegConfig {
     std::string device = "/dev/video10";
-    int width = 640;
-    int height = 480;
-    int fps = 60;
+    int width = 320;
+    int height = 240;
+    int fps = 15;
     int buffer_count = 4;
 };
 

@@ -174,6 +174,13 @@ def _launch_setup(context, *args, **kwargs):
                     'gyro_lsb_per_dps': LaunchConfiguration('gyro_lsb_per_dps'),
                     'imu_accel_axis': LaunchConfiguration('imu_accel_axis'),
                     'imu_gyro_axis': LaunchConfiguration('imu_gyro_axis'),
+                    'camera_tf_enable': LaunchConfiguration('camera_tf_enable'),
+                    'camera_x': LaunchConfiguration('camera_x'),
+                    'camera_y': LaunchConfiguration('camera_y'),
+                    'camera_z': LaunchConfiguration('camera_z'),
+                    'camera_roll': LaunchConfiguration('camera_roll'),
+                    'camera_pitch': LaunchConfiguration('camera_pitch'),
+                    'camera_yaw': LaunchConfiguration('camera_yaw'),
                 }.items(),
             )],
         ))
@@ -271,14 +278,23 @@ def generate_launch_description():
             'camera_device', default_value='/dev/video10',
             description='Device monochrome camera video node.'),
         DeclareLaunchArgument(
-            'camera_width', default_value='640',
-            description='Camera frame width.'),
+            'camera_width', default_value='320',
+            description='Camera frame width (QVGA).'),
         DeclareLaunchArgument(
-            'camera_height', default_value='480',
-            description='Camera frame height.'),
+            'camera_height', default_value='240',
+            description='Camera frame height (QVGA).'),
         DeclareLaunchArgument(
-            'camera_fps', default_value='60',
-            description='Camera capture FPS.'),
+            'camera_fps', default_value='15',
+            description='Camera output FPS after capture-side throttling.'),
+        DeclareLaunchArgument(
+            'camera_tf_enable', default_value='false',
+            description='Publish imu_link -> camera optical frame TF.'),
+        DeclareLaunchArgument('camera_x', default_value='0.0'),
+        DeclareLaunchArgument('camera_y', default_value='0.0'),
+        DeclareLaunchArgument('camera_z', default_value='0.0'),
+        DeclareLaunchArgument('camera_roll', default_value='0.0'),
+        DeclareLaunchArgument('camera_pitch', default_value='0.0'),
+        DeclareLaunchArgument('camera_yaw', default_value='0.0'),
         DeclareLaunchArgument(
             'start_adb_forward', default_value='true',
             description='Create and remove adb forward tcp:LOCAL->tcp:DEVICE.'),
