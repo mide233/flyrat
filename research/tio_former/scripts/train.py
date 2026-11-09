@@ -131,7 +131,9 @@ def main() -> int:
     clip = float(training_config.get("grad_clip", 1.0))
     window = int(data_config.get("window_frames", 64))
     stride = max(1, window // 2)
-    missing_ratios = augmentation.get("missing_ratios", [0.1, 0.3, 0.5])
+    missing_ratios = augmentation.get(
+        "missing_ratios", augmentation.get("missing_ratio", [0.1, 0.3, 0.5])
+    )
     exclude_scenes = [item for item in args.exclude_scenes.split(",") if item]
 
     train_set = SequenceWindows(
@@ -146,6 +148,9 @@ def main() -> int:
         max_sequences=args.limit_train,
         exclude_scenes=exclude_scenes or None,
         use_camera=args.camera,
+        view_dropout=float(augmentation.get("view_dropout_probability", 0.0)),
+        block_probability=float(augmentation.get("block_missing_probability", 0.0)),
+        camera_augment=bool(augmentation.get("camera_enabled", True)),
     )
     val_set = SequenceWindows(
         ROOT / args.processed,

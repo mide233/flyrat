@@ -65,10 +65,17 @@ def _augment_missing(
     *,
     probability: float,
     ratios: list[float],
+    view_dropout: float = 0.0,
+    block_probability: float = 0.0,
 ) -> None:
     if rng.random() > probability:
         return
     frames, views, height, width = tof.shape
+    if view_dropout > 0.0:
+        for view in range(views):
+            if rng.random() < view_dropout:
+                tof[:, view] = 0.0
+                weight[:, view] = 0.0
     ratio = float(rng.choice(ratios))
     zones = height * width
     count = max(1, int(round(ratio * zones)))
@@ -80,6 +87,37 @@ def _augment_missing(
             chosen = rng.choice(valid, size=min(count, valid.size), replace=False)
             tof[frame, view].reshape(-1)[chosen] = 0.0
             weight[frame, view].reshape(-1)[chosen] = 0.0
+    if block_probability > 0.0 and rng.random() < block_probability:
+        block_h = int(rng.integers(2, min(5, height) + 1))
+        block_w = int(rng.integers(2, min(5, width) + 1))
+        top = int(rng.integers(0, height - block_h + 1))
+        left = int(rng.integers(0, width - block_w + 1))
+        view = int(rng.integers(0, views))
+        tof[:, view, top : top + block_h, left : left + block_w] = 0.0
+        weight[:, view, top : top + block_h, left : left + block_w] = 0.0
+
+
+def _augment_camera(
+    camera: np.ndarray,
+    rng: np.random.Generator,
+    *,
+    brightness: float = 0.2,
+    contrast: float = 0.2,
+    gamma: float = 0.2,
+    noise: float = 0.03,
+) -> np.ndarray:
+    image = camera.astype(np.float32) / 255.0
+    if brightness > 0.0:
+        image = image + float(rng.uniform(-brightness, brightness))
+    if contrast > 0.0:
+        factor = float(rng.uniform(1.0 - contrast, 1.0 + contrast))
+        image = (image - 0.5) * factor + 0.5
+    if gamma > 0.0:
+        exponent = float(np.exp(rng.uniform(-gamma, gamma)))
+        image = np.clip(image, 1e-4, 1.0) ** exponent
+    if noise > 0.0:
+        image = image + rng.normal(0.0, noise, image.shape).astype(np.float32)
+    return np.clip(image, 0.0, 1.0)
 
 
 class SequenceWindows(Dataset):
@@ -108,6 +146,9 @@ class SequenceWindows(Dataset):
         scenes: list[str] | None = None,
         exclude_scenes: list[str] | None = None,
         use_camera: bool = False,
+        view_dropout: float = 0.0,
+        block_probability: float = 0.0,
+        camera_augment: bool = False,
     ) -> None:
         self.root = Path(root)
         self.window_frames = window_frames
@@ -117,6 +158,9 @@ class SequenceWindows(Dataset):
         self.missing_ratios = missing_ratios or [0.1, 0.3, 0.5]
         self.seed = seed
         self.use_camera = use_camera
+        self.view_dropout = view_dropout
+        self.block_probability = block_probability
+        self.camera_augment = camera_augment
         self.camera_size = (120, 160)
         self.skipped_short_sequences = 0
         self.files: list[Path] = []
@@ -235,6 +279,8 @@ class SequenceWindows(Dataset):
                 rng,
                 probability=self.missing_probability,
                 ratios=self.missing_ratios,
+                view_dropout=self.view_dropout,
+                block_probability=self.block_probability,
             )
 
         previous = np.empty_like(tof)
@@ -258,7 +304,11 @@ class SequenceWindows(Dataset):
                 camera = np.zeros((length, *self.camera_size), dtype=np.uint8)
             else:
                 camera = _decode_camera(camera_blob, camera_offset, start, end, self.camera_size)
-            item["camera"] = torch.from_numpy(camera).float().div_(255.0)
+            if self.augment and self.camera_augment:
+                camera = _augment_camera(
+                    camera, np.random.default_rng(self.seed + index + 7919)
+                ) * 255.0
+            item["camera"] = torch.from_numpy(camera.astype(np.float32)).div_(255.0)
         return item
 
 

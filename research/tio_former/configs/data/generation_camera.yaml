@@ -1,0 +1,71 @@
+# P1 camera pilot: v3.1 motion distribution + forward mono camera.
+generation:
+  target_seconds: 8000.0
+  workers: 3
+  resume: true
+  keep_raw: false
+  scene_weights:
+    corridor: 0.35
+    office: 0.3
+    pantry: 0.15
+    meeting_room: 0.2
+  canonical_ratio: 0.2
+  split_fractions:
+    train: 0.7
+    val: 0.15
+    test: 0.15
+  speed_bins:
+  - min: 0.1
+    max: 0.2
+    weight: 0.2
+  - min: 0.2
+    max: 0.3
+    weight: 0.3
+  - min: 0.3
+    max: 0.4
+    weight: 0.25
+  - min: 0.4
+    max: 0.5
+    weight: 0.15
+  - min: 0.5
+    max: 0.65
+    weight: 0.1
+  nominal_path_m:
+    train: 6.0
+    val: 6.0
+    test: 5.5
+  raw_duration_s: 20.0
+  duration_s:
+    train:
+    - 10.0
+    - 80.0
+    val:
+    - 10.0
+    - 80.0
+    test:
+    - 6.0
+    - 80.0
+  altitude_range:
+  - 0.6
+  - 2.2
+  max_acceleration_mps2: 12.0
+  vertical_jitter_m: 0.45
+  test_path_m:
+  - 4.0
+  - 7.0
+  test_waypoint_count:
+  - 5
+  - 9
+  test_waypoint_step_m:
+  - 0.6
+  - 1.1
+  attempts_per_sequence: 200
+  raw_dir: data_cam/raw
+  processed_dir: data_cam/processed
+  trajectory_dir: trajectories_cam
+  plan_path: data_cam/generation_plan.json
+  plan_report_path: data_cam/generation_plan.md
+  index_path: data_cam/index.csv
+  report_path: data_v3/report.md
+  sensors_config: configs/sim/sensors_v3.yaml
+  seed: 20261110
