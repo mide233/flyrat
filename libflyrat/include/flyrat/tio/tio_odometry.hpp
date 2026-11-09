@@ -27,6 +27,13 @@ struct TofGrid {
     std::array<float, 64> weight {};
 };
 
+// Forward mono camera frame, already resized and normalised to [0, 1].
+struct CameraFrame {
+    int width = 160;
+    int height = 120;
+    std::vector<float> gray;
+};
+
 struct Options {
     // TorchScript file produced by research/tio_former/scripts/export_tio.py.
     std::string model_path;
@@ -41,6 +48,10 @@ struct Options {
     // and are out of distribution; keep this at window_frames for real use.
     int warmup_frames = 64;
     double imu_buffer_seconds = 2.0;
+    // Optional forward mono camera branch (must match the exported model).
+    bool camera = false;
+    int camera_width = 160;
+    int camera_height = 120;
 };
 
 class TioOdometry {
@@ -58,6 +69,8 @@ public:
 
     // views must be ordered front, left, right, down (the training order).
     odometry::Result track(const std::vector<TofGrid>& views, double timestamp);
+    odometry::Result track(const std::vector<TofGrid>& views, double timestamp,
+        const CameraFrame* camera);
 
     void reset();
     void shutdown();

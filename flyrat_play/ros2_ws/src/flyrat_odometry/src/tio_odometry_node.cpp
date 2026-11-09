@@ -8,6 +8,7 @@
 // odometry node.  The model consumes four directional range images ordered
 // front, left, right, down plus 16 IMU samples per ToF frame.
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -32,6 +33,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <tf2_ros/transform_broadcaster.h>
@@ -123,6 +125,11 @@ public:
         trajectory_path_ = declare_parameter<std::string>("trajectory_path", "");
         tof_rate_hz_ = declare_parameter<double>("tof_rate_hz", 15.0);
         imu_buffer_seconds_ = declare_parameter<double>("imu_buffer_seconds", 2.0);
+        camera_enabled_ = declare_parameter<bool>("camera_enabled", false);
+        camera_width_ = declare_parameter<int>("camera_width", 160);
+        camera_height_ = declare_parameter<int>("camera_height", 120);
+        camera_topic_ = declare_parameter<std::string>(
+            "camera_topic", "/flyrat/sensors/camera/image_raw");
 
         if (model_path_.empty()) {
             throw std::runtime_error("model_path is required");
@@ -143,6 +150,9 @@ public:
         options.warmup_frames = warmup_frames;
         options.tof_rate_hz = tof_rate_hz_;
         options.imu_buffer_seconds = imu_buffer_seconds_;
+        options.camera = camera_enabled_;
+        options.camera_width = camera_width_;
+        options.camera_height = camera_height_;
         RCLCPP_INFO(get_logger(), "loading TIO-Former model %s", model_path_.c_str());
         odometry_ = std::make_unique<TioOdometry>(options);
 
@@ -162,6 +172,13 @@ public:
         imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
             "/flyrat/sensors/imu", rclcpp::SensorDataQoS(),
             std::bind(&TioOdometryNode::on_imu, this, std::placeholders::_1));
+        if (camera_enabled_) {
+            camera_sub_ = create_subscription<sensor_msgs::msg::Image>(
+                camera_topic_, rclcpp::SensorDataQoS(),
+                std::bind(&TioOdometryNode::on_camera, this, std::placeholders::_1));
+            RCLCPP_INFO(get_logger(), "camera branch enabled: %s (%dx%d)",
+                camera_topic_.c_str(), camera_width_, camera_height_);
+        }
 
         const std::array<std::string, 4> defaults {
             "/flyrat/sensors/tof_0", "/flyrat/sensors/tof_1",
@@ -243,7 +260,39 @@ private:
     struct PendingFrame {
         std::array<TofGrid, 4> views;
         rclcpp::Time stamp;
+        CameraFrame camera;
+        bool has_camera = false;
     };
+
+    void on_camera(const sensor_msgs::msg::Image::ConstSharedPtr& message)
+    {
+        if (message->encoding != "mono8" && message->encoding != "8UC1") {
+            return;
+        }
+        const int source_width = static_cast<int>(message->width);
+        const int source_height = static_cast<int>(message->height);
+        if (source_width <= 0 || source_height <= 0 ||
+            message->step < static_cast<std::uint32_t>(source_width)) {
+            return;
+        }
+        CameraFrame frame;
+        frame.width = camera_width_;
+        frame.height = camera_height_;
+        frame.gray.resize(static_cast<std::size_t>(camera_width_ * camera_height_));
+        for (int y = 0; y < camera_height_; ++y) {
+            const int source_y = std::min(source_height - 1, y * source_height / camera_height_);
+            const std::uint8_t* row = message->data.data() + source_y * message->step;
+            for (int x = 0; x < camera_width_; ++x) {
+                const int source_x = std::min(source_width - 1, x * source_width / camera_width_);
+                frame.gray[static_cast<std::size_t>(y * camera_width_ + x)] =
+                    static_cast<float>(row[source_x]) / 255.0F;
+            }
+        }
+        std::lock_guard<std::mutex> lock(camera_mutex_);
+        latest_camera_ = std::move(frame);
+        have_camera_ = true;
+        camera_count_.fetch_add(1);
+    }
 
     void on_imu(const sensor_msgs::msg::Imu::ConstSharedPtr& message)
     {
@@ -290,6 +339,13 @@ private:
                 return;
             }
         }
+        if (camera_enabled_) {
+            std::lock_guard<std::mutex> camera_lock(camera_mutex_);
+            if (have_camera_) {
+                frame.camera = latest_camera_;
+                frame.has_camera = true;
+            }
+        }
         last_tof_stamp_.store(stamp);
         frame.stamp = rclcpp::Time(first->header.stamp);
         input_frames_.fetch_add(1);
@@ -321,7 +377,7 @@ private:
                 std::lock_guard<std::mutex> lock(odometry_mutex_);
                 result = odometry_->track(std::vector<TofGrid>(
                                               frame.views.begin(), frame.views.end()),
-                    frame.stamp.seconds());
+                    frame.stamp.seconds(), frame.has_camera ? &frame.camera : nullptr);
             } catch (const std::exception& error) {
                 failed_frames_.fetch_add(1);
                 RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 2000,
@@ -489,6 +545,15 @@ private:
     std::atomic<std::uint64_t> failed_frames_ { 0 };
     std::atomic<std::uint64_t> imu_count_ { 0 };
     std::atomic<double> last_imu_stamp_ { 0.0 };
+    std::atomic<std::uint64_t> camera_count_ { 0 };
+    bool camera_enabled_ = false;
+    int camera_width_ = 160;
+    int camera_height_ = 120;
+    std::string camera_topic_;
+    std::mutex camera_mutex_;
+    CameraFrame latest_camera_;
+    bool have_camera_ = false;
+    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr camera_sub_;
 
     message_filters::Subscriber<Tof> tof_subs_[4];
     std::unique_ptr<message_filters::Synchronizer<TofPolicy>> sync_;

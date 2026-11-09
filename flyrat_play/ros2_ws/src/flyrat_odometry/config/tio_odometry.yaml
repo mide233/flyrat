@@ -12,6 +12,12 @@ tio_odometry_node:
     trajectory_path: ""
     tof_rate_hz: 15.0
     imu_buffer_seconds: 2.0
+    # Forward mono camera branch. Must be true only for a camera-enabled
+    # TorchScript export (metadata "camera": true).
+    camera_enabled: false
+    camera_width: 160
+    camera_height: 120
+    camera_topic: /flyrat/sensors/camera/image_raw
     # View index -> sensor id. The model expects front, left, right, down.
     # The airframe nose is the old rear-ToF end, so after the 180-degree
     # redefinition the physical ids from INT/LPn wiring are:

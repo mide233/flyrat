@@ -45,6 +45,7 @@ struct TioOdometry::Impl {
     std::deque<std::array<float, 4 * 64>> tof_window;
     std::deque<std::array<float, 4 * 64>> weight_window;
     std::deque<std::array<float, 16 * kChannels>> imu_window;
+    std::deque<std::vector<float>> camera_window;
 
     Eigen::Matrix3d rotation = Eigen::Matrix3d::Identity();
     Eigen::Vector3d position = Eigen::Vector3d::Zero();
@@ -138,6 +139,38 @@ struct TioOdometry::Impl {
         return output;
     }
 
+    torch::Tensor cameraTensor() const
+    {
+        const int width = options.camera_width;
+        const int height = options.camera_height;
+        const int cells = width * height;
+        auto tensor = torch::zeros(
+            { 1, options.window_frames, height, width },
+            torch::TensorOptions().dtype(torch::kFloat32));
+        if (!options.camera) {
+            return tensor;
+        }
+        float* destination = tensor.data_ptr<float>();
+        const int frames = static_cast<int>(camera_window.size());
+        const int offset = (options.window_frames - frames) * cells;
+        for (int frame = 0; frame < frames; ++frame) {
+            std::memcpy(destination + offset + frame * cells, camera_window[frame].data(),
+                static_cast<std::size_t>(cells) * sizeof(float));
+        }
+        return tensor;
+    }
+
+    torch::Tensor shiftedCameraTensor(const torch::Tensor& input) const
+    {
+        auto output = torch::zeros_like(input);
+        output.index_put_({ 0, 0 }, input.index({ 0, 0 }));
+        if (input.size(1) > 1) {
+            output.index_put_({ 0, torch::indexing::Slice(1, torch::indexing::None) },
+                input.index({ 0, torch::indexing::Slice(0, -1) }));
+        }
+        return output;
+    }
+
     torch::Tensor imuTensor() const
     {
         const int frames = static_cast<int>(imu_window.size());
@@ -172,6 +205,10 @@ TioOdometry::TioOdometry(Options options)
         impl_->options.warmup_frames > impl_->options.window_frames) {
         throw odometry::OdometryError(
             "TIO warmup_frames must be in [1, window_frames]");
+    }
+    if (impl_->options.camera &&
+        (impl_->options.camera_width <= 0 || impl_->options.camera_height <= 0)) {
+        throw odometry::OdometryError("TIO camera dimensions must be positive");
     }
     try {
         impl_->module = torch::jit::load(impl_->options.model_path);
@@ -209,6 +246,12 @@ void TioOdometry::addImu(const odometry::ImuSample& sample)
 
 odometry::Result TioOdometry::track(const std::vector<TofGrid>& views, double timestamp)
 {
+    return track(views, timestamp, nullptr);
+}
+
+odometry::Result TioOdometry::track(
+    const std::vector<TofGrid>& views, double timestamp, const CameraFrame* camera)
+{
     std::lock_guard<std::mutex> lock(impl_->mutex);
     if (impl_->shutdown) {
         throw odometry::OdometryError("TIO odometry has been shut down");
@@ -232,10 +275,23 @@ odometry::Result TioOdometry::track(const std::vector<TofGrid>& views, double ti
     impl_->tof_window.push_back(range);
     impl_->weight_window.push_back(weight_input);
     impl_->imu_window.push_back(impl_->makeImuWindow_locked(timestamp));
+    if (impl_->options.camera) {
+        const int cells = impl_->options.camera_width * impl_->options.camera_height;
+        if (camera != nullptr && camera->width == impl_->options.camera_width &&
+            camera->height == impl_->options.camera_height &&
+            static_cast<int>(camera->gray.size()) == cells) {
+            impl_->camera_window.emplace_back(camera->gray.begin(), camera->gray.end());
+        } else {
+            impl_->camera_window.emplace_back(static_cast<std::size_t>(cells), 0.0F);
+        }
+    }
     while (static_cast<int>(impl_->tof_window.size()) > impl_->options.window_frames) {
         impl_->tof_window.pop_front();
         impl_->weight_window.pop_front();
         impl_->imu_window.pop_front();
+        if (!impl_->camera_window.empty()) {
+            impl_->camera_window.pop_front();
+        }
     }
     impl_->last_tof_stamp = timestamp;
     impl_->have_last_tof = true;
@@ -258,7 +314,16 @@ odometry::Result TioOdometry::track(const std::vector<TofGrid>& views, double ti
     torch::Tensor delta_phi;
     try {
         torch::NoGradGuard no_grad;
-        const auto output = impl_->module.forward({ tof, imu, weight, previous_tof, previous_weight });
+        torch::jit::IValue output;
+        if (impl_->options.camera) {
+            const auto camera_tensor = impl_->cameraTensor();
+            const auto previous_camera = impl_->shiftedCameraTensor(camera_tensor);
+            output = impl_->module.forward(
+                { tof, imu, weight, previous_tof, previous_weight, camera_tensor, previous_camera });
+        } else {
+            output = impl_->module.forward(
+                { tof, imu, weight, previous_tof, previous_weight });
+        }
         const auto tuple = output.toTuple();
         delta_p = tuple->elements()[0].toTensor();
         delta_phi = tuple->elements()[1].toTensor();
