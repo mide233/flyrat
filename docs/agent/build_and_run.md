@@ -524,7 +524,7 @@ camera_height=480
 camera_fps=60          # 请求值；主机实测约 30 Hz
 record=false           # true 时用 ros2 bag record 录传感器
 record_path=           # 空则 /tmp/flyrat_bags/<时间戳>
-record_topics=/flyrat/sensors/imu /flyrat/sensors/camera/image_raw
+record_topics=/flyrat/sensors/imu /flyrat/sensors/camera/image_raw /flyrat/sensors/tof_0 /flyrat/sensors/tof_1 /flyrat/sensors/tof_2 /flyrat/sensors/tof_3
 record_imu_only=false  # true 时只录 IMU（Allan 方差）
 record_storage=mcap
 record_duration=0      # 秒数或 30m/3h；>0 时倒计时并自动停止录制
@@ -554,7 +554,9 @@ trajectory_path=
 .script/bringup_real.sh start_odometry:=false camera_fps:=20 record:=true
 ```
 
-默认写到 `/tmp/flyrat_bags/<时间戳>`，用 `record_path:=/path/to/bag` 指定；
+默认会录 IMU、相机和 4 路 ToF；TIO-Former 的回放必须包含
+`/flyrat/sensors/tof_0..3`，否则只有 IMU/相机，无法复现里程计。默认写到
+`/tmp/flyrat_bags/<时间戳>`，用 `record_path:=/path/to/bag` 指定；
 `record_duration` 结束后自动给录制进程发 SIGTERM 并写完 MCAP；录制停止后
 bringup 仍在运行，按 `Ctrl-C` 结束。`ros2 bag info /path/to/bag` 可检查消息数和
 频率。`record:=true` 不会传给 `bringup.launch.py`，它只是脚本参数。
