@@ -16,7 +16,8 @@
 | 实机 IMU + ToF 转发/ROS 接收 | **已验证** | 4 路 ToF、200 Hz IMU 可稳定进入 ROS 2 |
 | TIO-Former C++/ROS 推理链路 | **已验证能跑** | 进入 `TRACKING`，发布 odometry/path/status/TF |
 | TIO-Former 实机静态零漂 | **未通过（旧布局）** | 2026-11-08 旧映射下静止放桌面 20 s 漂移约 0.98 m |
-| TIO-Former v3.1 仿真 | ATE 0.0879 ± 0.0025 m | 3 seeds，141 条 test，四个 Gazebo 场景；未实机验证 |
+| TIO-Former v3.1 仿真 | ATE 0.0879 ± 0.0025 m | 3 seeds，141 条 test，四个 Gazebo 场景 |
+| TIO-Former v3.1 实机部署 | **模型已加载并出首帧位姿** | 2026-11-09，seed1 TorchScript；桌面漂移仍需净空复测 |
 | 单目黑白相机转发 | **已验证** | `/dev/video10`，640x480 MJPEG，ROS 发布 mono8，主机约 30 Hz |
 | 旧立体 `flyrat::odometry` 后端 | **legacy 骨架** | 只输出 `NOT_INITIALIZED`，无有效位姿 |
 | 机载 RK3566 部署 | **未验证** | 目前只在开发机用 CPU libtorch 跑通 |

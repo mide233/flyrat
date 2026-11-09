@@ -190,9 +190,16 @@ front/left/right/down，节点用 `sensor_order: [1, 3, 2, 0]` 映射为：
 `start_slam`。单目相机默认 `/dev/video10`、640x480@60，可用
 `camera_device/camera_width/camera_height/camera_fps` 覆盖。
 
-### 4.3 真机验证现状（2026-11-08）
+### 4.3 真机验证现状
 
-已用 RK3566 + 4×VL53L5CX 做实机链路测试：
+**2026-11-09：v3.1 模型已部署到实机链路。** 导出源为
+`research/tio_former/checkpoints_v3/main/seed1/best.pt`（epoch 57），
+TorchScript 写入 `libflyrat/models/tio_former_window64.pt`（4.77 MB）。
+`tio_bench` 80 帧平均约 9.4 ms，`test_tio_api` 通过；`bringup_real.sh`
+实机启动时节点成功加载新模型、打印 `front/left/right/down <- 1/3/2/0`
+映射并发布首帧位姿。仿真测试结果为 ATE 0.0848 m / EDR 2.58%。
+
+2026-11-08 已用 RK3566 + 4×VL53L5CX 做实机链路测试：
 
 - 设备端 10 s 实测：传感器 0/1/2/3 分别为 15.1/15.2/15.0/14.8 Hz，
   0 读取错误，单帧读取约 4.7 ms；
@@ -204,6 +211,9 @@ front/left/right/down，节点用 `sensor_order: [1, 3, 2, 0]` 映射为：
   主机实测约 30 Hz；
 - 旧布局下无人机静止放桌面 20 s 漂移约 **0.98 m**，不能用于飞行；新布局尚未
   做净空静止复测。
+- 2026-11-09 v3.1 桌面链路复测中，首帧位姿约在 10.7 s 出现，随后约 8 s
+  的 TF 位移约 **1.04 m**；当时是否完全静止未记录，不能据此判断新模型精度，
+  仍需净空静止和匀速直线测试。
 
 主要原因是下视传感器距桌面 0–5 mm、当时模型 front 槽位接的是后向数据，
 以及仿真到实机的域差异。机头重定义和新映射已修正前后语义，但仍需抬到

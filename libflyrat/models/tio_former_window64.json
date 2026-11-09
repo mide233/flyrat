@@ -1,5 +1,5 @@
 {
-  "source_checkpoint": "research/tio_former/checkpoints/main_imu/seed0/best.pt",
+  "source_checkpoint": "research/tio_former/checkpoints_v3/main/seed1/best.pt",
   "window_frames": 64,
   "views": 4,
   "grid_size": 8,
