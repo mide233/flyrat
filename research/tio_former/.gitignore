@@ -3,6 +3,8 @@
 /trajectories_v3/
 /data_cam/
 /trajectories_cam/
+/runs_cam/
+/checkpoints_cam/
 /assets/
 /runs/
 /runs_v3/
