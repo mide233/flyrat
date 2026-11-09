@@ -1,0 +1,59 @@
+# TIO-Former simulation sensor configuration.
+
+body_frame: base_link
+world_frame: world
+
+tof:
+  # The paper uses six TOFSense-M sensors. FlyRat has four VL53L5CX units.
+  views: [front, left, right, down]
+  # Mount poses in the FLU body frame: [x, y, z, roll, pitch, yaw] (radians).
+  # The sensor optical axis is +x; yaw +90 deg points it to body +y,
+  # yaw -90 deg to body -y, pitch +90 deg to body -z.
+  mounts:
+    front: [0.06, 0.0, 0.0, 0.0, 0.0, 0.0]
+    left: [0.0, 0.06, 0.0, 0.0, 0.0, 1.5707963267948966]
+    right: [0.0, -0.06, 0.0, 0.0, 0.0, -1.5707963267948966]
+    down: [0.0, 0.0, -0.06, 0.0, 1.5707963267948966, 0.0]
+  # Rendering resolution before aggregation to the physical 8x8 grid.
+  render_width: 64
+  render_height: 64
+  grid_width: 8
+  grid_height: 8
+  horizontal_fov: 0.7853981633974483
+  vertical_fov: 0.7853981633974483
+  near_m: 0.015
+  far_m: 4.0
+  rate_hz: 15.0
+
+imu:
+  rate_hz: 200.0
+  samples_per_tof: 16
+  # Noise densities start from the FlyRat Kalibr calibration but are raised
+  # deliberately: ideal analytic IMU is unrealistically clean and makes an
+  # IMU-only baseline near-perfect.  These values emulate a low-cost MEMS IMU
+  # with noticeable bias drift so the ToF branch has a realistic role.
+  noise_gyro: 4.0e-04
+  noise_acc: 0.02
+  gyro_walk: 5.0e-05
+  acc_walk: 0.0015
+  init_bias_acc: 0.2
+  init_bias_gyro: 0.01
+  gravity: [0.0, 0.0, -9.81]
+  time_offset_s: 0.0
+
+tof_sim:
+  ar1_gamma: 0.9
+  ar1_sigma_m: 0.01
+  valid_target_status: [5, 9]
+  # The real VL53L5CX driver only exposes status 5/9.  Do not synthesise the
+  # paper's TOFSense-M status 10; it would not occur at inference time.
+  new_target_status: 10
+  new_target_probability: 0.0
+  invalid_status: 0
+  new_target_weight: 0.5
+  valid_weight: 1.0
+  invalid_weight: 0.0
+  # Probability that a valid return is lost because of specular reflection.
+  reflectivity_dropout: 0.02
+  # Probability of an independent dropout per zone.
+  dropout_probability: 0.03

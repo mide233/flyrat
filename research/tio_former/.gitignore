@@ -1,7 +1,11 @@
 /data/
+/data_v3/
+/trajectories_v3/
 /assets/
 /runs/
+/runs_v3/
 /checkpoints/
+/checkpoints_v3/
 /.venv/
 /.venv-cpu/
 __pycache__/

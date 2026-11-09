@@ -9,6 +9,7 @@ from tio_former.sim.trajectory import (
     canonical_trajectory,
     load_csv,
     random_trajectory,
+    retime_to_speed,
 )
 
 BOUNDS = {"x": [-5.0, 5.0], "y": [-3.0, 3.0], "z": [0.15, 2.5]}
@@ -74,6 +75,23 @@ def test_random_trajectory_reproducible() -> None:
     )
     np.testing.assert_allclose(first.position, second.position)
     assert first.duration == second.duration == 4.0
+
+
+def test_retime_to_speed_preserves_path() -> None:
+    trajectory = canonical_trajectory(
+        "straight",
+        BOUNDS,
+        sample_rate_hz=100.0,
+        speed_mps=0.8,
+        altitude_m=1.0,
+        clearance_m=0.3,
+        radius_m=2.0,
+        duration_s=5.0,
+    )
+    retimed = retime_to_speed(trajectory, 0.5, sample_rate_hz=100.0)
+    assert abs(retimed.path_length - trajectory.path_length) < 0.02
+    assert abs(retimed.duration - trajectory.path_length / 0.5) < 0.05
+    assert abs(retimed.path_length / retimed.duration - 0.5) < 0.01
 
 
 def test_trajectory_rejects_obstacle() -> None:

@@ -1,0 +1,61 @@
+# v3.1 dataset generation.
+#
+# Main change from v2: every split is generated from the same speed/step
+# distribution, instead of deriving speed indirectly from split-specific
+# duration ranges.  This removes the train/test speed shift that caused the
+# model to collapse to a nearly constant step length.
+
+generation:
+  target_seconds: 20000.0
+  workers: 3
+  resume: true
+  keep_raw: false
+  scene_weights:
+    corridor: 0.35
+    office: 0.30
+    pantry: 0.15
+    meeting_room: 0.20
+  canonical_ratio: 0.20
+  split_fractions:
+    train: 0.70
+    val: 0.15
+    test: 0.15
+
+  # Speed is sampled from this common distribution for every split.  The
+  # trajectory is time-scaled to the sampled average speed after generation.
+  speed_bins:
+    - {min: 0.10, max: 0.20, weight: 0.20}
+    - {min: 0.20, max: 0.30, weight: 0.30}
+    - {min: 0.30, max: 0.40, weight: 0.25}
+    - {min: 0.40, max: 0.50, weight: 0.15}
+    - {min: 0.50, max: 0.65, weight: 0.10}
+  nominal_path_m:
+    train: 6.0
+    val: 6.0
+    test: 5.5
+  raw_duration_s: 20.0
+  # Final duration bounds after retiming.  A 4 m test path at 0.10 m/s is 40 s;
+  # a 20 m training path at 0.10 m/s is 200 s and will be rejected rather than
+  # silently producing an out-of-distribution speed.
+  duration_s:
+    train: [10.0, 80.0]
+    val: [10.0, 80.0]
+    test: [6.0, 80.0]
+  altitude_range: [0.6, 2.2]
+  max_acceleration_mps2: 12.0
+  vertical_jitter_m: 0.45
+
+  test_path_m: [4.0, 7.0]
+  test_waypoint_count: [5, 9]
+  test_waypoint_step_m: [0.6, 1.1]
+  attempts_per_sequence: 200
+
+  raw_dir: data_v3/raw
+  processed_dir: data_v3/processed
+  trajectory_dir: trajectories_v3
+  plan_path: data_v3/generation_plan.json
+  plan_report_path: data_v3/generation_plan.md
+  index_path: data_v3/index.csv
+  report_path: data_v3/report.md
+  sensors_config: configs/sim/sensors_v3.yaml
+  seed: 20261108

@@ -16,7 +16,7 @@ from typing import Any, Iterable
 
 import numpy as np
 
-from tio_former.utils.se3 import yaw_to_quat
+from tio_former.utils.se3 import quat_slerp, yaw_to_quat
 
 _TWO_PI = 2.0 * np.pi
 
@@ -67,6 +67,53 @@ def load_csv(path: str | Path) -> Trajectory:
     if data.shape[1] != 8:
         raise ValueError(f"{path}: expected 8 columns, got {data.shape[1]}")
     return Trajectory(data[:, 0], data[:, 1:4], data[:, 4:8])
+
+
+def retime_to_speed(
+    trajectory: Trajectory,
+    target_speed_mps: float,
+    *,
+    sample_rate_hz: float = 100.0,
+) -> Trajectory:
+    """Stretch a trajectory to an exact average speed without changing its path.
+
+    The input path is preserved; only the time parameterisation changes.  This
+    is used by ``generate_dataset.py`` to make every split share one speed
+    distribution instead of relying on the duration ranges of the raw
+    generator.
+    """
+    if target_speed_mps <= 0.0:
+        raise ValueError("target_speed_mps must be positive")
+    if sample_rate_hz <= 0.0:
+        raise ValueError("sample_rate_hz must be positive")
+    path_length = trajectory.path_length
+    if path_length <= 1e-6:
+        raise ValueError("cannot retime a zero-length trajectory")
+
+    duration = path_length / target_speed_mps
+    count = max(2, int(round(duration * sample_rate_hz)) + 1)
+    t = np.linspace(0.0, duration, count)
+    source_t = trajectory.t - trajectory.t[0]
+    old_duration = float(source_t[-1])
+    if old_duration <= 0.0:
+        raise ValueError("trajectory has zero duration")
+    query = (t / duration) * old_duration
+    position = np.column_stack(
+        [np.interp(query, source_t, trajectory.position[:, axis]) for axis in range(3)]
+    )
+
+    indices = np.searchsorted(source_t, query, side="right") - 1
+    indices = np.clip(indices, 0, source_t.size - 2)
+    denominator = source_t[indices + 1] - source_t[indices]
+    alpha = np.where(denominator > 0.0, (query - source_t[indices]) / denominator, 0.0)
+    quat = np.stack(
+        [
+            quat_slerp(trajectory.quat[i], trajectory.quat[i + 1], float(a))
+            for i, a in zip(indices, alpha)
+        ],
+        axis=0,
+    )
+    return Trajectory(t, position, quat)
 
 
 def _bounds(scene_bounds: dict[str, Iterable[float]]) -> tuple[np.ndarray, np.ndarray]:

@@ -89,6 +89,13 @@ def test_simulate_frame_shapes_and_statuses() -> None:
     assert np.all(result["weight"] > 0.0)
 
 
+def test_status_ten_disabled_by_default() -> None:
+    config = _tof_config()
+    config.pop("new_target_probability")
+    result = simulate_frame(np.full((8, 8), 2.0), np.random.default_rng(0), config)
+    assert 10 not in set(np.unique(result["status"]).tolist())
+
+
 def test_missing_mask_and_causal_imputation() -> None:
     rng = np.random.default_rng(0)
     ranges = np.full((2, 8, 8), 2.0)

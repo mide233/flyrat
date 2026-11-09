@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from tio_former.sim.scene import scene_obstacles  # noqa: E402
-from tio_former.sim.trajectory import generate_sequence  # noqa: E402
+from tio_former.sim.trajectory import generate_sequence, retime_to_speed  # noqa: E402
 from tio_former.utils.config import load_yaml  # noqa: E402
 from tio_former.utils.logging import get_logger  # noqa: E402
 
@@ -45,6 +45,8 @@ class SequenceSpec:
     kind: str
     seed: int
     duration_s: float
+    target_speed_mps: float = 0.0
+    speed_bin: str = ""
     csv: str = ""
     path_length_m: float = 0.0
     shape: str | None = None
@@ -55,6 +57,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--generation", default=str(ROOT / "configs/data/generation.yaml"))
     parser.add_argument("--scenes", default=str(ROOT / "configs/sim/scenes.yaml"))
     parser.add_argument("--trajectory", default=str(ROOT / "configs/sim/trajectory.yaml"))
+    parser.add_argument("--sensors", default=str(ROOT / "configs/sim/sensors_v3.yaml"))
     parser.add_argument("--target-seconds", type=float, default=None)
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--split", choices=["train", "val", "test"], default=None)
@@ -85,6 +88,40 @@ def _scene_seconds(config: dict[str, Any], scenes: list[str], split_seconds: flo
     return {scene: split_seconds * value / total for scene, value in raw.items()}
 
 
+def _speed_bins(generation: dict[str, Any]) -> list[dict[str, float]]:
+    raw = generation.get("speed_bins", [])
+    if not raw:
+        return []
+    normalised: list[dict[str, float]] = []
+    for entry in raw:
+        low = float(entry["min"])
+        high = float(entry["max"])
+        weight = float(entry.get("weight", 1.0))
+        if not (0.0 < low < high):
+            raise ValueError(f"invalid speed bin {entry!r}")
+        if weight <= 0.0:
+            continue
+        normalised.append({"min": low, "max": high, "weight": weight})
+    total = sum(entry["weight"] for entry in normalised)
+    if total <= 0.0:
+        raise ValueError("speed_bins weights must sum to a positive value")
+    for entry in normalised:
+        entry["weight"] /= total
+    return normalised
+
+
+def _sample_speed(rng: np.random.Generator, bins: list[dict[str, float]]) -> tuple[float, str]:
+    draw = float(rng.random())
+    cumulative = 0.0
+    for entry in bins:
+        cumulative += entry["weight"]
+        if draw <= cumulative:
+            speed = float(rng.uniform(entry["min"], entry["max"]))
+            return speed, f"{entry['min']:.2f}-{entry['max']:.2f}"
+    entry = bins[-1]
+    return float(rng.uniform(entry["min"], entry["max"])), f"{entry['min']:.2f}-{entry['max']:.2f}"
+
+
 def _plan_specs(
     config: dict[str, Any],
     scene_config: dict[str, Any],
@@ -104,6 +141,8 @@ def _plan_specs(
         scene_names = [scene_filter]
     base_seed = int(generation.get("seed", 0))
     durations = generation["duration_s"]
+    speed_bins = _speed_bins(generation)
+    nominal_paths = generation.get("nominal_path_m", {})
     canonical_ratio = float(generation.get("canonical_ratio", 0.2))
     attempts = int(generation.get("attempts_per_sequence", 80))
     test_path_range = [float(v) for v in generation.get("test_path_m", [4.0, 7.0])]
@@ -122,7 +161,13 @@ def _plan_specs(
             index = 0
             while elapsed < scene_budget:
                 duration_range = durations[split]
-                duration = float(rng.uniform(*duration_range))
+                if speed_bins:
+                    target_speed, speed_bin = _sample_speed(rng, speed_bins)
+                    nominal_path = float(nominal_paths.get(split, 6.0))
+                    duration = nominal_path / target_speed
+                else:
+                    target_speed, speed_bin = 0.0, ""
+                    duration = float(rng.uniform(*duration_range))
                 if smoke:
                     duration = 8.0
                 kind = "canonical" if rng.random() < canonical_ratio else "random"
@@ -134,6 +179,8 @@ def _plan_specs(
                     kind=kind,
                     seed=seed,
                     duration_s=duration,
+                    target_speed_mps=target_speed,
+                    speed_bin=speed_bin,
                 )
                 specs.append(spec)
                 elapsed += duration
@@ -156,10 +203,17 @@ def _make_trajectory(
     test_path_range: list[float],
     test_waypoint_count: list[int],
     test_waypoint_step_m: list[float],
+    trajectory_root: Path,
+    raw_duration_s: float,
+    duration_range: list[float],
+    altitude_range: list[float] | None,
+    vertical_jitter_m: float,
+    max_acceleration_mps2: float,
+    sample_rate_hz: float,
 ) -> SequenceSpec:
     scene = scene_config["scenes"][spec.scene]
     obstacles = scene_obstacles(spec.scene, scene)
-    trajectory_dir = ROOT / "data/trajectories" / spec.split / spec.scene
+    trajectory_dir = trajectory_root / spec.split / spec.scene
     trajectory_dir.mkdir(parents=True, exist_ok=True)
     last_error: Exception | None = None
     attempts = max(1, attempts)
@@ -167,7 +221,9 @@ def _make_trajectory(
         for attempt in range(attempts):
             rng = np.random.default_rng(spec.seed + attempt * 1009 + (0 if kind == "canonical" else 7919))
             shape = None
-            duration = spec.duration_s
+            altitude = None
+            if altitude_range:
+                altitude = float(rng.uniform(altitude_range[0], altitude_range[1]))
             if kind == "canonical":
                 shapes = trajectory_config.get("canonical", {}).get(
                     "shapes", ["circle", "figure_eight", "square", "straight"]
@@ -179,27 +235,60 @@ def _make_trajectory(
                     scene["bounds"],
                     trajectory_config,
                     kind=kind,
-                    duration_s=duration,
+                    duration_s=raw_duration_s,
                     shape=shape,
                     obstacles=obstacles,
+                    altitude_m=altitude,
+                    vertical_jitter_m=vertical_jitter_m,
                     waypoint_count=test_waypoint_count if spec.split == "test" else None,
                     waypoint_step_m=test_waypoint_step_m if spec.split == "test" else None,
                     attempts=1,
                 )
+                if spec.split == "test":
+                    path_length = trajectory.path_length
+                    if not (test_path_range[0] <= path_length <= test_path_range[1]):
+                        last_error = ValueError(
+                            f"test path {path_length:.2f} m outside {test_path_range}"
+                        )
+                        continue
+                if spec.target_speed_mps > 0.0:
+                    trajectory = retime_to_speed(
+                        trajectory,
+                        spec.target_speed_mps,
+                        sample_rate_hz=sample_rate_hz,
+                    )
+                if not (duration_range[0] <= trajectory.duration <= duration_range[1]):
+                    last_error = ValueError(
+                        f"duration {trajectory.duration:.2f} s outside {duration_range}"
+                    )
+                    continue
+                if len(trajectory.position) >= 3:
+                    dt = float(np.median(np.diff(trajectory.t)))
+                    accel = np.linalg.norm(np.diff(trajectory.position, n=2, axis=0), axis=1) / max(
+                        dt * dt, 1e-9
+                    )
+                    peak = float(np.max(accel))
+                    if peak > max_acceleration_mps2:
+                        last_error = ValueError(
+                            f"peak acceleration {peak:.2f} m/s^2 exceeds {max_acceleration_mps2}"
+                        )
+                        continue
+                if spec.target_speed_mps > 0.0:
+                    actual_speed = trajectory.path_length / max(trajectory.duration, 1e-9)
+                    error = abs(actual_speed / spec.target_speed_mps - 1.0)
+                    if error > 0.05:
+                        last_error = ValueError(
+                            f"retimed speed error {error:.3f} exceeds 0.05"
+                        )
+                        continue
             except ValueError as exc:
                 last_error = exc
                 continue
-            if spec.split == "test":
-                path_length = trajectory.path_length
-                if not (test_path_range[0] <= path_length <= test_path_range[1]):
-                    last_error = ValueError(
-                        f"test path {path_length:.2f} m outside {test_path_range}"
-                    )
-                    continue
             path = trajectory_dir / f"{spec.seq_id}.csv"
             trajectory.to_csv(path)
             spec.csv = str(path)
             spec.kind = kind
+            spec.duration_s = float(trajectory.duration)
             spec.path_length_m = float(trajectory.path_length)
             spec.shape = shape
             return spec
@@ -229,6 +318,7 @@ def _run_one(
     overwrite: bool,
     keep_raw: bool,
     resume: bool,
+    sensors_config: str,
 ) -> dict[str, Any]:
     raw_path, processed_path = _sequence_paths(config, spec)
     if resume and processed_path.exists() and not overwrite:
@@ -277,6 +367,8 @@ def _run_one(
             spec.seq_id,
             "--seed",
             str(spec.seed),
+            "--sensors-config",
+            sensors_config,
         ],
         timeout=timeout,
     )
@@ -347,6 +439,15 @@ def main() -> int:
         sum(spec.duration_s for spec in specs),
     )
 
+    trajectory_root = ROOT / generation.get("trajectory_dir", "data/trajectories")
+    raw_duration_s = float(generation.get("raw_duration_s", 20.0))
+    altitude_range = generation.get("altitude_range")
+    if altitude_range is not None:
+        altitude_range = [float(v) for v in altitude_range]
+    max_acceleration = float(generation.get("max_acceleration_mps2", 12.0))
+    sample_rate_hz = float(trajectory_config.get("trajectory", {}).get("sample_rate_hz", 100.0))
+    sensors_config = str((ROOT / generation.get("sensors_config", args.sensors)).resolve())
+
     failures: list[str] = []
     made: list[SequenceSpec] = []
     for index, spec in enumerate(specs, start=1):
@@ -362,6 +463,13 @@ def main() -> int:
                     test_waypoint_step_m=[
                         float(v) for v in generation.get("test_waypoint_step_m", [0.3, 0.7])
                     ],
+                    trajectory_root=trajectory_root,
+                    raw_duration_s=raw_duration_s,
+                    duration_range=[float(v) for v in generation["duration_s"][spec.split]],
+                    altitude_range=altitude_range,
+                    vertical_jitter_m=float(generation.get("vertical_jitter_m", 0.15)),
+                    max_acceleration_mps2=max_acceleration,
+                    sample_rate_hz=sample_rate_hz,
                 )
             )
         except ValueError as exc:
@@ -369,7 +477,8 @@ def main() -> int:
             failures.append(spec.seq_id)
     logger.info("generated %d trajectories (%d failures)", len(made), len(failures))
 
-    plan_path = ROOT / "data/generation_plan.json"
+    plan_path = ROOT / generation.get("plan_path", "data/generation_plan.json")
+    plan_report_path = ROOT / generation.get("plan_report_path", "data/generation_plan.md")
     plan_path.parent.mkdir(parents=True, exist_ok=True)
     plan_path.write_text(
         json.dumps([asdict(spec) for spec in made], indent=2, sort_keys=True), encoding="utf-8"
@@ -379,7 +488,7 @@ def main() -> int:
     logger.info("planned duration %.1f s, path %.1f m", total_duration, total_path)
 
     if args.dry_run or args.plan_only:
-        _write_plan_report(made)
+        _write_plan_report(made, report_path=plan_report_path)
         return 0 if not failures else 1
 
     workers = max(1, int(generation.get("workers", 3)))
@@ -394,6 +503,7 @@ def main() -> int:
                 overwrite=args.overwrite,
                 keep_raw=bool(generation.get("keep_raw", False)),
                 resume=resume,
+                sensors_config=sensors_config,
             ): spec
             for spec in made
         }
@@ -413,7 +523,12 @@ def main() -> int:
         summary["seconds"],
         summary["path_m"],
     )
-    _write_plan_report(made, summary=summary, failures=failures)
+    _write_plan_report(
+        made,
+        summary=summary,
+        failures=failures,
+        report_path=plan_report_path,
+    )
     if failures:
         logger.error("%d sequences failed: %s", len(failures), ", ".join(failures[:10]))
         return 1
@@ -425,26 +540,31 @@ def _write_plan_report(
     *,
     summary: dict[str, Any] | None = None,
     failures: list[str] | None = None,
+    report_path: Path | None = None,
 ) -> None:
-    report = ROOT / "data/generation_plan.md"
+    report = report_path or ROOT / "data/generation_plan.md"
+    report.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# TIO-Former M2 generation plan",
+        "# TIO-Former generation plan",
         "",
         f"Sequences: {len(specs)}",
         f"Planned duration: {sum(s.duration_s for s in specs):.1f} s",
         f"Planned path: {sum(s.path_length_m for s in specs):.1f} m",
         "",
-        "| split | scene | sequences | seconds | path m |",
-        "|---|---|---:|---:|---:|",
+        "| split | scene | sequences | seconds | path m | mean target speed m/s |",
+        "|---|---|---:|---:|---:|---:|",
     ]
     groups: dict[tuple[str, str], list[SequenceSpec]] = {}
     for spec in specs:
         groups.setdefault((spec.split, spec.scene), []).append(spec)
     for (split, scene), group in sorted(groups.items()):
+        speeds = [s.target_speed_mps for s in group if s.target_speed_mps > 0.0]
+        mean_speed = sum(speeds) / len(speeds) if speeds else 0.0
         lines.append(
             f"| {split} | {scene} | {len(group)} | "
             f"{sum(s.duration_s for s in group):.1f} | "
-            f"{sum(s.path_length_m for s in group):.1f} |"
+            f"{sum(s.path_length_m for s in group):.1f} | "
+            f"{mean_speed:.3f} |"
         )
     if summary is not None:
         lines += ["", "## Processed", "", f"Sequences: {summary['sequences']}"]

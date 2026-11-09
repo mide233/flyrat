@@ -136,9 +136,9 @@ def simulate_frame(
 
     Returns ``range``, ``status``, ``weight``, ``valid`` and ``noise`` arrays.
     Out-of-range zones, random dropouts and specular dropouts become invalid
-    (status 0, weight 0).  A small fraction of otherwise valid zones is marked
-    as a newly acquired target (status 10, weight 0.5), mimicking the paper's
-    TOFSense-M temporal-continuity flag.
+    (status 0, weight 0).  The optional ``new_target_probability`` can mark a
+    fraction of valid zones as status 10 for paper-style experiments, but it
+    defaults to zero because the real VL53L5CX only reports status 5/9.
     """
     ideal = np.asarray(ideal_range, dtype=np.float64)
     if ideal.ndim < 2:
@@ -159,7 +159,7 @@ def simulate_frame(
         valid &= ~drop
     status[~valid] = 0
 
-    new_target_probability = float(config.get("new_target_probability", 0.02))
+    new_target_probability = float(config.get("new_target_probability", 0.0))
     if new_target_probability > 0.0:
         new_target = valid & (rng.random(ideal.shape) < new_target_probability)
         status[new_target] = int(config.get("new_target_status", 10))
