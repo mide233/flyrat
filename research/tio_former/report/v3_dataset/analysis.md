@@ -121,6 +121,6 @@ python3 scripts/audit_dataset_v3.py
 
 ## 7. 训练结果
 
-v3.1 seed 0 在修正 checkpoint 选择后取得测试 ATE 0.0880 m、EDR 2.44%，
-路径比 0.992，v3 gate 全部通过。详细结果、分场景/分速度表和图见
-[`../v3_model/analysis.md`](../v3_model/analysis.md)。
+v3.1 在修正 checkpoint 选择后，3 seeds 取得测试 ATE 0.0879 ± 0.0025 m、
+EDR 2.52%，路径比约 1.00，三个 seed 的 v3 gate 全部通过。详细结果、
+分场景/分速度表和图见 [`../v3_model/analysis.md`](../v3_model/analysis.md)。

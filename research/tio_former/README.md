@@ -37,9 +37,9 @@ The method uses 4× VL53L5CX 8×8 ToF arrays (front / left / right / down) and a
   split **618/135/141**，平均速度 0.315/0.316/0.308 m/s。关闭合成 status=10，
   加入 3% dropout + 2% reflectivity dropout，增加 0.6–2.2 m 垂直运动。
   审计除 val–test KS=0.173 外均通过。旧 checkpoint 选择规则曾误选 epoch 7
-  （ATE 0.5184 m）；修复为只惩罚 `[0.83,1.2]` 之外的尺度误差后，seed 0
-  在 epoch 60 取得测试 **ATE 0.0880 m / RPEp 0.00353 m / RPER 0.193° /
-  EDR 2.44%**，路径比 0.992，|speed–ATE| 0.344，v3 gate 全部通过。
+  （ATE 0.5184 m）；修复为只惩罚 `[0.83,1.2]` 之外的尺度误差后，3 seeds
+  取得测试 **ATE 0.0879 ± 0.0025 m / RPEp 0.00363 m / RPER 0.175° /
+  EDR 2.52%**，路径比约 1.00，三个 seed 的 v3 gate 全部通过。
   结果与图见 `report/v3_model/analysis.md`。
 - **模型改进筛选（v2）**：新增 `hybrid`、`gated_fifo`、`hybrid_gated`、
   `hybrid_split`。15-epoch 筛选中 `hybrid_gated` ATE 0.4208 m；40-epoch 复核

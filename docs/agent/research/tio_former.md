@@ -333,8 +333,8 @@ scene_id, seq_id, traj_type, split
   0.173 未达 <0.1，属于分布形状的采样差异。分布图与审计见
   `research/tio_former/report/v3_dataset/analysis.md`。训练改为按
   `val_loss + 0.5*max(0, |log(val_path_ratio)| - log 1.2)` 选 checkpoint。
-  seed 0 在 epoch 60 取得测试 **ATE 0.0880 m / RPEp 0.00353 m /
-  RPER 0.193° / EDR 2.44%**，路径比 0.992，|speed–ATE| 0.344，v3 gate
+  3 seeds 取得测试 **ATE 0.0879 ± 0.0025 m / RPEp 0.00363 m /
+  RPER 0.175° / EDR 2.52%**，路径比约 1.00，三个 seed 的 v3 gate
   全部通过；结果见 `research/tio_former/report/v3_model/analysis.md`。
 - C++/ROS 接入（实验性）：新增 `flyrat::tio`（`FLYRAT_BUILD_TIO`，CPU
   libtorch）和 ROS 2 `tio_odometry_node`，将导出的 TorchScript 模型
