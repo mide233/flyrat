@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import json
+import math
 import os
 import subprocess
 import sys
@@ -425,7 +426,71 @@ def _make_random_scene_trajectory(
         spec.world = str(world_path)
         spec.scene_spec = str(spec_path)
         return spec
-    raise ValueError(f"could not generate {spec.seq_id}: {last_error}")
+    # Last resort: shrink the excursion to the minimum and, if the room is so
+    # cluttered that even that collides, drop the near-field clutter closest to
+    # the spawn.  This keeps the planned sequence instead of silently reducing
+    # the dataset (and its seconds) by a tenth.
+    obstacles = list(random_scene.obstacles)
+    for relax in range(8):
+        rng = np.random.default_rng(spec.seed + 7717 + 97 * relax)
+        try:
+            trajectory = inspection_trajectory(
+                random_scene.bounds,
+                rng=rng,
+                sample_rate_hz=sample_rate_hz,
+                duration_s=float(rng.uniform(*duration_range)),
+                altitude_m=random_scene.spawn[2],
+                clearance_m=0.12,
+                obstacles=obstacles,
+                motion_mix=motion.get("motion_mix"),
+                lateral_excursion_m=0.26,
+                vertical_excursion_m=0.10,
+                max_speed_mps=float(motion.get("max_speed_mps", 1.0)),
+                return_to_start=bool(motion.get("return_to_start", True)),
+            )
+            if (duration_range[0] <= trajectory.duration <= duration_range[1]):
+                break
+        except ValueError as exc:
+            last_error = exc
+        # Winnow the clutter ring around the spawn, then try again.
+        keep = []
+        for obj in random_scene.objects:
+            center = obj.get("center") or [0.0, 0.0, 0.0]
+            if obj.get("kind") in {"wall", "floor"}:
+                keep.append(obj)
+                continue
+            if math.hypot(center[0] - random_scene.spawn[0], center[1] - random_scene.spawn[1]) > 1.3:
+                keep.append(obj)
+        random_scene.objects = keep
+        kept_names = {obj["name"] for obj in keep}
+        obstacles = [item for item in obstacles if item.get("name") in kept_names]
+    else:
+        raise ValueError(f"could not generate {spec.seq_id}: {last_error}")
+    clutter_cfg = scene.get("path_clutter", {})
+    if clutter_cfg.get("enabled", True):
+        add_path_clutter(
+            random_scene,
+            trajectory.position,
+            np.random.default_rng(spec.seed + 9901),
+            count=tuple(clutter_cfg.get("count", [10, 20])),
+            min_distance=float(clutter_cfg.get("min_distance_m", 0.25)),
+            max_distance=float(clutter_cfg.get("max_distance_m", 0.45)),
+            clearance=float(clutter_cfg.get("clearance_m", 0.24)),
+            forward_exclusion_deg=float(clutter_cfg.get("forward_exclusion_deg", 50.0)),
+        )
+    world_path.write_text(scene_to_sdf(random_scene, texture_root=texture_root), encoding="utf-8")
+    spec_path.write_text(json.dumps(random_scene.spec(), indent=2), encoding="utf-8")
+    path = trajectory_root / spec.split / spec.scene / f"{spec.seq_id}.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    trajectory.to_csv(path)
+    spec.csv = str(path)
+    spec.kind = "inspection"
+    spec.duration_s = float(trajectory.duration)
+    spec.path_length_m = float(trajectory.path_length)
+    spec.shape = "inspection"
+    spec.world = str(world_path)
+    spec.scene_spec = str(spec_path)
+    return spec
 
 
 def _run(command: list[str], *, timeout: float) -> None:
