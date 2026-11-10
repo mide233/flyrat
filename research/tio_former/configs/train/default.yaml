@@ -39,7 +39,7 @@ training:
   # ToF branch. Applied only when the model returns gate weights.
   gate_regularization:
     tof_floor: 0.10
-    weight: 0.05
+    weight: 0.01
 
 loss:
   step:
