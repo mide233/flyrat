@@ -21,3 +21,4 @@ __pycache__/
 .pytest_cache/
 sim/gz_plugins/**/build/
 sim/worlds/generated/
+/runs_bag/
