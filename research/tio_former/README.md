@@ -200,6 +200,26 @@ ToF 大面积缺失（视觉可用）的训练样本由 `augmentation.tof_degrad
 完整相机数据集配置为 `configs/data/generation_camera_full.yaml`
 （目标 20,000 s，输出到 `data_cam_full/`）。
 
+### 集群训练
+
+`scripts/cluster/` 提供两个 Slurm 脚本，默认布局为
+`$HOME/flyrat_tio/p1_camera/`（代码、`data_cam_full/processed`、
+`checkpoints_cam_full`、`logs`），可用 `FLYRAT_P1_ROOT` 覆盖：
+
+```bash
+# 3 个相机 seed + 1 个无相机基线
+sbatch scripts/cluster/train_seed.sbatch 0 seed0 1
+sbatch scripts/cluster/train_seed.sbatch 1 seed1 1
+sbatch scripts/cluster/train_seed.sbatch 2 seed2 1
+sbatch scripts/cluster/train_seed.sbatch 0 seed0_nocam 0
+
+# 每个 run 评估：正常 test、退化 ToF、v3.1 test（相机补零）
+sbatch scripts/cluster/eval_run.sbatch seed0
+```
+
+脚本假定 Python 环境已装 torch/Pillow（例如 micromamba `fdrone`），
+`--processed` 必须是绝对路径；否则 `train.py` 会相对项目根解析。
+
 结果写入 `data/processed/`、`data/index.csv`、`data/splits.json`、
 `data/stats.json`、`data/report.md`。数据目录不提交。
 
