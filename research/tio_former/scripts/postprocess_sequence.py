@@ -156,6 +156,21 @@ def main() -> int:
     gt_pose = np.asarray(arrays["gt_pose"], dtype=np.float64)
     if gt_stamp.size < 2:
         raise ValueError("not enough ground-truth poses")
+    # Gazebo occasionally republishes a pose with the same stamp when a
+    # worker is starved; keep the first sample so the timeline is monotonic.
+    unique = np.concatenate([[True], np.diff(gt_stamp) > 0])
+    gt_stamp = gt_stamp[unique]
+    gt_pose = gt_pose[unique]
+
+    # A dropped frame can leave one view with fewer depth images than stamps.
+    for view in views:
+        stamps = np.asarray(arrays[f"t_{view}"], dtype=np.float64)
+        depth = np.asarray(arrays[f"depth_{view}"], dtype=np.float32)
+        count = min(stamps.size, depth.shape[0])
+        if count < 2:
+            raise ValueError(f"view {view} has too few frames")
+        arrays[f"t_{view}"] = stamps[:count]
+        arrays[f"depth_{view}"] = depth[:count]
 
     tolerance = 0.75 / rate
     indices = np.stack(
@@ -174,7 +189,11 @@ def main() -> int:
     if dropped:
         logger.warning("dropped %d/%d frames with missing/aligned views", dropped, keep.size)
     indices = indices[keep]
-    t_tof = gt_stamp[keep] - gt_stamp[keep][0]
+    aligned_stamp = gt_stamp[keep]
+    monotonic = np.concatenate([[True], np.diff(aligned_stamp) > 0])
+    indices = indices[monotonic]
+    aligned_stamp = aligned_stamp[monotonic]
+    t_tof = aligned_stamp - aligned_stamp[0]
     if t_tof.size < 2:
         raise ValueError("fewer than two aligned frames")
 
@@ -248,7 +267,10 @@ def main() -> int:
     if args.camera and "camera_image" in arrays and "t_camera" in arrays:
         camera_images = np.asarray(arrays["camera_image"], dtype=np.uint8)
         camera_stamp = np.asarray(arrays["t_camera"], dtype=np.float64)
-        camera_indices = _nearest_indices(camera_stamp, gt_stamp[keep], tolerance)
+        camera_count = min(camera_stamp.size, camera_images.shape[0])
+        camera_stamp = camera_stamp[:camera_count]
+        camera_images = camera_images[:camera_count]
+        camera_indices = _nearest_indices(camera_stamp, aligned_stamp, tolerance)
         valid_camera = camera_indices >= 0
         if not np.all(valid_camera):
             logger.warning(
