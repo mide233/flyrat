@@ -16,6 +16,8 @@ int main(int argc, char** argv)
         ? argv[1]
         : "models/tio_former_window64.pt";
     const int frames = argc > 2 ? std::atoi(argv[2]) : 100;
+    const bool camera_enabled = argc > 3 && std::string(argv[3]) == "camera";
+    options.camera = camera_enabled;
 
     try {
         flyrat::tio::TioOdometry odometry(options);
@@ -23,6 +25,18 @@ int main(int argc, char** argv)
         for (auto& view : views) {
             view.range.fill(1.0F);
             view.weight.fill(1.0F);
+        }
+
+        flyrat::tio::CameraFrame camera;
+        if (camera_enabled) {
+            camera.gray.resize(static_cast<std::size_t>(options.camera_width * options.camera_height));
+            for (int y = 0; y < options.camera_height; ++y) {
+                for (int x = 0; x < options.camera_width; ++x) {
+                    camera.gray[static_cast<std::size_t>(y * options.camera_width + x)] =
+                        static_cast<float>(x + y) / static_cast<float>(
+                            options.camera_width + options.camera_height);
+                }
+            }
         }
 
         const auto started = std::chrono::steady_clock::now();
@@ -36,7 +50,8 @@ int main(int argc, char** argv)
                 imu.accel = Eigen::Vector3d(0.0, 0.0, 9.81);
                 odometry.addImu(imu);
             }
-            last = odometry.track(views, timestamp);
+            last = camera_enabled ? odometry.track(views, timestamp, &camera)
+                                  : odometry.track(views, timestamp);
             if (last.pose.valid) {
                 ++valid;
             }
