@@ -256,6 +256,7 @@ def _make_trajectory(
                 )
                 shape = str(rng.choice(shapes))
             inspection = trajectory_config.get("inspection", {})
+            scale = max(0.35, 1.0 - 0.12 * attempt)
             try:
                 if inspection.get("enabled", False):
                     cfg = trajectory_config.get("trajectory", trajectory_config)
@@ -268,8 +269,8 @@ def _make_trajectory(
                         clearance_m=float(cfg.get("min_clearance_m", 0.3)),
                         obstacles=obstacles,
                         motion_mix=inspection.get("motion_mix"),
-                        lateral_excursion_m=float(inspection.get("lateral_excursion_m", 0.4)),
-                        vertical_excursion_m=float(inspection.get("vertical_excursion_m", 0.2)),
+                        lateral_excursion_m=float(inspection.get("lateral_excursion_m", 0.4)) * scale,
+                        vertical_excursion_m=float(inspection.get("vertical_excursion_m", 0.2)) * scale,
                         max_speed_mps=float(inspection.get("max_speed_mps", 1.0)),
                         return_to_start=bool(inspection.get("return_to_start", True)),
                     )
