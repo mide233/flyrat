@@ -18,6 +18,8 @@ tio_odometry_node:
     camera_width: 160
     camera_height: 120
     camera_topic: /flyrat/sensors/camera/image_raw
+    # Max |camera - ToF| timestamp difference; older frames count as missing.
+    camera_max_skew_s: 0.08
     # View index -> sensor id. The model expects front, left, right, down.
     # The airframe nose is the old rear-ToF end, so after the 180-degree
     # redefinition the physical ids from INT/LPn wiring are:

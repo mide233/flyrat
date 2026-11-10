@@ -47,11 +47,35 @@ OpenCV 解码为 `mono8`。
 --camera-device /dev/video10
 --camera-width 640        单目图像宽度
 --camera-height 480
---camera-fps 60         请求值；主机实测约 30 Hz
+--camera-fps 15         输出帧率（相机实际采集后节流）
+--camera-exposure-us 5000  手动曝光，单位微秒；0 表示保留相机自动曝光
+--camera-gain -1        手动增益；-1 表示不修改（通常仍是自动增益）
 --tof-resolution 8      4 或 8；默认 8
 --tof-rate 15           4x4 最高 60，8x8 最高 15；默认 15
 --no-imu / --no-tof / --no-camera
 ```
+
+### 相机曝光与运动模糊
+
+`MonoJpegSource` 在打开 `/dev/video10` 后会写入 UVC 曝光控制：
+
+- `exposure_auto=manual`
+- `exposure_absolute=exposure_us/100`（UVC 以 100 µs 为单位）
+- `exposure_auto_priority=0`，锁定帧间隔，避免相机用降帧换取长曝光
+
+默认 **5 ms** 曝光，明显短于自动曝光常见的 20–30 ms。启动日志会打印每个
+控制的写入值和读回值，例如：
+
+```text
+camera /dev/video10: exposure_auto=1 (readback 1)
+camera /dev/video10: exposure_absolute=50 (readback 50)
+camera /dev/video10: exposure_auto_priority=0 (readback 0)
+```
+
+若某控制不被相机支持，会打印 `unsupported` 并继续采集。曝光变短后画面
+变暗属于预期，可用 `--camera-gain`（或 bringup 的 `camera_gain:=`）提高增益，
+或把 `camera_exposure_us:=` 调大。建议先用 5 ms 录一段，再根据平均亮度和
+模糊程度微调。
 
 TIO-Former 需要 4 颗 ToF 都输出 **8×8 @ 15 Hz**，因此
 `flyrat_sensor_forwarder` 默认已改为 8×8、15 Hz。若要临时回到 4×4，

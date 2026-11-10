@@ -39,6 +39,8 @@ void usage()
         << "  --camera-width N     default 320 (QVGA)\n"
         << "  --camera-height N    default 240 (QVGA)\n"
         << "  --camera-fps N       default 15\n"
+        << "  --camera-exposure-us N default 5000 (5 ms, 0 = camera auto)\n"
+        << "  --camera-gain N      default -1 (leave camera gain untouched)\n"
         << "  --tof-resolution N   default 8 (4 or 8)\n"
         << "  --tof-rate HZ        default 15 (4x4 up to 60, 8x8 up to 15)\n"
         << "  --no-imu --no-tof --no-camera\n"
@@ -88,6 +90,10 @@ int main(int argc, char** argv)
             config.camera.height = std::atoi(next("--camera-height").c_str());
         } else if (arg == "--camera-fps") {
             config.camera.fps = std::atoi(next("--camera-fps").c_str());
+        } else if (arg == "--camera-exposure-us") {
+            config.camera.exposure_us = std::atoi(next("--camera-exposure-us").c_str());
+        } else if (arg == "--camera-gain") {
+            config.camera.gain = std::atoi(next("--camera-gain").c_str());
         } else if (arg == "--tof-resolution") {
             config.tof.resolution = std::atoi(next("--tof-resolution").c_str());
         } else if (arg == "--tof-rate") {

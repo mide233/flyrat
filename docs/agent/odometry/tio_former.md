@@ -206,6 +206,13 @@ TIO 后端默认使用**带相机模型**（`tio_camera:=true`），并把
 `160/120//flyrat/sensors/camera/image_raw`。相机只参与学习融合，不参与几何
 三角化，因此**不需要标定**；`camera_tf_enable` 仍保持 `false`。
 
+实机相机曝光由设备端 `flyrat_sensor_forwarder` 控制，默认手动 **5 ms**
+（`camera_exposure_us:=5000`，0 表示回到自动曝光），并关闭
+`exposure_auto_priority` 以锁定 15 Hz 帧间隔。曝光变短可显著减少快速运动下的
+拖影，画面变暗时用 `camera_gain:=` 提高增益。节点按时间戳为每个 ToF 帧选择
+最近的相机帧，超过 `tio_camera_max_skew_s`（默认 0.08 s）则视为缺失并补零，
+避免把过期图像送进模型。
+
 ### 4.3 真机验证现状
 
 **2026-11-10：带相机模型已设为 bringup 默认。** 导出源为
@@ -216,7 +223,9 @@ TIO 后端默认使用**带相机模型**（`tio_camera:=true`），并把
 同模型把相机置零 ATE 0.0871 m，全部 ToF 丢弃时 0.174 m（无相机模型
 0.205 m）。本机 `tio_bench ... camera` 80 帧平均 **13.6 ms**；
 `bringup.launch.py` 已实测能加载该模型并打印 `camera branch enabled`。
-真实相机仍未标定，实机精度尚未复测。
+真实相机仍未标定，实机精度尚未复测。早期实机回放显示运动模糊明显、模型
+退化严重，因此把设备端曝光从自动的长曝光改为手动 5 ms，并加入相机/ToF
+时间戳最近邻匹配；效果等待新的实车 rosbag 验证。
 
 **2026-11-09：v3.1 模型曾部署到实机链路。** 导出源为
 `research/tio_former/checkpoints_v3/main/seed1/best.pt`（epoch 57），

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <thread>
@@ -77,6 +78,43 @@ struct MonoJpegSource::Impl {
     std::chrono::steady_clock::time_point next_publish {};
     std::string last_error;
 
+    void write_control(std::uint32_t id, int value, const char* name)
+    {
+        v4l2_control control {};
+        control.id = id;
+        control.value = value;
+        if (xioctl(fd, VIDIOC_S_CTRL, &control) < 0) {
+            std::fprintf(stderr, "camera %s: %s=%d unsupported (%s)\n",
+                config.device.c_str(), name, value, std::strerror(errno));
+            return;
+        }
+        v4l2_control readback {};
+        readback.id = id;
+        if (xioctl(fd, VIDIOC_G_CTRL, &readback) == 0) {
+            std::fprintf(stderr, "camera %s: %s=%d (readback %d)\n",
+                config.device.c_str(), name, value, readback.value);
+        } else {
+            std::fprintf(stderr, "camera %s: %s=%d\n",
+                config.device.c_str(), name, value);
+        }
+    }
+
+    // UVC exposure is expressed in 100 us units.  Manual exposure with
+    // auto-priority disabled keeps the frame interval constant, so the camera
+    // cannot trade frame rate for a long exposure and smear fast motion.
+    void apply_exposure_controls()
+    {
+        if (config.exposure_us > 0) {
+            write_control(V4L2_CID_EXPOSURE_AUTO, V4L2_EXPOSURE_MANUAL, "exposure_auto");
+            const int ticks = std::max(1, (config.exposure_us + 50) / 100);
+            write_control(V4L2_CID_EXPOSURE_ABSOLUTE, ticks, "exposure_absolute");
+            write_control(V4L2_CID_EXPOSURE_AUTO_PRIORITY, 0, "exposure_auto_priority");
+        }
+        if (config.gain >= 0) {
+            write_control(V4L2_CID_GAIN, config.gain, "gain");
+        }
+    }
+
     void open_device()
     {
         fd = ::open(config.device.c_str(), O_RDWR | O_NONBLOCK);
@@ -118,6 +156,8 @@ struct MonoJpegSource::Impl {
         parm.parm.capture.timeperframe.numerator = 1;
         parm.parm.capture.timeperframe.denominator = static_cast<std::uint32_t>(config.fps);
         (void)xioctl(fd, VIDIOC_S_PARM, &parm);
+
+        apply_exposure_controls();
 
         v4l2_requestbuffers request {};
         request.count = static_cast<std::uint32_t>(std::max(config.buffer_count, 2));

@@ -31,6 +31,7 @@ struct TofGrid {
 struct CameraFrame {
     int width = 160;
     int height = 120;
+    double timestamp = 0.0;
     std::vector<float> gray;
 };
 

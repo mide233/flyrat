@@ -15,6 +15,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -130,6 +131,7 @@ public:
         camera_height_ = declare_parameter<int>("camera_height", 120);
         camera_topic_ = declare_parameter<std::string>(
             "camera_topic", "/flyrat/sensors/camera/image_raw");
+        camera_max_skew_ = declare_parameter<double>("camera_max_skew_s", 0.08);
 
         if (model_path_.empty()) {
             throw std::runtime_error("model_path is required");
@@ -278,6 +280,7 @@ private:
         CameraFrame frame;
         frame.width = camera_width_;
         frame.height = camera_height_;
+        frame.timestamp = rclcpp::Time(message->header.stamp).seconds();
         frame.gray.resize(static_cast<std::size_t>(camera_width_ * camera_height_));
         for (int y = 0; y < camera_height_; ++y) {
             const int source_y = std::min(source_height - 1, y * source_height / camera_height_);
@@ -289,8 +292,14 @@ private:
             }
         }
         std::lock_guard<std::mutex> lock(camera_mutex_);
-        latest_camera_ = std::move(frame);
-        have_camera_ = true;
+        camera_buffer_.emplace_back(frame.timestamp, std::move(frame));
+        while (camera_buffer_.size() > 8) {
+            camera_buffer_.pop_front();
+        }
+        while (camera_buffer_.size() > 1 &&
+            camera_buffer_.front().first < camera_buffer_.back().first - 0.5) {
+            camera_buffer_.pop_front();
+        }
         camera_count_.fetch_add(1);
     }
 
@@ -340,9 +349,19 @@ private:
             }
         }
         if (camera_enabled_) {
+            const double tof_seconds = rclcpp::Time(first->header.stamp).seconds();
             std::lock_guard<std::mutex> camera_lock(camera_mutex_);
-            if (have_camera_) {
-                frame.camera = latest_camera_;
+            const std::pair<double, CameraFrame>* best = nullptr;
+            double best_delta = camera_max_skew_;
+            for (const auto& entry : camera_buffer_) {
+                const double delta = std::abs(entry.first - tof_seconds);
+                if (delta <= best_delta) {
+                    best_delta = delta;
+                    best = &entry;
+                }
+            }
+            if (best != nullptr) {
+                frame.camera = best->second;
                 frame.has_camera = true;
             }
         }
@@ -550,9 +569,9 @@ private:
     int camera_width_ = 160;
     int camera_height_ = 120;
     std::string camera_topic_;
+    double camera_max_skew_ = 0.08;
     std::mutex camera_mutex_;
-    CameraFrame latest_camera_;
-    bool have_camera_ = false;
+    std::deque<std::pair<double, CameraFrame>> camera_buffer_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr camera_sub_;
 
     message_filters::Subscriber<Tof> tof_subs_[4];

@@ -66,6 +66,8 @@ int main()
     check(mono.width == 320 && mono.height == 240, "mono QVGA defaults");
     check(mono.fps == 15, "mono 15 Hz default");
     check(mono.device == "/dev/video10", "mono default device");
+    check(mono.exposure_us == 5000, "mono default 5 ms exposure");
+    check(mono.gain == -1, "mono default gain untouched");
 
     if (g_failures != 0) {
         std::printf("%d hardware header check(s) failed\n", g_failures);

@@ -26,6 +26,12 @@ struct MonoJpegConfig {
     int height = 240;
     int fps = 15;
     int buffer_count = 4;
+    // UVC exposure in microseconds.  Positive values switch the camera to
+    // manual exposure and keep a constant frame interval, which is what
+    // removes motion blur; 0 leaves the camera's own auto exposure alone.
+    int exposure_us = 5000;
+    // UVC gain; negative leaves the camera's current (usually auto) gain alone.
+    int gain = -1;
 };
 
 struct MonoJpegFrame {

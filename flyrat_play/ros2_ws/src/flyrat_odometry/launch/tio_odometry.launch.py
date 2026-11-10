@@ -31,6 +31,12 @@ def generate_launch_description() -> LaunchDescription:
                 "camera_topic",
                 default_value="/flyrat/sensors/camera/image_raw",
             ),
+            DeclareLaunchArgument(
+                "camera_max_skew_s",
+                default_value="0.08",
+                description="Maximum camera/ToF timestamp difference before "
+                            "the frame is treated as missing.",
+            ),
             Node(
                 package="flyrat_odometry",
                 executable="tio_odometry_node",
@@ -58,6 +64,9 @@ def generate_launch_description() -> LaunchDescription:
                             LaunchConfiguration("camera_height"), value_type=int
                         ),
                         "camera_topic": LaunchConfiguration("camera_topic"),
+                        "camera_max_skew_s": ParameterValue(
+                            LaunchConfiguration("camera_max_skew_s"), value_type=float
+                        ),
                     },
                 ],
             ),

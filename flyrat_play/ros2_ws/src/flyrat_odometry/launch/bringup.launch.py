@@ -126,6 +126,8 @@ def _launch_setup(context, *args, **kwargs):
         camera_width = _text(context, 'camera_width')
         camera_height = _text(context, 'camera_height')
         camera_fps = _text(context, 'camera_fps')
+        camera_exposure_us = _text(context, 'camera_exposure_us')
+        camera_gain = _text(context, 'camera_gain')
         # Restart any forwarder left over from a previous run, otherwise the
         # new instance cannot bind the TCP port. Match the full command line,
         # anchored at the executable path: the process name is truncated to 15
@@ -143,7 +145,9 @@ def _launch_setup(context, *args, **kwargs):
             f'--camera-device {shlex.quote(camera_device)} '
             f'--camera-width {shlex.quote(camera_width)} '
             f'--camera-height {shlex.quote(camera_height)} '
-            f'--camera-fps {shlex.quote(camera_fps)}')
+            f'--camera-fps {shlex.quote(camera_fps)} '
+            f'--camera-exposure-us {shlex.quote(camera_exposure_us)} '
+            f'--camera-gain {shlex.quote(camera_gain)}')
         device_process = ExecuteProcess(
             cmd=adb + ['shell', remote_command],
             name='device_forwarder',
@@ -216,6 +220,8 @@ def _launch_setup(context, *args, **kwargs):
                         'camera_width': LaunchConfiguration('tio_camera_width'),
                         'camera_height': LaunchConfiguration('tio_camera_height'),
                         'camera_topic': LaunchConfiguration('tio_camera_topic'),
+                        'camera_max_skew_s': LaunchConfiguration(
+                            'tio_camera_max_skew_s'),
                     }.items(),
                 )],
             ))
@@ -296,6 +302,14 @@ def generate_launch_description():
             'camera_fps', default_value='15',
             description='Camera output FPS after capture-side throttling.'),
         DeclareLaunchArgument(
+            'camera_exposure_us', default_value='5000',
+            description='Manual camera exposure in microseconds (0 keeps the '
+                        'camera auto exposure). Shorter exposure reduces motion blur.'),
+        DeclareLaunchArgument(
+            'camera_gain', default_value='-1',
+            description='Camera gain; -1 leaves the current (usually auto) gain '
+                        'untouched, which compensates a shorter exposure.'),
+        DeclareLaunchArgument(
             'camera_tf_enable', default_value='false',
             description='Publish imu_link -> camera optical frame TF.'),
         DeclareLaunchArgument('camera_x', default_value='0.0'),
@@ -340,6 +354,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'tio_camera_height', default_value='120',
             description='Model camera input height (must match the export).'),
+        DeclareLaunchArgument(
+            'tio_camera_max_skew_s', default_value='0.08',
+            description='Max camera/ToF timestamp difference; the camera frame '
+                        'nearest the ToF stamp is used, older frames count as missing.'),
         DeclareLaunchArgument(
             'mode', default_value='imu_stereo',
             description="Odometry mode: 'imu_stereo' or 'stereo'."),
