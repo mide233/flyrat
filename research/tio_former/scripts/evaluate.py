@@ -150,7 +150,7 @@ def _load_model(checkpoint: Path, device: str) -> TioFormer:
     return model
 
 
-def _predict(model: TioFormer, arrays: dict, device: str) -> tuple[np.ndarray, np.ndarray]:
+def _predict(model: TioFormer, arrays: dict, device: str):
     tof = torch.from_numpy(np.asarray(arrays["tof"], dtype=np.float32)).unsqueeze(0).to(device)
     weight = torch.from_numpy(np.asarray(arrays["tof_weight"], dtype=np.float32)).unsqueeze(0).to(device)
     imu = torch.from_numpy(np.asarray(arrays["imu"], dtype=np.float32)).unsqueeze(0).to(device)
@@ -181,7 +181,10 @@ def _predict(model: TioFormer, arrays: dict, device: str) -> tuple[np.ndarray, n
             previous_weight=previous_weight,
             camera=camera,
         )
-    return output["delta_p"].cpu().numpy(), output["delta_phi"].cpu().numpy()
+    gate = None
+    if "gate_weights" in output:
+        gate = output["gate_weights"].float().mean(dim=(0, 1)).cpu().tolist()
+    return output["delta_p"].cpu().numpy(), output["delta_phi"].cpu().numpy(), gate
 
 
 def _aggregate(rows: list[dict], keys: tuple[str, ...]) -> list[dict]:
@@ -241,7 +244,7 @@ def main() -> int:
         arrays, _ = load_sequence(path)
         metadata = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
         _perturb_arrays(arrays, metadata, args)
-        delta_p, delta_phi = _predict(model, arrays, args.device)
+        delta_p, delta_phi, gate = _predict(model, arrays, args.device)
         delta_p_t = torch.from_numpy(np.asarray(delta_p)).to(args.device)
         delta_phi_t = torch.from_numpy(np.asarray(delta_phi)).to(args.device)
         predicted = integrate_increments(delta_p_t, delta_phi_t)[0].cpu().numpy()
@@ -268,6 +271,8 @@ def main() -> int:
             "duration_s": float(metadata.get("duration_s", len(predicted) / 15.0)),
             **metrics,
         }
+        if gate is not None:
+            row["gate_imu"], row["gate_camera"], row["gate_tof"] = gate
         rows.append(row)
         if not args.no_save_trajectories:
             np.savez_compressed(
@@ -299,6 +304,15 @@ def main() -> int:
         },
         "by_scene": by_scene,
         "by_scene_kind": by_scene_kind,
+        "gate_usage": (
+            {
+                "imu": float(np.mean([row["gate_imu"] for row in rows])),
+                "camera": float(np.mean([row["gate_camera"] for row in rows])),
+                "tof": float(np.mean([row["gate_tof"] for row in rows])),
+            }
+            if "gate_imu" in rows[0]
+            else None
+        ),
         "perturbations": {
             "drop_views": list(args.drop_views or []),
             "tof_noise_m": float(args.tof_noise_m),
@@ -318,6 +332,13 @@ def main() -> int:
         summary["metrics"]["rpe_rotation_deg"],
         summary["metrics"]["end_drift_percent"],
     )
+    if summary["gate_usage"] is not None:
+        logger.info(
+            "gate usage: imu %.3f | camera %.3f | tof %.3f",
+            summary["gate_usage"]["imu"],
+            summary["gate_usage"]["camera"],
+            summary["gate_usage"]["tof"],
+        )
     logger.info("wrote %s", out_dir)
     return 0
 
