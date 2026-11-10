@@ -252,6 +252,11 @@ def test_camera_fusion_forward_and_streaming() -> None:
     stacked_p = torch.cat([item["delta_p"] for item in streamed], dim=1)
     stacked_phi = torch.cat([item["delta_phi"] for item in streamed], dim=1)
     assert full["delta_p"].shape == (1, 4, 3)
+    assert "gate_weights" in full
+    assert full["gate_weights"].shape == (1, 4, 3)
+    torch.testing.assert_close(
+        full["gate_weights"].sum(dim=-1), torch.ones(1, 4), atol=1e-5, rtol=1e-5
+    )
     torch.testing.assert_close(full["delta_p"], stacked_p, atol=1e-5, rtol=1e-5)
     torch.testing.assert_close(full["delta_phi"], stacked_phi, atol=1e-5, rtol=1e-5)
 

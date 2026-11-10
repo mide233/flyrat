@@ -697,18 +697,22 @@ class TioFormer(nn.Module):
 
     def _fused_features(
         self, tof, imu, weight, previous_tof, previous_weight, camera=None, previous_camera=None
-    ):
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """Return fused features and, when camera fusion is active, gate weights."""
         if self.variant == "imu_only":
-            return self._imu_tokens(imu)
+            return self._imu_tokens(imu), None
         view_tokens = self._view_tokens(tof, weight, previous_tof, previous_weight)
         if self.variant == "tof_only":
-            return view_tokens.mean(dim=1)
+            return view_tokens.mean(dim=1), None
         imu_tokens = self._imu_tokens(imu)
         if self.variant == "naive_concat":
-            return self.concat_proj(torch.cat([view_tokens.mean(dim=1), imu_tokens], dim=-1))
+            return (
+                self.concat_proj(torch.cat([view_tokens.mean(dim=1), imu_tokens], dim=-1)),
+                None,
+            )
         base = self.fusion(imu_tokens, view_tokens)
         if camera is None or self.camera_encoder is None:
-            return base
+            return base, None
         tof_token = view_tokens.mean(dim=1)
         camera_token = self._camera_tokens(camera, previous_camera)
         weights = self.reliability_gate(imu_tokens, camera_token, tof_token)
@@ -717,7 +721,7 @@ class TioFormer(nn.Module):
             + weights[:, 1:2] * camera_token
             + weights[:, 2:3] * tof_token
         )
-        return self.camera_out(torch.cat([base, weighted], dim=-1))
+        return self.camera_out(torch.cat([base, weighted], dim=-1)), weights
 
     def _fused_features_pair(self, tof, imu, weight, previous_tof, previous_weight):
         """Position branch = concat/local; rotation branch = directional attention."""
@@ -761,12 +765,15 @@ class TioFormer(nn.Module):
                 "delta_p": position_motion[..., :3],
                 "delta_phi": rotation_motion[..., 3:],
             }
-        features = self._fused_features(
+        features, gate_weights = self._fused_features(
             tof, imu, weight, previous_tof, previous_weight, camera, previous_camera
         )
         hidden = self.streaming(features.reshape(batch, length, -1))
         motion = self.pose_head(hidden)
-        return {"delta_p": motion[..., :3], "delta_phi": motion[..., 3:]}
+        output = {"delta_p": motion[..., :3], "delta_phi": motion[..., 3:]}
+        if gate_weights is not None:
+            output["gate_weights"] = gate_weights.reshape(batch, length, -1)
+        return output
 
     def forward_stream(
         self,
@@ -805,14 +812,18 @@ class TioFormer(nn.Module):
                 },
                 (position_states, rotation_states),
             )
-        fused = self._fused_features(
+        features, gate_weights = self._fused_features(
             tof, imu, weight, previous_tof, previous_weight, camera, previous_camera
-        ).unsqueeze(1)
+        )
+        fused = features.unsqueeze(1)
         if states is None:
             states = self.streaming.init_state(batch, fused.shape[-1], fused.device, fused.dtype)
         hidden, states = self.streaming.forward_step(fused, states)
         motion = self.pose_head(hidden)
-        return {"delta_p": motion[..., :3], "delta_phi": motion[..., 3:]}, states
+        output = {"delta_p": motion[..., :3], "delta_phi": motion[..., 3:]}
+        if gate_weights is not None:
+            output["gate_weights"] = gate_weights
+        return output, states
 
 
 def count_parameters(model: nn.Module) -> int:

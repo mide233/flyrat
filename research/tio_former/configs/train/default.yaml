@@ -35,6 +35,11 @@ training:
   log_every: 50
   validate_every_epochs: 1
   save_top_k: 3
+  # Keep the reliability gate from collapsing onto IMU/camera and starving the
+  # ToF branch. Applied only when the model returns gate weights.
+  gate_regularization:
+    tof_floor: 0.10
+    weight: 0.05
 
 loss:
   step:

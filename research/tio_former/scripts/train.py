@@ -71,12 +71,14 @@ def _lr_lambda(step: int, *, warmup_steps: int, total_steps: int, min_ratio: flo
 
 
 @torch.no_grad()
-def _validate(model, loader, loss_config, device, amp_dtype) -> tuple[float, float]:
+def _validate(model, loader, loss_config, device, amp_dtype):
     model.eval()
     total_loss = 0.0
     batches = 0
     predicted_step = 0.0
     target_step = 0.0
+    gate_sum = None
+    gate_count = 0
     for batch in loader:
         batch = {key: value.to(device) for key, value in batch.items()}
         with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=amp_dtype is not None):
@@ -98,9 +100,19 @@ def _validate(model, loader, loss_config, device, amp_dtype) -> tuple[float, flo
         batches += 1
         predicted_step += float(output["delta_p"].float().norm(dim=-1).sum())
         target_step += float(batch["delta_p"].float().norm(dim=-1).sum())
+        if "gate_weights" in output:
+            weights = output["gate_weights"].float().detach()
+            if gate_sum is None:
+                gate_sum = weights.sum(dim=(0, 1))
+            else:
+                gate_sum = gate_sum + weights.sum(dim=(0, 1))
+            gate_count += int(weights.shape[0] * weights.shape[1])
     model.train()
     path_ratio = predicted_step / max(target_step, 1e-9)
-    return total_loss / max(1, batches), path_ratio
+    gate_mean = None
+    if gate_sum is not None and gate_count > 0:
+        gate_mean = (gate_sum / gate_count).cpu().tolist()
+    return total_loss / max(1, batches), path_ratio, gate_mean
 
 
 def main() -> int:
@@ -123,6 +135,9 @@ def main() -> int:
     scheduler_config = train_config.get("scheduler", {})
     augmentation = train_config.get("augmentation", {})
     loss_config = train_config.get("loss", train_config)
+    gate_config = training_config.get("gate_regularization", {})
+    gate_tof_floor = float(gate_config.get("tof_floor", 0.0))
+    gate_reg_weight = float(gate_config.get("weight", 0.0))
 
     batch_size = int(args.batch_size or data_config.get("batch_size", 32))
     workers = int(args.workers if args.workers is not None else data_config.get("num_workers", 8))
@@ -230,6 +245,8 @@ def main() -> int:
     for epoch in range(1, epochs + 1):
         model.train()
         epoch_loss = 0.0
+        epoch_gate_sum = None
+        epoch_gate_count = 0
         optimizer.zero_grad(set_to_none=True)
         for step_in_epoch in range(1, steps_per_epoch + 1):
             try:
@@ -263,6 +280,18 @@ def main() -> int:
                 batch["delta_phi"].float(),
                 loss_config,
             )
+            if "gate_weights" in output:
+                weights = output["gate_weights"].float()
+                if gate_reg_weight > 0.0 and gate_tof_floor > 0.0:
+                    loss = loss + gate_reg_weight * torch.relu(
+                        gate_tof_floor - weights[..., 2]
+                    ).mean()
+                detached = weights.detach()
+                if epoch_gate_sum is None:
+                    epoch_gate_sum = detached.sum(dim=(0, 1))
+                else:
+                    epoch_gate_sum = epoch_gate_sum + detached.sum(dim=(0, 1))
+                epoch_gate_count += int(weights.shape[0] * weights.shape[1])
             scaled_loss = loss / grad_accum
             if not torch.isfinite(scaled_loss):
                 logger.error("non-finite loss at epoch %d step %d", epoch, step_in_epoch)
@@ -289,7 +318,7 @@ def main() -> int:
                 if args.max_steps is not None and global_step >= args.max_steps:
                     break
 
-        val_loss, val_path_ratio = _validate(
+        val_loss, val_path_ratio, val_gate = _validate(
             model,
             iterate_batches(
                 val_set,
@@ -321,6 +350,10 @@ def main() -> int:
             "lr": optimizer.param_groups[0]["lr"],
             "elapsed_s": time.time() - started,
         }
+        if epoch_gate_sum is not None and epoch_gate_count > 0:
+            record["train_gate"] = (epoch_gate_sum / epoch_gate_count).cpu().tolist()
+        if val_gate is not None:
+            record["val_gate"] = val_gate
         with metrics_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
         logger.info(
@@ -332,6 +365,14 @@ def main() -> int:
             selection_score,
             record["lr"],
         )
+        if val_gate is not None:
+            logger.info(
+                "epoch %d | gate imu %.3f | camera %.3f | tof %.3f",
+                epoch,
+                val_gate[0],
+                val_gate[1],
+                val_gate[2],
+            )
         state = {
             "model": model.state_dict(),
             "model_config": model_config.to_dict(),
