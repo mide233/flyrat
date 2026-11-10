@@ -84,11 +84,18 @@ def scale_loss(
     delta_p: torch.Tensor,
     target_p: torch.Tensor,
     beta: float = 0.10,
+    min_target_norm: float = 0.02,
+    max_ratio: float = 10.0,
 ) -> torch.Tensor:
+    """Path-length ratio with a floor on the denominator.
+
+    Static-heavy windows have a near-zero target path length; without a floor
+    the ratio (and its gradient) explodes and destabilises the whole loss.
+    """
     predicted_norm = torch.linalg.norm(delta_p, dim=-1).sum(dim=1)
     target_norm = torch.linalg.norm(target_p, dim=-1).sum(dim=1)
-    ratio = predicted_norm / target_norm.clamp_min(1e-6)
-    return smooth_l1(ratio, torch.ones_like(ratio), beta)
+    ratio = predicted_norm / target_norm.clamp_min(max(min_target_norm, 1e-6))
+    return smooth_l1(ratio.clamp_max(max_ratio), torch.ones_like(ratio), beta)
 
 
 def residual_loss(
@@ -134,6 +141,8 @@ def compute_losses(
         delta_p,
         target_p,
         float(scale_config.get("beta", 0.10)),
+        float(scale_config.get("min_target_norm", 0.02)),
+        float(scale_config.get("max_ratio", 10.0)),
     )
     residual = residual_loss(
         delta_p,

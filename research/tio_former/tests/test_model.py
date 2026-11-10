@@ -290,3 +290,15 @@ def test_dataset_window_includes_camera(tmp_path) -> None:
     assert item["camera"].shape == (frames, 120, 160)
     assert item["camera"].dtype == torch.float32
     assert float(item["camera"][0].max()) == 0.0
+
+
+def test_scale_loss_is_finite_for_static_windows() -> None:
+    from tio_former.models.losses import scale_loss
+
+    torch.manual_seed(0)
+    target = torch.zeros(2, 16, 3)
+    target[:, 0] = 1e-4
+    prediction = torch.full((2, 16, 3), 0.002)
+    value = scale_loss(prediction, target)
+    assert torch.isfinite(value)
+    assert float(value) < 5.0

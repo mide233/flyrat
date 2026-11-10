@@ -53,6 +53,9 @@ loss:
   scale:
     beta: 0.10
     weight: 0.005
+    # Floor for the target path length so static windows cannot blow up the ratio.
+    min_target_norm: 0.02
+    max_ratio: 10.0
   residual:
     beta: 0.02
     weight: 0.005
