@@ -1,0 +1,19 @@
+{
+  "source_checkpoint": "research/tio_former/checkpoints_cam_full/seed0.pt",
+  "window_frames": 64,
+  "views": 4,
+  "grid_size": 8,
+  "imu_samples": 16,
+  "channels": 6,
+  "parameters": 1278937,
+  "trace_max_abs_difference": 0.0,
+  "view_order": [
+    "front",
+    "left",
+    "right",
+    "down"
+  ],
+  "camera": true,
+  "camera_width": 160,
+  "camera_height": 120
+}

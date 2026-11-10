@@ -191,12 +191,17 @@ def _launch_setup(context, *args, **kwargs):
                 get_package_share_directory('flyrat_odometry'),
                 'launch',
                 'tio_odometry.launch.py')
-            model_path = os.path.join(
-                get_package_share_directory('flyrat_odometry'),
-                'models',
-                'tio_former_window64.pt')
-            actions.append(LogInfo(
-                msg=f'[bringup] TIO-Former backend: {model_path}'))
+            tio_camera = _flag(context, 'tio_camera')
+            model_path = _text(context, 'tio_model')
+            if not model_path:
+                model_path = os.path.join(
+                    get_package_share_directory('flyrat_odometry'),
+                    'models',
+                    'tio_former_window64_camera.pt'
+                    if tio_camera else 'tio_former_window64.pt')
+            actions.append(LogInfo(msg=(
+                f'[bringup] TIO-Former backend: {model_path} '
+                f'(camera={"on" if tio_camera else "off"})')))
             actions.append(TimerAction(
                 period=1.0,
                 actions=[IncludeLaunchDescription(
@@ -207,6 +212,10 @@ def _launch_setup(context, *args, **kwargs):
                         'body_frame': 'imu_link',
                         'warmup_frames': LaunchConfiguration('tio_warmup_frames'),
                         'trajectory_path': LaunchConfiguration('trajectory_path'),
+                        'camera_enabled': 'true' if tio_camera else 'false',
+                        'camera_width': LaunchConfiguration('tio_camera_width'),
+                        'camera_height': LaunchConfiguration('tio_camera_height'),
+                        'camera_topic': LaunchConfiguration('tio_camera_topic'),
                     }.items(),
                 )],
             ))
@@ -313,6 +322,24 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'tio_warmup_frames', default_value='64',
             description='ToF frames collected before the first TIO pose.'),
+        DeclareLaunchArgument(
+            'tio_camera', default_value='true',
+            description='Use the forward-camera TIO-Former model and feed '
+                        '/flyrat/sensors/camera/image_raw to it.'),
+        DeclareLaunchArgument(
+            'tio_model', default_value='',
+            description='Override the TIO TorchScript path. Empty selects the '
+                        'camera or ToF-only model installed by '
+                        'flyrat_odometry.'),
+        DeclareLaunchArgument(
+            'tio_camera_topic', default_value='/flyrat/sensors/camera/image_raw',
+            description='mono8 topic consumed by the camera TIO model.'),
+        DeclareLaunchArgument(
+            'tio_camera_width', default_value='160',
+            description='Model camera input width (must match the export).'),
+        DeclareLaunchArgument(
+            'tio_camera_height', default_value='120',
+            description='Model camera input height (must match the export).'),
         DeclareLaunchArgument(
             'mode', default_value='imu_stereo',
             description="Odometry mode: 'imu_stereo' or 'stereo'."),

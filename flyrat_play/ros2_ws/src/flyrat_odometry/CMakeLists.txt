@@ -78,6 +78,8 @@ if(FLYRAT_BUILD_TIO)
   install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/../../../../libflyrat/models/tio_former_window64.pt"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../../../libflyrat/models/tio_former_window64.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../../../libflyrat/models/tio_former_window64_camera.pt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../../../libflyrat/models/tio_former_window64_camera.json"
     DESTINATION share/${PROJECT_NAME}/models)
 endif()
 

@@ -3,11 +3,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <deque>
 #include <fstream>
 #include <mutex>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 #include <torch/script.h>
@@ -213,6 +215,21 @@ TioOdometry::TioOdometry(Options options)
     try {
         impl_->module = torch::jit::load(impl_->options.model_path);
         impl_->module.eval();
+        const std::size_t expected_inputs = impl_->options.camera ? 7 : 5;
+        const std::size_t model_inputs =
+            impl_->module.get_method("forward").num_inputs();
+        // TorchScript methods include `self`; compare tensor arguments only.
+        const std::size_t model_arguments = model_inputs > 0 ? model_inputs - 1 : 0;
+        if (model_arguments != expected_inputs) {
+            throw odometry::OdometryError(
+                "TIO model " + impl_->options.model_path + " takes " +
+                std::to_string(model_arguments) + " inputs but camera=" +
+                (impl_->options.camera ? "true" : "false") + " implies " +
+                std::to_string(expected_inputs) +
+                "; set the matching camera option");
+        }
+    } catch (const odometry::OdometryError&) {
+        throw;
     } catch (const std::exception& error) {
         throw odometry::OdometryError(
             "cannot load TIO TorchScript model " + impl_->options.model_path + ": " + error.what());

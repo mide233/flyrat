@@ -13,8 +13,10 @@
 |---|---|
 | `research/tio_former/` | 数据集生成、PyTorch 模型、训练与评估 |
 | `research/tio_former/scripts/export_tio.py` | 将 checkpoint 导出为 TorchScript |
-| `libflyrat/models/tio_former_window64.pt` | 导出的 TorchScript 模型（4.6 MB） |
+| `libflyrat/models/tio_former_window64.pt` | ToF+IMU TorchScript 模型（4.6 MB） |
 | `libflyrat/models/tio_former_window64.json` | 模型元数据（窗口、视角、参数量） |
+| `libflyrat/models/tio_former_window64_camera.pt` | ToF+IMU+前向相机模型（5.4 MB，bringup 默认） |
+| `libflyrat/models/tio_former_window64_camera.json` | 相机模型元数据（`camera: true`, 160×120） |
 | `libflyrat/include/flyrat/tio/tio_odometry.hpp` | C++ 后端接口 |
 | `libflyrat/src/tio/tio_odometry.cpp` | 滑动窗口、IMU 插值、推理和增量积分 |
 | `libflyrat/tools/tio_bench.cpp` | 合成输入基准程序 |
@@ -187,12 +189,36 @@ front/left/right/down，节点用 `sensor_order: [1, 3, 2, 0]` 映射为：
 `bringup_real.sh` 会把参数原样传给 `bringup.launch.py`。默认
 `odometry_backend:=tio` 启动 `tio_odometry_node`；`odometry_backend:=stereo`
 仍可选择旧的立体骨架。启动参数是 `start_odometry`（默认 `true`），不是旧的
-`start_slam`。单目相机默认 `/dev/video10`、640x480@60，可用
+`start_slam`。单目相机默认 `/dev/video10`、320x240@15，可用
 `camera_device/camera_width/camera_height/camera_fps` 覆盖。
+
+TIO 后端默认使用**带相机模型**（`tio_camera:=true`），并把
+`/flyrat/sensors/camera/image_raw`（mono8）下采样到 160×120 后送入模型的第 6、7
+个输入。回退到旧 ToF+IMU 模型：
+
+```sh
+.script/bringup_real.sh tio_camera:=false
+```
+
+也可用 `tio_model:=/path/to.pt` 指定其他导出；模型张量输入数必须与
+`tio_camera` 匹配，否则 `TioOdometry` 在加载时直接报错，避免运行到首帧才崩溃。
+`tio_camera_width/tio_camera_height/tio_camera_topic` 分别默认
+`160/120//flyrat/sensors/camera/image_raw`。相机只参与学习融合，不参与几何
+三角化，因此**不需要标定**；`camera_tf_enable` 仍保持 `false`。
 
 ### 4.3 真机验证现状
 
-**2026-11-09：v3.1 模型已部署到实机链路。** 导出源为
+**2026-11-10：带相机模型已设为 bringup 默认。** 导出源为
+`research/tio_former/checkpoints_cam_full/seed0.pt`（完整相机数据集
+23,361 s、60 epoch），TorchScript 写入
+`libflyrat/models/tio_former_window64_camera.pt`（5.41 MB，1,278,937 参数，
+窗口 64，输入 160×120 灰度）。仿真 152 条 test：ATE **0.0814 m**、EDR 2.41%；
+同模型把相机置零 ATE 0.0871 m，全部 ToF 丢弃时 0.174 m（无相机模型
+0.205 m）。本机 `tio_bench ... camera` 80 帧平均 **13.6 ms**；
+`bringup.launch.py` 已实测能加载该模型并打印 `camera branch enabled`。
+真实相机仍未标定，实机精度尚未复测。
+
+**2026-11-09：v3.1 模型曾部署到实机链路。** 导出源为
 `research/tio_former/checkpoints_v3/main/seed1/best.pt`（epoch 57），
 TorchScript 写入 `libflyrat/models/tio_former_window64.pt`（4.77 MB）。
 `tio_bench` 80 帧平均约 9.4 ms，`test_tio_api` 通过；`bringup_real.sh`

@@ -354,8 +354,9 @@ ros2 launch flyrat_control flyrat_sitl.launch.py \
 
 ## 7. 里程计
 
-当前 `bringup_real.sh` 默认启动 TIO-Former ToF-惯性后端
-`tio_odometry_node`（4×8×8 ToF + 200 Hz IMU，需要 libtorch，见 7.6）。
+当前 `bringup_real.sh` 默认启动 TIO-Former ToF-IMU-相机后端
+`tio_odometry_node`（4×8×8 ToF + 200 Hz IMU + 160×120 mono8 相机，需要
+libtorch，见 7.6）；`tio_camera:=false` 回退 ToF+IMU 模型。
 `libflyrat` 同时保留不依赖 OpenCV 的旧立体接口 `flyrat::odometry` 和
 `odometry_node`，但它已是 legacy 骨架：只做输入校验、静态 TF 和状态发布，
 不输出有效位姿。TIO 细节见 [`odometry/tio_former.md`](odometry/tio_former.md)，
@@ -475,7 +476,8 @@ IMU 的 scale/misalignment 在 `sensor_receiver_node` 发布前按
 选定的里程计后端串成一条启动链：
 
 ```sh
-.script/bringup_real.sh                         # 传感器 + TIO 后端
+.script/bringup_real.sh                         # 传感器 + TIO 相机后端
+.script/bringup_real.sh tio_camera:=false       # ToF+IMU 模型回退
 .script/bringup_real.sh odometry_backend:=stereo # 旧立体骨架
 .script/bringup_real.sh start_foxglove:=true    # 再加 Foxglove bridge
 .script/bringup_real.sh start_odometry:=false   # 只看传感器
@@ -584,6 +586,7 @@ cmake -S libflyrat -B libflyrat/build-tio \
 cmake --build libflyrat/build-tio -j"$(nproc)"
 ctest --test-dir libflyrat/build-tio --output-on-failure -R tio
 libflyrat/build-tio/tio_bench libflyrat/models/tio_former_window64.pt 40
+libflyrat/build-tio/tio_bench libflyrat/models/tio_former_window64_camera.pt 80 camera
 ```
 
 ROS 节点：

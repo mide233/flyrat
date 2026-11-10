@@ -43,10 +43,12 @@ The method uses 4× VL53L5CX 8×8 ToF arrays (front / left / right / down) and a
   结果与图见 `report/v3_model/analysis.md`。
 - **P1 前向单目相机**：仿真 `tof_rig` 增加 `320×240@15` L8 相机；数据集记录
   `camera_jpeg/camera_offset`（160×120 JPEG q85）；模型增加 `CameraEncoder`
-  和 IMU>camera>ToF 的软先验可靠性 gate（`--camera` 开启）。C++/ROS 的
-  `TioOdometry` 和 `tio_odometry_node` 已支持可选的 160×120 相机输入，
-  但需要重新导出带相机的 TorchScript，并在 `tio_odometry.yaml` 中设置
-  `camera_enabled: true`。真实相机仍未标定。
+  和 IMU>camera>ToF 的软先验可靠性 gate（`--camera` 开启）。完整数据集
+  891 序列 / 23,361 s，3 seeds 测试 ATE 0.0868 ± 0.0047 m；相机置零
+  0.0945 m，全部 ToF 丢弃时 0.174 m（无相机模型 0.205 m）。
+  `libflyrat/models/tio_former_window64_camera.pt` 已导出并成为
+  `bringup_real.sh` 的默认 TIO 模型，`tio_camera:=false` 可回退。
+  真实相机仍未标定，实机精度尚未复测。
 - **模型改进筛选（v2）**：新增 `hybrid`、`gated_fifo`、`hybrid_gated`、
   `hybrid_split`。15-epoch 筛选中 `hybrid_gated` ATE 0.4208 m；40-epoch 复核
   0.4122 m，优于原 full 的 0.4316 m，但仍未超过 `naive_concat`（0.4013 m）和

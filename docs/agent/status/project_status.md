@@ -141,11 +141,13 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   [`research/tio_former/report/v3_model/analysis.md`](../../research/tio_former/report/v3_model/analysis.md)。
   该结果仍为四个 Gazebo 场景的仿真值，实机域差距尚未验证。
 - P1 前向单目相机：仿真数据集可记录 320×240@15 Hz 单目图像（存为
-  160×120 JPEG），模型增加 CameraEncoder 与可靠性 gate；C++/ROS TIO
-  后端已支持可选相机输入，但需重新导出带相机模型并开启
-  `camera_enabled`。`tio_bench <model> 80 camera` 可验证 C++ 7 输入路径。
-  训练增加 gate 使用率日志、ToF 使用下限正则和 ToF 退化增强。真实相机
-  仍未标定。
+  160×120 JPEG），模型增加 CameraEncoder 与可靠性 gate。完整数据集
+  891 序列 / 23,361 s，相机模型 3 seeds 测试 ATE 0.0868 ± 0.0047 m；
+  相机置零 0.0945 m，全部 ToF 丢弃时 0.174 m（无相机 0.205 m）。
+  `libflyrat/models/tio_former_window64_camera.pt` 已导出（窗口 64、
+  160×120、1,278,937 参数），并设为 `bringup_real.sh` 的默认 TIO 模型；
+  `tio_camera:=false` 可回退旧 ToF+IMU 模型。真实相机仍未标定，实机
+  精度尚未复测。
 
 ## 3. 实测指标
 

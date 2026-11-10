@@ -6,7 +6,9 @@
 /data_cam_full/
 /trajectories_cam_full/
 /runs_cam/
+/runs_cam_full/
 /checkpoints_cam/
+/checkpoints_cam_full/
 /assets/
 /runs/
 /runs_v3/

@@ -42,6 +42,11 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--tof-noise-m", type=float, default=0.0, help="Extra Gaussian range noise (m)")
     parser.add_argument("--status-dropout", type=float, default=0.0, help="Fraction of valid zones to drop")
     parser.add_argument("--perturb-seed", type=int, default=0)
+    parser.add_argument(
+        "--zero-camera",
+        action="store_true",
+        help="Feed zero camera frames to measure the camera branch contribution.",
+    )
     return parser.parse_args()
 
 
@@ -150,7 +155,7 @@ def _load_model(checkpoint: Path, device: str) -> TioFormer:
     return model
 
 
-def _predict(model: TioFormer, arrays: dict, device: str):
+def _predict(model: TioFormer, arrays: dict, device: str, zero_camera: bool = False):
     tof = torch.from_numpy(np.asarray(arrays["tof"], dtype=np.float32)).unsqueeze(0).to(device)
     weight = torch.from_numpy(np.asarray(arrays["tof_weight"], dtype=np.float32)).unsqueeze(0).to(device)
     imu = torch.from_numpy(np.asarray(arrays["imu"], dtype=np.float32)).unsqueeze(0).to(device)
@@ -161,7 +166,7 @@ def _predict(model: TioFormer, arrays: dict, device: str):
         from tio_former.data.torch_dataset import _decode_camera
 
         height, width = model.config.camera_height, model.config.camera_width
-        if "camera_jpeg" in arrays and "camera_offset" in arrays:
+        if not zero_camera and "camera_jpeg" in arrays and "camera_offset" in arrays:
             frames = _decode_camera(
                 np.asarray(arrays["camera_jpeg"]),
                 np.asarray(arrays["camera_offset"]),
@@ -244,7 +249,7 @@ def main() -> int:
         arrays, _ = load_sequence(path)
         metadata = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
         _perturb_arrays(arrays, metadata, args)
-        delta_p, delta_phi, gate = _predict(model, arrays, args.device)
+        delta_p, delta_phi, gate = _predict(model, arrays, args.device, args.zero_camera)
         delta_p_t = torch.from_numpy(np.asarray(delta_p)).to(args.device)
         delta_phi_t = torch.from_numpy(np.asarray(delta_phi)).to(args.device)
         predicted = integrate_increments(delta_p_t, delta_phi_t)[0].cpu().numpy()
@@ -295,6 +300,8 @@ def main() -> int:
     summary = {
         "split": split,
         "checkpoint": str(Path(args.checkpoint)),
+        "camera": bool(model.config.camera),
+        "zero_camera": bool(args.zero_camera),
         "sequences": len(rows),
         "duration_s": float(sum(row["duration_s"] for row in rows)),
         "path_length_m": float(sum(row["path_length_m"] for row in rows)),

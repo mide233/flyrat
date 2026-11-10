@@ -13,6 +13,7 @@
 #   .script/bringup_real.sh start_foxglove:=true
 #   .script/bringup_real.sh start_odometry:=false
 #   .script/bringup_real.sh odometry_backend:=tio
+#   .script/bringup_real.sh tio_camera:=false   # ToF+IMU model fallback
 #   .script/bringup_real.sh record:=true record_imu_only:=true record_duration:=3h
 #   .script/bringup_real.sh record:=true record_topics:="/flyrat/sensors/imu /flyrat/sensors/camera/image_raw /flyrat/sensors/tof_0 /flyrat/sensors/tof_1 /flyrat/sensors/tof_2 /flyrat/sensors/tof_3"
 #
