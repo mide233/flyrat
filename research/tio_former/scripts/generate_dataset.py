@@ -339,6 +339,45 @@ def _make_trajectory(
             spec.path_length_m = float(trajectory.path_length)
             spec.shape = shape
             return spec
+    # Dense template rooms (office partitions) can reject every nominal
+    # excursion; retry with a minimal in-place inspection path before giving up.
+    for attempt in range(8):
+        rng = np.random.default_rng(spec.seed + 5501 + 131 * attempt)
+        try:
+            trajectory = inspection_trajectory(
+                scene["bounds"],
+                rng=rng,
+                sample_rate_hz=sample_rate_hz,
+                duration_s=float(rng.uniform(*duration_range)),
+                altitude_m=float(
+                    altitude
+                    if altitude is not None
+                    else trajectory_config.get("trajectory", trajectory_config).get("altitude_m", 1.0)
+                ),
+                clearance_m=0.10,
+                obstacles=obstacles,
+                motion_mix=trajectory_config.get("inspection", {}).get("motion_mix"),
+                lateral_excursion_m=0.22,
+                vertical_excursion_m=0.08,
+                max_speed_mps=float(
+                    trajectory_config.get("inspection", {}).get("max_speed_mps", 1.0)
+                ),
+                return_to_start=True,
+            )
+        except ValueError as exc:
+            last_error = exc
+            continue
+        if not (duration_range[0] <= trajectory.duration <= duration_range[1]):
+            last_error = ValueError(f"duration {trajectory.duration:.2f} s outside {duration_range}")
+            continue
+        path = trajectory_dir / f"{spec.seq_id}.csv"
+        trajectory.to_csv(path)
+        spec.csv = str(path)
+        spec.kind = "inspection"
+        spec.duration_s = float(trajectory.duration)
+        spec.path_length_m = float(trajectory.path_length)
+        spec.shape = "inspection"
+        return spec
     raise ValueError(f"could not generate {spec.seq_id}: {last_error}")
 
 
@@ -683,7 +722,14 @@ def main() -> int:
 
     failures: list[str] = []
     made: list[SequenceSpec] = []
+    processed_dir = ROOT / generation["processed_dir"]
     for index, spec in enumerate(specs, start=1):
+        if not args.overwrite and (processed_dir / f"{spec.seq_id}.npz").exists():
+            # Resume: keep the existing sequence and skip trajectory/world
+            # regeneration.  Planning is deterministic, so the stored CSV and
+            # world already match this spec.
+            made.append(spec)
+            continue
         try:
             made.append(
                 _make_trajectory(
