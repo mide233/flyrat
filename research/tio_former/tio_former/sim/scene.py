@@ -22,9 +22,9 @@ _HEADER = """<?xml version="1.0" ?>
       <shadows>true</shadows>
     </scene>
     <physics name="physics" type="ignored">
-      <max_step_size>0.0025</max_step_size>
+      <max_step_size>0.01</max_step_size>
       <real_time_factor>{real_time_factor}</real_time_factor>
-      <real_time_update_rate>400</real_time_update_rate>
+      <real_time_update_rate>100</real_time_update_rate>
     </physics>
     <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
     <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>

@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import json
+import os
 import subprocess
 import sys
 import zlib
@@ -334,6 +335,45 @@ def _run_one(
     if not world.exists():
         raise FileNotFoundError(f"missing world {world}; run scripts/generate_worlds.py")
     timeout = max(180.0, spec.duration_s * 8.0)
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            _record_and_process(
+                spec,
+                config,
+                raw_path=raw_path,
+                processed_path=processed_path,
+                timeout=timeout,
+                sensors_config=sensors_config,
+            )
+            last_error = None
+            break
+        except RuntimeError as exc:
+            last_error = exc
+            raw_path.unlink(missing_ok=True)
+            if attempt < 2:
+                logger.warning("%s: attempt %d failed, retrying: %s", spec.seq_id, attempt + 1, exc)
+    if last_error is not None:
+        raise last_error
+    if not keep_raw:
+        raw_path.unlink(missing_ok=True)
+        raw_path.with_suffix(".json").unlink(missing_ok=True)
+        raw_path.with_suffix(".gazebo.log").unlink(missing_ok=True)
+    return {"seq_id": spec.seq_id, "status": "done", "processed": str(processed_path)}
+
+
+def _record_and_process(
+    spec: SequenceSpec,
+    config: dict[str, Any],
+    *,
+    raw_path: Path,
+    processed_path: Path,
+    timeout: float,
+    sensors_config: str,
+) -> None:
+    world = ROOT / "sim/worlds/generated" / f"{spec.scene}.sdf"
+    if not world.exists():
+        raise FileNotFoundError(f"missing world {world}; run scripts/generate_worlds.py")
     _run(
         [
             sys.executable,
@@ -372,11 +412,6 @@ def _run_one(
         ],
         timeout=timeout,
     )
-    if not keep_raw:
-        raw_path.unlink(missing_ok=True)
-        raw_path.with_suffix(".json").unlink(missing_ok=True)
-        raw_path.with_suffix(".gazebo.log").unlink(missing_ok=True)
-    return {"seq_id": spec.seq_id, "status": "done", "processed": str(processed_path)}
 
 
 def _summarize(plan: list[SequenceSpec], config: dict[str, Any]) -> dict[str, Any]:
@@ -491,7 +526,12 @@ def main() -> int:
         _write_plan_report(made, report_path=plan_report_path)
         return 0 if not failures else 1
 
-    workers = max(1, int(generation.get("workers", 3)))
+    workers = int(generation.get("workers", 3))
+    if workers <= 0:
+        # Each Gazebo server is a single-core process; rendering is the
+        # practical limit (8+ concurrent EGL contexts fail on a 6 GB GPU),
+        # so cap the automatic value.
+        workers = min(6, max(1, (os.cpu_count() or 2) // 2))
     resume = bool(generation.get("resume", True)) and not args.no_resume
     logger.info("recording with %d workers", workers)
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:

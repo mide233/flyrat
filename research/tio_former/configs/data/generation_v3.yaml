@@ -7,7 +7,7 @@
 
 generation:
   target_seconds: 20000.0
-  workers: 3
+  workers: 0
   resume: true
   keep_raw: false
   scene_weights:

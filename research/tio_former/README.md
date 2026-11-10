@@ -151,10 +151,14 @@ bash scripts/download_assets.sh
 python3 scripts/generate_worlds.py
 
 # 试跑 4 个短序列，检查录制/后处理链路
-python3 scripts/generate_dataset.py --smoke --overwrite --workers 2
+python3 scripts/generate_dataset.py --smoke --overwrite
 
-# 生成完整数据集（目标 9500 s；可中断后重新运行以续跑）
-python3 scripts/generate_dataset.py --workers 3
+# 生成完整数据集（目标时长由 generation 配置的 target_seconds 决定；可中断续跑）
+# workers: 0 表示按 CPU 自动选择（上限 6；再高会因并发 EGL 上下文失败）
+python3 scripts/generate_dataset.py
+
+# 指定并发（本机 12 核实测：6 workers 约 12x 实时，3 workers 约 5.5x）
+python3 scripts/generate_dataset.py --workers 6
 
 # 建立索引、随机划分与留一场景划分
 python3 scripts/build_dataset_index.py
@@ -171,6 +175,18 @@ python3 scripts/build_dataset_index.py
 - `camera_frame_valid`：该 ToF 帧是否有对齐的相机帧
 
 这些字段是可选的，不进入 `REQUIRED_ARRAYS`，旧数据集仍可直接加载。
+
+实机 rosbag 可离线检查与回放：
+
+```bash
+# 解包 mcap -> bag.npz/bag.json（需要 ROS jazzy 的 rosbag2_py 和 cv2）
+bash -lc 'source /opt/ros/jazzy/setup.bash && python3 scripts/inspect_rosbag.py \
+  --bag ../../issue_6_logbag_1_1 --out /tmp/bag_issue6'
+
+# 用指定 checkpoint 回放并输出轨迹
+.venv/bin/python scripts/replay_rosbag.py --extracted /tmp/bag_issue6/bag.npz \
+  --checkpoint checkpoints/seed0.pt --out runs/bag_issue6 --plot --device cpu
+```
 训练时加 `--camera` 会启用 `CameraEncoder` 和可靠性 gate：
 
 ```bash

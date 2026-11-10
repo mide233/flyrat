@@ -1,7 +1,7 @@
 # P1 full camera dataset: v3.1-scale motion distribution + forward mono camera.
 generation:
   target_seconds: 20000.0
-  workers: 3
+  workers: 0
   resume: true
   keep_raw: false
   scene_weights:

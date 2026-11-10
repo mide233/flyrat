@@ -1,7 +1,7 @@
 # P1 camera pilot: v3.1 motion distribution + forward mono camera.
 generation:
   target_seconds: 8000.0
-  workers: 3
+  workers: 0
   resume: true
   keep_raw: false
   scene_weights:
