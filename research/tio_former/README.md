@@ -178,7 +178,27 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python scripts/train.py \
 ```
 
 gate 使用 IMU > camera > ToF 的软先验，但权重可学习，相机可以在静态漂移时
-压过 IMU/ToF。
+压过 IMU/ToF。训练日志每个 epoch 会输出 `gate imu/camera/tof` 平均权重，
+`metrics.jsonl` 中同时记录 `train_gate`/`val_gate`；`gate_regularization`
+中的 `tof_floor` 通过 `relu(tof_floor - w_tof)` 防止 ToF 分支塌缩。
+
+ToF 大面积缺失（视觉可用）的训练样本由 `augmentation.tof_degraded_*`
+控制；评估时可用：
+
+```bash
+# 正常输入
+.venv/bin/python scripts/evaluate.py --checkpoint checkpoints_cam/seed0/best.pt \
+  --processed data_cam_full/processed --split test --out runs_cam/eval
+# 退化 ToF：丢 2 路视角并随机丢弃 60% 有效区
+.venv/bin/python scripts/evaluate.py --checkpoint checkpoints_cam/seed0/best.pt \
+  --processed data_cam_full/processed --split test \
+  --drop-views front left --status-dropout 0.6 --out runs_cam/eval_degraded
+```
+
+`summary.json` 额外写入 `gate_usage`，便于比较有/无相机时的分支使用率。
+
+完整相机数据集配置为 `configs/data/generation_camera_full.yaml`
+（目标 20,000 s，输出到 `data_cam_full/`）。
 
 结果写入 `data/processed/`、`data/index.csv`、`data/splits.json`、
 `data/stats.json`、`data/report.md`。数据目录不提交。

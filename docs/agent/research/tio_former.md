@@ -340,7 +340,11 @@ scene_id, seq_id, traj_type, split
   数据集可选保存 `camera_jpeg`/`camera_offset`（160×120 JPEG q85）；模型增加
   `CameraEncoder` 与 IMU>camera>ToF 的软先验可靠性 gate。C++ `TioOdometry`
   和 ROS `tio_odometry_node` 支持可选 160×120 相机输入，需导出带相机的
-  TorchScript 并设置 `camera_enabled: true`。真实相机仍未标定。
+  TorchScript 并设置 `camera_enabled: true`。训练日志/`metrics.jsonl` 记录
+  每个 epoch 的 gate 平均权重，`gate_regularization.tof_floor` 防止 ToF
+  分支塌缩；`augmentation.tof_degraded_*` 注入 ToF 大面积缺失样本。完整
+  数据配置为 `configs/data/generation_camera_full.yaml`（目标 20k s）。
+  真实相机仍未标定。
 - C++/ROS 接入（实验性）：新增 `flyrat::tio`（`FLYRAT_BUILD_TIO`，CPU
   libtorch）和 ROS 2 `tio_odometry_node`，将导出的 TorchScript 模型
   `libflyrat/models/tio_former_window64.pt` 接入 `/flyrat/sensors/tof_0..3`

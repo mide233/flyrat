@@ -143,7 +143,9 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - P1 前向单目相机：仿真数据集可记录 320×240@15 Hz 单目图像（存为
   160×120 JPEG），模型增加 CameraEncoder 与可靠性 gate；C++/ROS TIO
   后端已支持可选相机输入，但需重新导出带相机模型并开启
-  `camera_enabled`。真实相机仍未标定。
+  `camera_enabled`。`tio_bench <model> 80 camera` 可验证 C++ 7 输入路径。
+  训练增加 gate 使用率日志、ToF 使用下限正则和 ToF 退化增强。真实相机
+  仍未标定。
 
 ## 3. 实测指标
 
