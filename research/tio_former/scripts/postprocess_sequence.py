@@ -193,6 +193,7 @@ def main() -> int:
     monotonic = np.concatenate([[True], np.diff(aligned_stamp) > 0])
     indices = indices[monotonic]
     aligned_stamp = aligned_stamp[monotonic]
+    keep = np.flatnonzero(keep)[monotonic]
     t_tof = aligned_stamp - aligned_stamp[0]
     if t_tof.size < 2:
         raise ValueError("fewer than two aligned frames")
