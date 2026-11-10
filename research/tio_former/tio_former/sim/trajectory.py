@@ -465,3 +465,166 @@ def generate_sequence(
     raise ValueError(
         f"failed to generate a collision-free {kind} trajectory after {attempts} attempts: {last_error}"
     )
+
+
+def _min_jerk(alpha: np.ndarray) -> np.ndarray:
+    """Zero-velocity/zero-acceleration interpolation between two keyframes."""
+    return alpha * alpha * alpha * (10.0 + alpha * (-15.0 + 6.0 * alpha))
+
+
+def inspection_trajectory(
+    scene_bounds: dict[str, Iterable[float]],
+    *,
+    rng: np.random.Generator,
+    sample_rate_hz: float,
+    duration_s: float,
+    altitude_m: float,
+    clearance_m: float,
+    obstacles: list[dict[str, Any]] | None = None,
+    motion_mix: dict[str, float] | None = None,
+    lateral_excursion_m: float = 0.4,
+    vertical_excursion_m: float = 0.25,
+    max_speed_mps: float = 1.0,
+    return_to_start: bool = True,
+) -> Trajectory:
+    """Stop-and-go inspection motion with real static dwell.
+
+    The sequence is a chain of holds and smooth moves.  Moves use a minimum
+    jerk profile, so velocity and acceleration are exactly zero at every hold
+    boundary; this gives the model genuine stationary samples instead of the
+    old constant 0.3 m/s crawl that caused the real-vehicle velocity bias.
+    """
+    if sample_rate_hz <= 0.0 or duration_s <= 0.0:
+        raise ValueError("sample_rate_hz and duration_s must be positive")
+    low, high = _bounds(scene_bounds)
+    clearance = max(0.0, float(clearance_m))
+    inner_low = low + clearance
+    inner_high = high - clearance
+    if np.any(inner_high <= inner_low):
+        raise ValueError("scene is too small for the requested clearance")
+
+    mix = motion_mix or {"static": 0.3, "micro": 0.2, "low": 0.3, "normal": 0.2}
+    names = list(mix)
+    weights = np.asarray([max(0.0, float(mix[name])) for name in names], dtype=np.float64)
+    if weights.sum() <= 0.0:
+        raise ValueError("motion_mix must have positive total weight")
+    weights /= weights.sum()
+
+    start = np.array(
+        [
+            rng.uniform(max(inner_low[0], -lateral_excursion_m), min(inner_high[0], lateral_excursion_m)),
+            rng.uniform(max(inner_low[1], -lateral_excursion_m), min(inner_high[1], lateral_excursion_m)),
+            np.clip(altitude_m, inner_low[2], inner_high[2]),
+        ],
+        dtype=np.float64,
+    )
+    lateral = max(0.05, float(lateral_excursion_m))
+    vertical = max(0.03, float(vertical_excursion_m))
+
+    key_t: list[float] = [0.0]
+    key_p: list[np.ndarray] = [start.copy()]
+    t = 0.0
+    position = start.copy()
+    stagnant = 0
+    while t < duration_s - 3.0:
+        name = str(rng.choice(names, p=weights))
+        remaining = duration_s - t
+        if name == "static":
+            length = float(rng.uniform(0.8, 2.0))
+            length = min(length, remaining)
+            t += length
+            key_t.append(t)
+            key_p.append(position.copy())
+            continue
+        if name == "micro":
+            length = float(rng.uniform(1.5, 3.5))
+            distance = float(rng.uniform(0.02, 0.12))
+        elif name == "low":
+            speed = float(rng.uniform(0.05, 0.2))
+            length = float(rng.uniform(2.0, 5.0))
+            distance = speed * length / 1.875
+        else:
+            speed = float(rng.uniform(0.25, max_speed_mps))
+            length = float(rng.uniform(1.5, 4.0))
+            # Minimum-jerk peak speed is 1.875x the mean, so budget the
+            # distance from the mean instead of the requested peak.
+            distance = speed * length / 1.875
+        planned = length
+        if return_to_start:
+            # Keep enough time for a final return that does not exceed the
+            # speed limit (minimum-jerk peak is 1.875x the mean speed).
+            needed = (float(np.linalg.norm(position - start)) + distance) / 0.5
+            if t + length + needed > duration_s - 1.0:
+                break
+        length = min(length, remaining)
+        if length < 0.4:
+            break
+        # Reserve the end of the sequence for a final return-to-start move.
+        if return_to_start and t + length > duration_s - 1.2:
+            length = max(0.4, duration_s - 1.2 - t)
+        distance *= length / max(planned, 1e-6)
+        target = position.copy()
+        for _ in range(60):
+            angle = float(rng.uniform(-np.pi, np.pi))
+            candidate = position + distance * np.array([np.cos(angle), np.sin(angle), 0.0])
+            candidate[2] = np.clip(
+                candidate[2] + float(rng.uniform(-vertical, vertical)),
+                start[2] - vertical,
+                start[2] + vertical,
+            )
+            offsets = candidate[:2] - start[:2]
+            if np.linalg.norm(offsets) <= lateral:
+                target = candidate
+                break
+        else:
+            target = position.copy()
+        if np.linalg.norm(target - position) < 1e-3:
+            # The excursion bound rejected every direction; try another phase
+            # instead of inserting an unplanned hold.
+            stagnant += 1
+            if stagnant > 12:
+                break
+            continue
+        position = target
+        stagnant = 0
+        t += length
+        key_t.append(t)
+        key_p.append(position.copy())
+
+    if return_to_start and np.linalg.norm(position - start) > 1e-3:
+        distance = float(np.linalg.norm(position - start))
+        required = distance * 1.875 / max(0.1, max_speed_mps)
+        length = float(np.clip(max(distance / 0.20, required), 1.0, 8.0))
+        available = max(0.6, duration_s - t)
+        if length > available:
+            length = available
+        t += length
+        key_t.append(t)
+        key_p.append(start.copy())
+    if t < duration_s:
+        key_t.append(duration_s)
+        key_p.append(key_p[-1].copy())
+
+    sample_count = max(2, int(round(duration_s * sample_rate_hz)) + 1)
+    times = np.linspace(0.0, duration_s, sample_count)
+    knots = np.asarray(key_t, dtype=np.float64)
+    points = np.asarray(key_p, dtype=np.float64)
+    position_out = np.empty((times.size, 3), dtype=np.float64)
+    segment = 0
+    for index, value in enumerate(times):
+        while segment + 1 < knots.size - 1 and value > knots[segment + 1]:
+            segment += 1
+        t0, t1 = knots[segment], knots[segment + 1]
+        alpha = 0.0 if t1 <= t0 else float(np.clip((value - t0) / (t1 - t0), 0.0, 1.0))
+        position_out[index] = points[segment] + _min_jerk(np.asarray(alpha)) * (
+            points[segment + 1] - points[segment]
+        )
+
+    position_out[:, 0] = np.clip(position_out[:, 0], inner_low[0], inner_high[0])
+    position_out[:, 1] = np.clip(position_out[:, 1], inner_low[1], inner_high[1])
+    position_out[:, 2] = np.clip(position_out[:, 2], inner_low[2], inner_high[2])
+    _check_bounds(position_out, low, high, clearance)
+    if obstacles:
+        _check_obstacles(position_out, obstacles, clearance)
+    quat = _positions_to_yaw_quat(position_out)
+    return Trajectory(times, position_out, quat)

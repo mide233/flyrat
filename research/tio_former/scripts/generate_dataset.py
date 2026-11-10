@@ -32,10 +32,22 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from tio_former.sim.random_scene import (  # noqa: E402
+    add_path_clutter,
+    load_texture_pool,
+    sample_scene,
+    scene_to_sdf,
+)
 from tio_former.sim.scene import scene_obstacles  # noqa: E402
-from tio_former.sim.trajectory import generate_sequence, retime_to_speed  # noqa: E402
+from tio_former.sim.trajectory import (  # noqa: E402
+    generate_sequence,
+    inspection_trajectory,
+    retime_to_speed,
+)
 from tio_former.utils.config import load_yaml  # noqa: E402
 from tio_former.utils.logging import get_logger  # noqa: E402
+
+logger = get_logger("generate_dataset")
 
 
 @dataclass
@@ -51,6 +63,8 @@ class SequenceSpec:
     csv: str = ""
     path_length_m: float = 0.0
     shape: str | None = None
+    world: str = ""
+    scene_spec: str = ""
 
 
 def _parse_args() -> argparse.Namespace:
@@ -213,8 +227,19 @@ def _make_trajectory(
     sample_rate_hz: float,
 ) -> SequenceSpec:
     scene = scene_config["scenes"][spec.scene]
-    obstacles = scene_obstacles(spec.scene, scene)
     trajectory_dir = trajectory_root / spec.split / spec.scene
+    if str(scene.get("style", "")).lower() == "random":
+        return _make_random_scene_trajectory(
+            spec,
+            scene,
+            trajectory_config,
+            attempts=attempts,
+            trajectory_root=trajectory_root,
+            raw_duration_s=raw_duration_s,
+            duration_range=duration_range,
+            sample_rate_hz=sample_rate_hz,
+        )
+    obstacles = scene_obstacles(spec.scene, scene)
     trajectory_dir.mkdir(parents=True, exist_ok=True)
     last_error: Exception | None = None
     attempts = max(1, attempts)
@@ -230,22 +255,41 @@ def _make_trajectory(
                     "shapes", ["circle", "figure_eight", "square", "straight"]
                 )
                 shape = str(rng.choice(shapes))
+            inspection = trajectory_config.get("inspection", {})
             try:
-                trajectory = generate_sequence(
-                    rng,
-                    scene["bounds"],
-                    trajectory_config,
-                    kind=kind,
-                    duration_s=raw_duration_s,
-                    shape=shape,
-                    obstacles=obstacles,
-                    altitude_m=altitude,
-                    vertical_jitter_m=vertical_jitter_m,
-                    waypoint_count=test_waypoint_count if spec.split == "test" else None,
-                    waypoint_step_m=test_waypoint_step_m if spec.split == "test" else None,
-                    attempts=1,
-                )
-                if spec.split == "test":
+                if inspection.get("enabled", False):
+                    cfg = trajectory_config.get("trajectory", trajectory_config)
+                    trajectory = inspection_trajectory(
+                        scene["bounds"],
+                        rng=rng,
+                        sample_rate_hz=sample_rate_hz,
+                        duration_s=float(rng.uniform(*duration_range)),
+                        altitude_m=float(altitude if altitude is not None else cfg.get("altitude_m", 1.0)),
+                        clearance_m=float(cfg.get("min_clearance_m", 0.3)),
+                        obstacles=obstacles,
+                        motion_mix=inspection.get("motion_mix"),
+                        lateral_excursion_m=float(inspection.get("lateral_excursion_m", 0.4)),
+                        vertical_excursion_m=float(inspection.get("vertical_excursion_m", 0.2)),
+                        max_speed_mps=float(inspection.get("max_speed_mps", 1.0)),
+                        return_to_start=bool(inspection.get("return_to_start", True)),
+                    )
+                    kind = "inspection"
+                else:
+                    trajectory = generate_sequence(
+                        rng,
+                        scene["bounds"],
+                        trajectory_config,
+                        kind=kind,
+                        duration_s=raw_duration_s,
+                        shape=shape,
+                        obstacles=obstacles,
+                        altitude_m=altitude,
+                        vertical_jitter_m=vertical_jitter_m,
+                        waypoint_count=test_waypoint_count if spec.split == "test" else None,
+                        waypoint_step_m=test_waypoint_step_m if spec.split == "test" else None,
+                        attempts=1,
+                    )
+                if spec.split == "test" and kind != "inspection":
                     path_length = trajectory.path_length
                     if not (test_path_range[0] <= path_length <= test_path_range[1]):
                         last_error = ValueError(
@@ -296,6 +340,93 @@ def _make_trajectory(
     raise ValueError(f"could not generate {spec.seq_id}: {last_error}")
 
 
+def _make_random_scene_trajectory(
+    spec: SequenceSpec,
+    scene: dict[str, Any],
+    trajectory_config: dict[str, Any],
+    *,
+    attempts: int,
+    trajectory_root: Path,
+    raw_duration_s: float,
+    duration_range: list[float],
+    sample_rate_hz: float,
+) -> SequenceSpec:
+    """Sample a textured room and a stop-and-go inspection path in it."""
+    manifest = str((ROOT / scene.get("texture_manifest", "configs/sim/textures_manifest.json")).resolve())
+    entries = load_texture_pool(manifest)
+    texture_root = ROOT / scene.get("texture_root", "assets/textures")
+    random_scene = sample_scene(
+        spec.seed,
+        scene,
+        split=spec.split,
+        texture_entries=entries,
+        texture_root=texture_root,
+    )
+    world_dir = ROOT / "sim/worlds/generated"
+    world_dir.mkdir(parents=True, exist_ok=True)
+    world_path = world_dir / f"{spec.seq_id}.sdf"
+    spec_path = trajectory_root / spec.split / spec.scene / f"{spec.seq_id}.scene.json"
+    spec_path.parent.mkdir(parents=True, exist_ok=True)
+
+    cfg = trajectory_config.get("trajectory", trajectory_config)
+    motion = trajectory_config.get("inspection", {})
+    last_error: Exception | None = None
+    for attempt in range(max(1, attempts)):
+        rng = np.random.default_rng(spec.seed + 31 * attempt + 4409)
+        duration = float(rng.uniform(*duration_range))
+        # Small, cluttered rooms may not fit the nominal excursion; shrink it
+        # progressively instead of failing the whole sequence.
+        scale = max(0.35, 1.0 - 0.12 * attempt)
+        try:
+            trajectory = inspection_trajectory(
+                random_scene.bounds,
+                rng=rng,
+                sample_rate_hz=sample_rate_hz,
+                duration_s=duration,
+                altitude_m=random_scene.spawn[2],
+                clearance_m=float(scene.get("clearance_m", cfg.get("min_clearance_m", 0.3))),
+                obstacles=random_scene.obstacles,
+                motion_mix=motion.get("motion_mix"),
+                lateral_excursion_m=float(motion.get("lateral_excursion_m", 0.4)) * scale,
+                vertical_excursion_m=float(motion.get("vertical_excursion_m", 0.2)) * scale,
+                max_speed_mps=float(motion.get("max_speed_mps", 1.0)),
+                return_to_start=bool(motion.get("return_to_start", True)),
+            )
+            if not (duration_range[0] <= trajectory.duration <= duration_range[1]):
+                raise ValueError(
+                    f"duration {trajectory.duration:.2f} s outside {duration_range}"
+                )
+        except ValueError as exc:
+            last_error = exc
+            continue
+        clutter_cfg = scene.get("path_clutter", {})
+        if clutter_cfg.get("enabled", True):
+            add_path_clutter(
+                random_scene,
+                trajectory.position,
+                np.random.default_rng(spec.seed + 9901),
+                count=tuple(clutter_cfg.get("count", [10, 20])),
+                min_distance=float(clutter_cfg.get("min_distance_m", 0.25)),
+                max_distance=float(clutter_cfg.get("max_distance_m", 0.45)),
+                clearance=float(clutter_cfg.get("clearance_m", 0.24)),
+                forward_exclusion_deg=float(clutter_cfg.get("forward_exclusion_deg", 50.0)),
+            )
+        world_path.write_text(scene_to_sdf(random_scene, texture_root=texture_root), encoding="utf-8")
+        spec_path.write_text(json.dumps(random_scene.spec(), indent=2), encoding="utf-8")
+        path = trajectory_root / spec.split / spec.scene / f"{spec.seq_id}.csv"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        trajectory.to_csv(path)
+        spec.csv = str(path)
+        spec.kind = "inspection"
+        spec.duration_s = float(trajectory.duration)
+        spec.path_length_m = float(trajectory.path_length)
+        spec.shape = "inspection"
+        spec.world = str(world_path)
+        spec.scene_spec = str(spec_path)
+        return spec
+    raise ValueError(f"could not generate {spec.seq_id}: {last_error}")
+
+
 def _run(command: list[str], *, timeout: float) -> None:
     completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=timeout)
     if completed.returncode != 0:
@@ -331,7 +462,7 @@ def _run_one(
         processed_path.unlink(missing_ok=True)
         processed_path.with_suffix(".json").unlink(missing_ok=True)
 
-    world = ROOT / "sim/worlds/generated" / f"{spec.scene}.sdf"
+    world = Path(spec.world) if spec.world else ROOT / "sim/worlds/generated" / f"{spec.scene}.sdf"
     if not world.exists():
         raise FileNotFoundError(f"missing world {world}; run scripts/generate_worlds.py")
     timeout = max(180.0, spec.duration_s * 8.0)
@@ -371,7 +502,7 @@ def _record_and_process(
     timeout: float,
     sensors_config: str,
 ) -> None:
-    world = ROOT / "sim/worlds/generated" / f"{spec.scene}.sdf"
+    world = Path(spec.world) if spec.world else ROOT / "sim/worlds/generated" / f"{spec.scene}.sdf"
     if not world.exists():
         raise FileNotFoundError(f"missing world {world}; run scripts/generate_worlds.py")
     _run(
@@ -409,7 +540,8 @@ def _record_and_process(
             str(spec.seed),
             "--sensors-config",
             sensors_config,
-        ],
+        ]
+        + (["--scene-spec", spec.scene_spec] if spec.scene_spec else []),
         timeout=timeout,
     )
 

@@ -1,0 +1,37 @@
+# V4 dataset: randomized textured rooms, real-vehicle degradation, and
+# stop-and-go motion with genuine static dwell (issue_6 drift fix).
+generation:
+  target_seconds: 40000.0
+  workers: 0
+  resume: true
+  keep_raw: false
+  scene_weights:
+    random_room: 0.70
+    office: 0.15
+    corridor: 0.15
+  canonical_ratio: 0.0
+  split_fractions:
+    train: 0.70
+    val: 0.15
+    test: 0.15
+  raw_duration_s: 35.0
+  duration_s:
+    train: [30.0, 40.0]
+    val: [30.0, 40.0]
+    test: [30.0, 40.0]
+  altitude_range: [0.22, 1.35]
+  max_acceleration_mps2: 10.0
+  vertical_jitter_m: 0.2
+  test_path_m: [0.8, 6.0]
+  test_waypoint_count: [3, 7]
+  test_waypoint_step_m: [0.2, 0.6]
+  attempts_per_sequence: 120
+  raw_dir: data_v4/raw
+  processed_dir: data_v4/processed
+  trajectory_dir: trajectories_v4
+  plan_path: data_v4/generation_plan.json
+  plan_report_path: data_v4/generation_plan.md
+  index_path: data_v4/index.csv
+  report_path: data_v4/report.md
+  sensors_config: configs/sim/sensors_v4.yaml
+  seed: 20261112

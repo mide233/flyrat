@@ -1,0 +1,53 @@
+# 70% randomized textured rooms + 30% structured templates.
+#
+# random_room is rebuilt from the sequence seed; `bounds`/`spawn` here are only
+# fallbacks (the sampler overrides them).  Templates keep the old hand-made
+# furniture so the model still sees corridor/office structure.
+scenes:
+  random_room:
+    style: random
+    bounds:
+      x: [-4.0, 4.0]
+      y: [-4.0, 4.0]
+      z: [0.0, 3.0]
+    spawn: [0.0, 0.0, 0.9]
+    room:
+      width_m: [3.2, 7.0]
+      depth_m: [3.2, 7.0]
+      height_m: [2.4, 3.2]
+    spawn_altitude_m: [0.18, 1.20]
+    spawn:
+      low_altitude_probability: 0.6
+      low_altitude_m: [0.18, 0.28]
+    clearance_m: 0.2
+    clutter:
+      count: [12, 26]
+      near_field_count: [3, 6]
+    textures:
+      per_scene: [4, 9]
+    light:
+      intensity: [0.45, 1.15]
+      color_temperature_k: [3000.0, 6800.0]
+      ambient: [0.22, 0.60]
+      drift_amplitude: 0.15
+      drift_period_s: [20.0, 60.0]
+    texture_manifest: configs/sim/textures_manifest.json
+    texture_root: assets/textures
+
+  office:
+    world_name: tio_office
+    style: office
+    bounds:
+      x: [-4.5, 4.5]
+      y: [-3.5, 3.5]
+      z: [0.15, 2.7]
+    spawn: [0.0, 0.0, 1.0]
+
+  corridor:
+    world_name: tio_corridor
+    style: corridor
+    bounds:
+      x: [-12.0, 12.0]
+      y: [-1.2, 1.2]
+      z: [0.15, 2.45]
+    spawn: [0.0, 0.0, 1.0]

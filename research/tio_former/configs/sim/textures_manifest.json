@@ -1,0 +1,1002 @@
+{
+  "source": "Poly Haven (CC0)",
+  "license": "CC0 1.0 Universal",
+  "size_px": 512,
+  "count": 60,
+  "textures": [
+    {
+      "id": "dark_wooden_planks",
+      "file": "dark_wooden_planks.jpg",
+      "name": "Dark Wooden Planks",
+      "categories": [
+        "floor",
+        "indoor",
+        "man made",
+        "raw wood",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/dark_wooden_planks",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dark_wooden_planks/dark_wooden_planks_diff_1k.jpg",
+      "entropy_bits": 5.083,
+      "gradient_energy": 4.093,
+      "contrast_std": 8.232
+    },
+    {
+      "id": "concrete_floor_02",
+      "file": "concrete_floor_02.jpg",
+      "name": "Concrete Floor 02",
+      "categories": [
+        "concrete",
+        "dirty",
+        "floor",
+        "indoor",
+        "man made",
+        "outdoor",
+        "plaster-concrete",
+        "wall"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/concrete_floor_02",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/concrete_floor_02/concrete_floor_02_diff_1k.jpg",
+      "entropy_bits": 6.455,
+      "gradient_energy": 15.272,
+      "contrast_std": 22.205
+    },
+    {
+      "id": "beam_wall_01",
+      "file": "beam_wall_01.jpg",
+      "name": "Beam Wall 01",
+      "categories": [
+        "man made",
+        "outdoor",
+        "wall",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/beam_wall_01",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/beam_wall_01/beam_wall_01_diff_1k.jpg",
+      "entropy_bits": 6.392,
+      "gradient_energy": 6.329,
+      "contrast_std": 24.717
+    },
+    {
+      "id": "grey_plaster_03",
+      "file": "grey_plaster_03.jpg",
+      "name": "Grey Plaster 03",
+      "categories": [
+        "dirty",
+        "floor",
+        "indoor",
+        "man made",
+        "outdoor",
+        "plaster",
+        "plaster-concrete",
+        "wall"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/grey_plaster_03",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/grey_plaster_03/grey_plaster_03_diff_1k.jpg",
+      "entropy_bits": 5.478,
+      "gradient_energy": 5.495,
+      "contrast_std": 11.551
+    },
+    {
+      "id": "bark_brown_01",
+      "file": "bark_brown_01.jpg",
+      "name": "Bark Brown 01",
+      "categories": [
+        "bark",
+        "natural",
+        "outdoor",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/bark_brown_01",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_brown_01/bark_brown_01_diff_1k.jpg",
+      "entropy_bits": 6.872,
+      "gradient_energy": 12.357,
+      "contrast_std": 28.663
+    },
+    {
+      "id": "cobblestone_04",
+      "file": "cobblestone_04.jpg",
+      "name": "Cobblestone 04",
+      "categories": [
+        "cobblestone",
+        "concrete",
+        "floor",
+        "man made",
+        "plaster-concrete"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/cobblestone_04",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/cobblestone_04/cobblestone_04_diff_1k.jpg",
+      "entropy_bits": 5.369,
+      "gradient_energy": 7.248,
+      "contrast_std": 10.051
+    },
+    {
+      "id": "bamboo_wall_02",
+      "file": "bamboo_wall_02.jpg",
+      "name": "Bamboo Wall 02",
+      "categories": [
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/bamboo_wall_02",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bamboo_wall_02/bamboo_wall_02_diff_1k.jpg",
+      "entropy_bits": 5.753,
+      "gradient_energy": 7.279,
+      "contrast_std": 14.058
+    },
+    {
+      "id": "rough_pine_door",
+      "file": "rough_pine_door.jpg",
+      "name": "Rough Pine Door",
+      "categories": [
+        "outdoor",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/rough_pine_door",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_pine_door/rough_pine_door_diff_1k.jpg",
+      "entropy_bits": 5.123,
+      "gradient_energy": 3.238,
+      "contrast_std": 8.844
+    },
+    {
+      "id": "denim_fabric",
+      "file": "denim_fabric.jpg",
+      "name": "Denim Fabric",
+      "categories": [
+        "denim",
+        "fabric"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/denim_fabric",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/denim_fabric/denim_fabric_diff_1k.jpg",
+      "entropy_bits": 5.874,
+      "gradient_energy": 10.05,
+      "contrast_std": 14.827
+    },
+    {
+      "id": "oak_veneer_01",
+      "file": "oak_veneer_01.jpg",
+      "name": "Oak Veneer 01",
+      "categories": [
+        "natural",
+        "raw wood",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/oak_veneer_01",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/oak_veneer_01/oak_veneer_01_diff_1k.jpg",
+      "entropy_bits": 5.323,
+      "gradient_energy": 4.791,
+      "contrast_std": 9.802
+    },
+    {
+      "id": "granite_tile_03",
+      "file": "granite_tile_03.jpg",
+      "name": "Granite Tile 03",
+      "categories": [
+        "tiles",
+        "wall"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/granite_tile_03",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/granite_tile_03/granite_tile_03_diff_1k.jpg",
+      "entropy_bits": 5.813,
+      "gradient_energy": 11.305,
+      "contrast_std": 14.394
+    },
+    {
+      "id": "grey_plaster_02",
+      "file": "grey_plaster_02.jpg",
+      "name": "Grey Plaster 02",
+      "categories": [
+        "collection: the_shed",
+        "dirty",
+        "floor",
+        "indoor",
+        "man made",
+        "outdoor",
+        "plaster",
+        "plaster-concrete",
+        "wall"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/grey_plaster_02",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/grey_plaster_02/grey_plaster_02_diff_1k.jpg",
+      "entropy_bits": 6.146,
+      "gradient_energy": 10.437,
+      "contrast_std": 17.23
+    },
+    {
+      "id": "patterned_plaster_wall",
+      "file": "patterned_plaster_wall.jpg",
+      "name": "Patterned Plaster Wall",
+      "categories": [
+        "plaster",
+        "wall"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/patterned_plaster_wall",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/patterned_plaster_wall/patterned_plaster_wall_diff_1k.jpg",
+      "entropy_bits": 6.353,
+      "gradient_energy": 7.585,
+      "contrast_std": 23.615
+    },
+    {
+      "id": "rusted_shutter",
+      "file": "rusted_shutter.jpg",
+      "name": "Rusted Shutter",
+      "categories": [
+        "metal",
+        "outdoor"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/rusted_shutter",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rusted_shutter/rusted_shutter_diff_1k.jpg",
+      "entropy_bits": 5.566,
+      "gradient_energy": 6.888,
+      "contrast_std": 12.351
+    },
+    {
+      "id": "gravel_floor",
+      "file": "gravel_floor.jpg",
+      "name": "Gravel Floor",
+      "categories": [
+        "gravel",
+        "outdoor"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/gravel_floor",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/gravel_floor/gravel_floor_diff_1k.jpg",
+      "entropy_bits": 6.848,
+      "gradient_energy": 22.159,
+      "contrast_std": 27.909
+    },
+    {
+      "id": "dirty_carpet",
+      "file": "dirty_carpet.jpg",
+      "name": "Dirty Carpet",
+      "categories": [
+        "carpet",
+        "fabric",
+        "floor"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/dirty_carpet",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dirty_carpet/dirty_carpet_diff_1k.jpg",
+      "entropy_bits": 5.789,
+      "gradient_energy": 10.164,
+      "contrast_std": 13.436
+    },
+    {
+      "id": "painted_brick",
+      "file": "painted_brick.jpg",
+      "name": "Painted Brick",
+      "categories": [
+        "brick",
+        "indoor",
+        "man made",
+        "outdoor",
+        "plaster",
+        "wall"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/painted_brick",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/painted_brick/painted_brick_diff_1k.jpg",
+      "entropy_bits": 5.852,
+      "gradient_energy": 5.988,
+      "contrast_std": 20.214
+    },
+    {
+      "id": "diagonal_parquet",
+      "file": "diagonal_parquet.jpg",
+      "name": "Diagonal Parquet",
+      "categories": [
+        "floor",
+        "indoor",
+        "man made",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/diagonal_parquet",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/diagonal_parquet/diagonal_parquet_diff_1k.jpg",
+      "entropy_bits": 5.422,
+      "gradient_energy": 3.756,
+      "contrast_std": 10.47
+    },
+    {
+      "id": "metal_plate",
+      "file": "metal_plate.jpg",
+      "name": "Metal Plate",
+      "categories": [
+        "dirty",
+        "floor",
+        "indoor",
+        "man made",
+        "metal",
+        "outdoor"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/metal_plate",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/metal_plate/metal_plate_diff_1k.jpg",
+      "entropy_bits": 5.49,
+      "gradient_energy": 3.913,
+      "contrast_std": 11.657
+    },
+    {
+      "id": "brown_planks_03",
+      "file": "brown_planks_03.jpg",
+      "name": "Brown Planks 03",
+      "categories": [
+        "clean",
+        "indoor",
+        "man made",
+        "outdoor",
+        "wall",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/brown_planks_03",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/brown_planks_03/brown_planks_03_diff_1k.jpg",
+      "entropy_bits": 6.417,
+      "gradient_energy": 9.862,
+      "contrast_std": 25.593
+    },
+    {
+      "id": "bark_brown_02",
+      "file": "bark_brown_02.jpg",
+      "name": "Bark Brown 02",
+      "categories": [
+        "bark",
+        "natural",
+        "outdoor",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/bark_brown_02",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_brown_02/bark_brown_02_diff_1k.jpg",
+      "entropy_bits": 6.807,
+      "gradient_energy": 13.562,
+      "contrast_std": 27.236
+    },
+    {
+      "id": "cobblestone_01",
+      "file": "cobblestone_01.jpg",
+      "name": "Cobblestone 01",
+      "categories": [
+        "cobblestone",
+        "dirty",
+        "floor",
+        "man made",
+        "outdoor"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/cobblestone_01",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/cobblestone_01/cobblestone_01_diff_1k.jpg",
+      "entropy_bits": 6.248,
+      "gradient_energy": 7.945,
+      "contrast_std": 21.717
+    },
+    {
+      "id": "bamboo_wall_03",
+      "file": "bamboo_wall_03.jpg",
+      "name": "Bamboo Wall 03",
+      "categories": [
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/bamboo_wall_03",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bamboo_wall_03/bamboo_wall_03_diff_1k.jpg",
+      "entropy_bits": 5.847,
+      "gradient_energy": 6.031,
+      "contrast_std": 14.749
+    },
+    {
+      "id": "weathered_plank_siding",
+      "file": "weathered_plank_siding.jpg",
+      "name": "Weathered Plank Siding",
+      "categories": [
+        "outdoor",
+        "wall",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/weathered_plank_siding",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/weathered_plank_siding/weathered_plank_siding_diff_1k.jpg",
+      "entropy_bits": 5.245,
+      "gradient_energy": 2.822,
+      "contrast_std": 9.535
+    },
+    {
+      "id": "denim_fabric_03",
+      "file": "denim_fabric_03.jpg",
+      "name": "Denim Fabric 03",
+      "categories": [
+        "denim",
+        "fabric"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/denim_fabric_03",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/denim_fabric_03/denim_fabric_03_diff_1k.jpg",
+      "entropy_bits": 5.06,
+      "gradient_energy": 8.931,
+      "contrast_std": 8.273
+    },
+    {
+      "id": "rosewood_veneer1",
+      "file": "rosewood_veneer1.jpg",
+      "name": "Rosewood Veneer1",
+      "categories": [
+        "natural",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/rosewood_veneer1",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rosewood_veneer1/rosewood_veneer1_diff_1k.jpg",
+      "entropy_bits": 5.273,
+      "gradient_energy": 5.827,
+      "contrast_std": 9.605
+    },
+    {
+      "id": "plaster_stone_wall_01",
+      "file": "plaster_stone_wall_01.jpg",
+      "name": "Plaster Stone Wall 01",
+      "categories": [
+        "plaster",
+        "plaster-concrete",
+        "wall"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/plaster_stone_wall_01",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/plaster_stone_wall_01/plaster_stone_wall_01_diff_1k.jpg",
+      "entropy_bits": 4.738,
+      "gradient_energy": 3.625,
+      "contrast_std": 8.4
+    },
+    {
+      "id": "rusty_metal_grid",
+      "file": "rusty_metal_grid.jpg",
+      "name": "Rusty Metal Grid",
+      "categories": [
+        "metal",
+        "wall"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/rusty_metal_grid",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rusty_metal_grid/rusty_metal_grid_diff_1k.jpg",
+      "entropy_bits": 5.492,
+      "gradient_energy": 4.368,
+      "contrast_std": 14.177
+    },
+    {
+      "id": "rusty_corrugated_iron",
+      "file": "rusty_corrugated_iron.jpg",
+      "name": "Rusty Corrugated Iron",
+      "categories": [
+        "industrial",
+        "metal"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/rusty_corrugated_iron",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rusty_corrugated_iron/rusty_corrugated_iron_diff_1k.jpg",
+      "entropy_bits": 5.126,
+      "gradient_energy": 4.454,
+      "contrast_std": 13.168
+    },
+    {
+      "id": "rounded_square_tiled_wall",
+      "file": "rounded_square_tiled_wall.jpg",
+      "name": "Rounded Square Tiled Wall",
+      "categories": [
+        "wall"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/rounded_square_tiled_wall",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rounded_square_tiled_wall/rounded_square_tiled_wall_diff_1k.jpg",
+      "entropy_bits": 6.284,
+      "gradient_energy": 7.648,
+      "contrast_std": 21.599
+    },
+    {
+      "id": "clay_roof_tiles",
+      "file": "clay_roof_tiles.jpg",
+      "name": "Clay Roof Tiles",
+      "categories": [
+        "roofing"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/clay_roof_tiles",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/clay_roof_tiles/clay_roof_tiles_diff_1k.jpg",
+      "entropy_bits": 6.273,
+      "gradient_energy": 7.749,
+      "contrast_std": 19.196
+    },
+    {
+      "id": "gravel_stones",
+      "file": "gravel_stones.jpg",
+      "name": "Gravel Stones",
+      "categories": [
+        "gravel",
+        "natural",
+        "outdoor"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/gravel_stones",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/gravel_stones/gravel_stones_diff_1k.jpg",
+      "entropy_bits": 5.325,
+      "gradient_energy": 6.72,
+      "contrast_std": 11.579
+    },
+    {
+      "id": "grey_plaster",
+      "file": "grey_plaster.jpg",
+      "name": "Grey Plaster",
+      "categories": [
+        "floor",
+        "indoor",
+        "man made",
+        "outdoor",
+        "plaster",
+        "plaster-concrete",
+        "wall"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/grey_plaster",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/grey_plaster/grey_plaster_diff_1k.jpg",
+      "entropy_bits": 5.905,
+      "gradient_energy": 10.51,
+      "contrast_std": 14.534
+    },
+    {
+      "id": "brown_planks_04",
+      "file": "brown_planks_04.jpg",
+      "name": "Brown Planks 04",
+      "categories": [
+        "clean",
+        "indoor",
+        "man made",
+        "outdoor",
+        "wall",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/brown_planks_04",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/brown_planks_04/brown_planks_04_diff_1k.jpg",
+      "entropy_bits": 5.998,
+      "gradient_energy": 4.418,
+      "contrast_std": 23.615
+    },
+    {
+      "id": "bark_willow",
+      "file": "bark_willow.jpg",
+      "name": "Bark Willow",
+      "categories": [
+        "bark",
+        "natural",
+        "outdoor",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/bark_willow",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_willow/bark_willow_diff_1k.jpg",
+      "entropy_bits": 5.232,
+      "gradient_energy": 5.497,
+      "contrast_std": 9.379
+    },
+    {
+      "id": "cobblestone_02",
+      "file": "cobblestone_02.jpg",
+      "name": "Cobblestone 02",
+      "categories": [
+        "cobblestone",
+        "floor",
+        "man made",
+        "outdoor"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/cobblestone_02",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/cobblestone_02/cobblestone_02_diff_1k.jpg",
+      "entropy_bits": 6.211,
+      "gradient_energy": 7.639,
+      "contrast_std": 20.313
+    },
+    {
+      "id": "black_painted_planks",
+      "file": "black_painted_planks.jpg",
+      "name": "Black Painted Planks",
+      "categories": [
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/black_painted_planks",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/black_painted_planks/black_painted_planks_diff_1k.jpg",
+      "entropy_bits": 4.849,
+      "gradient_energy": 3.828,
+      "contrast_std": 11.531
+    },
+    {
+      "id": "wooden_planks",
+      "file": "wooden_planks.jpg",
+      "name": "Wooden Planks",
+      "categories": [
+        "outdoor",
+        "raw wood",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/wooden_planks",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/wooden_planks/wooden_planks_diff_1k.jpg",
+      "entropy_bits": 5.245,
+      "gradient_energy": 2.84,
+      "contrast_std": 10.115
+    },
+    {
+      "id": "dark_wood",
+      "file": "dark_wood.jpg",
+      "name": "Dark Wood",
+      "categories": [
+        "indoor",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/dark_wood",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dark_wood/dark_wood_diff_1k.jpg",
+      "entropy_bits": 5.617,
+      "gradient_energy": 5.119,
+      "contrast_std": 11.96
+    },
+    {
+      "id": "cobblestone_embedded_asphalt",
+      "file": "cobblestone_embedded_asphalt.jpg",
+      "name": "Cobblestone Embedded Asphalt",
+      "categories": [
+        "asphalt",
+        "floor",
+        "man made"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/cobblestone_embedded_asphalt",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/cobblestone_embedded_asphalt/cobblestone_embedded_asphalt_diff_1k.jpg",
+      "entropy_bits": 5.955,
+      "gradient_energy": 7.452,
+      "contrast_std": 16.257
+    },
+    {
+      "id": "rough_wood",
+      "file": "rough_wood.jpg",
+      "name": "Rough Wood",
+      "categories": [
+        "natural",
+        "outdoor",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/rough_wood",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_diff_1k.jpg",
+      "entropy_bits": 6.191,
+      "gradient_energy": 8.551,
+      "contrast_std": 18.691
+    },
+    {
+      "id": "rectangular_facade_tiles_02",
+      "file": "rectangular_facade_tiles_02.jpg",
+      "name": "Rectangular Facade Tiles 02",
+      "categories": [
+        "tiles",
+        "wall"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/rectangular_facade_tiles_02",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rectangular_facade_tiles_02/rectangular_facade_tiles_02_diff_1k.jpg",
+      "entropy_bits": 6.102,
+      "gradient_energy": 10.121,
+      "contrast_std": 29.871
+    },
+    {
+      "id": "rusty_metal_shutter",
+      "file": "rusty_metal_shutter.jpg",
+      "name": "Rusty Metal Shutter",
+      "categories": [
+        "metal",
+        "outdoor"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/rusty_metal_shutter",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rusty_metal_shutter/rusty_metal_shutter_diff_1k.jpg",
+      "entropy_bits": 5.369,
+      "gradient_energy": 5.574,
+      "contrast_std": 12.311
+    },
+    {
+      "id": "old_planks_02",
+      "file": "old_planks_02.jpg",
+      "name": "Old Planks 02",
+      "categories": [
+        "floor",
+        "indoor",
+        "man made",
+        "outdoor",
+        "wall",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/old_planks_02",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/old_planks_02/old_planks_02_diff_1k.jpg",
+      "entropy_bits": 5.169,
+      "gradient_energy": 3.338,
+      "contrast_std": 9.436
+    },
+    {
+      "id": "corrugated_iron",
+      "file": "corrugated_iron.jpg",
+      "name": "Corrugated Iron",
+      "categories": [
+        "man made",
+        "metal",
+        "roofing",
+        "wall"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/corrugated_iron",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/corrugated_iron/corrugated_iron_diff_1k.jpg",
+      "entropy_bits": 5.094,
+      "gradient_energy": 6.273,
+      "contrast_std": 8.455
+    },
+    {
+      "id": "rubble",
+      "file": "rubble.jpg",
+      "name": "Rubble",
+      "categories": [
+        "dirty",
+        "floor",
+        "indoor"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/rubble",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rubble/rubble_diff_1k.jpg",
+      "entropy_bits": 6.379,
+      "gradient_energy": 7.335,
+      "contrast_std": 21.494
+    },
+    {
+      "id": "brown_planks_05",
+      "file": "brown_planks_05.jpg",
+      "name": "Brown Planks 05",
+      "categories": [
+        "clean",
+        "indoor",
+        "man made",
+        "outdoor",
+        "wall",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/brown_planks_05",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/brown_planks_05/brown_planks_05_diff_1k.jpg",
+      "entropy_bits": 5.571,
+      "gradient_energy": 3.889,
+      "contrast_std": 16.968
+    },
+    {
+      "id": "curly_teddy_checkered",
+      "file": "curly_teddy_checkered.jpg",
+      "name": "Curly Teddy Checkered",
+      "categories": [
+        "fabric",
+        "fur"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/curly_teddy_checkered",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/curly_teddy_checkered/curly_teddy_checkered_diff_1k.jpg",
+      "entropy_bits": 7.042,
+      "gradient_energy": 9.162,
+      "contrast_std": 35.124
+    },
+    {
+      "id": "bark_willow_02",
+      "file": "bark_willow_02.jpg",
+      "name": "Bark Willow 02",
+      "categories": [
+        "bark",
+        "natural",
+        "outdoor",
+        "raw wood",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/bark_willow_02",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_willow_02/bark_willow_02_diff_1k.jpg",
+      "entropy_bits": 6.661,
+      "gradient_energy": 12.517,
+      "contrast_std": 25.616
+    },
+    {
+      "id": "cobblestone_03",
+      "file": "cobblestone_03.jpg",
+      "name": "Cobblestone 03",
+      "categories": [
+        "cobblestone",
+        "dirty",
+        "floor",
+        "man made"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/cobblestone_03",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/cobblestone_03/cobblestone_03_diff_1k.jpg",
+      "entropy_bits": 6.421,
+      "gradient_energy": 10.93,
+      "contrast_std": 25.479
+    },
+    {
+      "id": "coated_pine",
+      "file": "coated_pine.jpg",
+      "name": "Coated Pine",
+      "categories": [
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/coated_pine",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/coated_pine/coated_pine_diff_1k.jpg",
+      "entropy_bits": 5.24,
+      "gradient_energy": 3.455,
+      "contrast_std": 9.44
+    },
+    {
+      "id": "worn_mossy_plasterwall",
+      "file": "worn_mossy_plasterwall.jpg",
+      "name": "Worn Mossy Plasterwall",
+      "categories": [
+        "outdoor",
+        "plaster",
+        "plaster-concrete",
+        "wall"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/worn_mossy_plasterwall",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/worn_mossy_plasterwall/worn_mossy_plasterwall_diff_1k.jpg",
+      "entropy_bits": 6.453,
+      "gradient_energy": 10.55,
+      "contrast_std": 22.576
+    },
+    {
+      "id": "medieval_wood",
+      "file": "medieval_wood.jpg",
+      "name": "Medieval Wood",
+      "categories": [
+        "indoor",
+        "man made",
+        "outdoor",
+        "wall",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/medieval_wood",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/medieval_wood/medieval_wood_diff_1k.jpg",
+      "entropy_bits": 6.763,
+      "gradient_energy": 13.546,
+      "contrast_std": 27.41
+    },
+    {
+      "id": "wood_chips",
+      "file": "wood_chips.jpg",
+      "name": "Wood Chips",
+      "categories": [
+        "natural",
+        "outdoor",
+        "raw wood",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/wood_chips",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/wood_chips/wood_chips_diff_1k.jpg",
+      "entropy_bits": 6.202,
+      "gradient_energy": 13.404,
+      "contrast_std": 18.753
+    },
+    {
+      "id": "terrazzo_tiles",
+      "file": "terrazzo_tiles.jpg",
+      "name": "Terrazzo Tiles",
+      "categories": [
+        "tiles"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/terrazzo_tiles",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/terrazzo_tiles/terrazzo_tiles_diff_1k.jpg",
+      "entropy_bits": 5.929,
+      "gradient_energy": 13.681,
+      "contrast_std": 14.82
+    },
+    {
+      "id": "brick_wall_13",
+      "file": "brick_wall_13.jpg",
+      "name": "Brick Wall 13",
+      "categories": [
+        "brick",
+        "indoor",
+        "wall"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/brick_wall_13",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/brick_wall_13/brick_wall_13_diff_1k.jpg",
+      "entropy_bits": 4.88,
+      "gradient_energy": 4.407,
+      "contrast_std": 9.064
+    },
+    {
+      "id": "plank_flooring",
+      "file": "plank_flooring.jpg",
+      "name": "Plank Flooring",
+      "categories": [
+        "floor",
+        "indoor",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/plank_flooring",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/plank_flooring/plank_flooring_diff_1k.jpg",
+      "entropy_bits": 5.877,
+      "gradient_energy": 4.758,
+      "contrast_std": 17.685
+    },
+    {
+      "id": "painted_concrete",
+      "file": "painted_concrete.jpg",
+      "name": "Painted Concrete",
+      "categories": [
+        "concrete",
+        "floor",
+        "indoor",
+        "plaster-concrete"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/painted_concrete",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/painted_concrete/painted_concrete_diff_1k.jpg",
+      "entropy_bits": 6.248,
+      "gradient_energy": 9.418,
+      "contrast_std": 24.933
+    },
+    {
+      "id": "rusty_metal_02",
+      "file": "rusty_metal_02.jpg",
+      "name": "Rusty Metal 02",
+      "categories": [
+        "dirty",
+        "indoor",
+        "man made",
+        "metal",
+        "outdoor",
+        "wall"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/rusty_metal_02",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rusty_metal_02/rusty_metal_02_diff_1k.jpg",
+      "entropy_bits": 6.273,
+      "gradient_energy": 5.706,
+      "contrast_std": 21.861
+    },
+    {
+      "id": "bamboo_wall",
+      "file": "bamboo_wall.jpg",
+      "name": "Bamboo Wall",
+      "categories": [
+        "raw wood",
+        "wall",
+        "wood"
+      ],
+      "license": "CC0",
+      "source": "https://polyhaven.com/a/bamboo_wall",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bamboo_wall/bamboo_wall_diff_1k.jpg",
+      "entropy_bits": 6.189,
+      "gradient_energy": 7.486,
+      "contrast_std": 19.176
+    }
+  ]
+}

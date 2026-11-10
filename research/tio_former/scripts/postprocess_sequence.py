@@ -54,6 +54,12 @@ sys.path.insert(0, str(ROOT))
 
 from tio_former.data.dataset import save_sequence  # noqa: E402
 from tio_former.data.imu import generate_imu, resample_to_tof_windows  # noqa: E402
+from tio_former.sim.degradation import (  # noqa: E402
+    apply_camera_degradation,
+    apply_imu_degradation,
+    apply_tof_degradation,
+    camera_state,
+)
 from tio_former.sim.tof import (  # noqa: E402
     aggregate_grid,
     depth_to_radial_range,
@@ -81,6 +87,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--camera-quality", type=int, default=85)
     parser.add_argument("--camera-width", type=int, default=160)
     parser.add_argument("--camera-height", type=int, default=120)
+    parser.add_argument(
+        "--scene-spec",
+        default=None,
+        help="Optional JSON with the sampled random-scene parameters.",
+    )
     parser.add_argument(
         "--camera",
         action=argparse.BooleanOptionalAction,
@@ -203,12 +214,29 @@ def main() -> int:
             tof_status[frame_index, view_index] = result["status"]
             tof_weight[frame_index, view_index] = result["weight"]
 
+    tof_degradation = apply_tof_degradation(
+        tof,
+        tof_ideal,
+        tof_status,
+        tof_weight,
+        np.random.default_rng(args.seed + 3),
+        sensors.get("tof_degradation"),
+    )
+
     position = gt_pose[keep, :3]
     quat = _quat_normalize(gt_pose[keep, 3:7])
     trajectory = Trajectory(t=t_tof, position=position, quat=quat)
     gt_twist = _ground_truth_twist(t_tof, position, quat).astype(np.float32)
 
     imu = generate_imu(trajectory, sensors["imu"], np.random.default_rng(args.seed + 1))
+    accel_degraded, gyro_degraded, imu_degradation = apply_imu_degradation(
+        imu.accel,
+        imu.gyro,
+        np.random.default_rng(args.seed + 4),
+        sensors.get("imu_degradation"),
+    )
+    imu = type(imu)(t=imu.t, accel=accel_degraded, gyro=gyro_degraded,
+                    bias_acc=imu.bias_acc, bias_gyro=imu.bias_gyro)
     imu_windows, imu_times = resample_to_tof_windows(
         imu,
         t_tof,
@@ -226,16 +254,28 @@ def main() -> int:
             logger.warning(
                 "missing camera frame for %d/%d ToF frames", int((~valid_camera).sum()), valid_camera.size
             )
+        camera_cfg = sensors.get("camera_degradation")
+        camera_rng = np.random.default_rng(args.seed + 5)
+        camera_values = camera_state(camera_rng, camera_cfg)
+        quality_range = camera_cfg.get("jpeg_quality", [args.camera_quality, args.camera_quality]) if camera_cfg else None
+        if quality_range:
+            quality = int(np.clip(int(camera_rng.integers(quality_range[0], quality_range[1] + 1)), 40, 95))
+        else:
+            quality = int(args.camera_quality)
         encoded: list[bytes] = []
         offsets = [0]
         for frame_index, camera_index in enumerate(camera_indices):
             if camera_index < 0:
                 encoded.append(b"")
             else:
-                resized = _resize_gray(
-                    camera_images[camera_index], int(args.camera_width), int(args.camera_height)
-                )
-                encoded.append(_encode_jpeg(resized, int(args.camera_quality)))
+                frame = camera_images[camera_index]
+                if camera_cfg:
+                    angular = float(np.linalg.norm(gt_twist[frame_index, 3:]))
+                    frame = apply_camera_degradation(
+                        frame, angular, camera_rng, camera_cfg, camera_values
+                    )
+                resized = _resize_gray(frame, int(args.camera_width), int(args.camera_height))
+                encoded.append(_encode_jpeg(resized, quality))
             offsets.append(offsets[-1] + len(encoded[-1]))
         blob = np.frombuffer(b"".join(encoded), dtype=np.uint8)
         camera_arrays = {
@@ -249,7 +289,9 @@ def main() -> int:
             "camera_source_height": int(camera_images.shape[1]),
             "camera_width": int(args.camera_width),
             "camera_height": int(args.camera_height),
-            "camera_jpeg_quality": int(args.camera_quality),
+            "camera_jpeg_quality": int(quality),
+            "camera_degradation": camera_values,
+            "camera_blur_enabled": bool(sensors.get("camera_degradation")),
             "camera_frames": int(len(camera_images)),
             "camera_missing_frames": int((~valid_camera).sum()),
         }
@@ -281,7 +323,12 @@ def main() -> int:
         "duration_s": float(t_tof[-1] - t_tof[0]),
         "path_length_m": float(trajectory.path_length),
         "sensors_config": str(Path(args.sensors_config).resolve()),
+        "tof_degradation": tof_degradation,
+        "imu_degradation": imu_degradation,
+        "camera_degradation": camera_meta.get("camera_degradation"),
     }
+    if args.scene_spec and Path(args.scene_spec).exists():
+        metadata["scene_spec"] = json.loads(Path(args.scene_spec).read_text(encoding="utf-8"))
     metadata.update(camera_meta)
     save_sequence(args.out, out_arrays, metadata)
     logger.info(

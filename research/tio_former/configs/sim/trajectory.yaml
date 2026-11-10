@@ -27,3 +27,16 @@ random:
   accel_mps2: [1.0, 3.0]
   vertical_jitter_m: 0.15
   yaw_mode: velocity
+
+# Stop-and-go inspection profile (enabled by default in v4 datasets).
+inspection:
+  enabled: true
+  motion_mix:
+    static: 0.30
+    micro: 0.05
+    low: 0.40
+    normal: 0.25
+  lateral_excursion_m: 1.8
+  vertical_excursion_m: 0.5
+  max_speed_mps: 1.0
+  return_to_start: true
