@@ -67,9 +67,16 @@ def _augment_missing(
     ratios: list[float],
     view_dropout: float = 0.0,
     block_probability: float = 0.0,
+    degraded_probability: float = 0.0,
+    degraded_ratio: float = 0.6,
+    degraded_view_dropout: float = 0.5,
 ) -> None:
-    if rng.random() > probability:
+    degraded = degraded_probability > 0.0 and rng.random() < degraded_probability
+    if not degraded and rng.random() > probability:
         return
+    if degraded:
+        view_dropout = max(view_dropout, degraded_view_dropout)
+        ratios = [degraded_ratio]
     frames, views, height, width = tof.shape
     if view_dropout > 0.0:
         for view in range(views):
@@ -149,6 +156,9 @@ class SequenceWindows(Dataset):
         view_dropout: float = 0.0,
         block_probability: float = 0.0,
         camera_augment: bool = False,
+        tof_degraded_probability: float = 0.0,
+        tof_degraded_ratio: float = 0.6,
+        tof_degraded_view_dropout: float = 0.5,
     ) -> None:
         self.root = Path(root)
         self.window_frames = window_frames
@@ -161,6 +171,9 @@ class SequenceWindows(Dataset):
         self.view_dropout = view_dropout
         self.block_probability = block_probability
         self.camera_augment = camera_augment
+        self.tof_degraded_probability = tof_degraded_probability
+        self.tof_degraded_ratio = tof_degraded_ratio
+        self.tof_degraded_view_dropout = tof_degraded_view_dropout
         self.camera_size = (120, 160)
         self.skipped_short_sequences = 0
         self.files: list[Path] = []
@@ -281,6 +294,9 @@ class SequenceWindows(Dataset):
                 ratios=self.missing_ratios,
                 view_dropout=self.view_dropout,
                 block_probability=self.block_probability,
+                degraded_probability=self.tof_degraded_probability,
+                degraded_ratio=self.tof_degraded_ratio,
+                degraded_view_dropout=self.tof_degraded_view_dropout,
             )
 
         previous = np.empty_like(tof)

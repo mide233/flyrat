@@ -166,6 +166,13 @@ def main() -> int:
         view_dropout=float(augmentation.get("view_dropout_probability", 0.0)),
         block_probability=float(augmentation.get("block_missing_probability", 0.0)),
         camera_augment=bool(augmentation.get("camera_enabled", True)),
+        tof_degraded_probability=float(
+            augmentation.get("tof_degraded_probability", 0.0)
+        ),
+        tof_degraded_ratio=float(augmentation.get("tof_degraded_ratio", 0.6)),
+        tof_degraded_view_dropout=float(
+            augmentation.get("tof_degraded_view_dropout", 0.5)
+        ),
     )
     val_set = SequenceWindows(
         ROOT / args.processed,

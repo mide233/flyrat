@@ -65,3 +65,8 @@ augmentation:
   view_dropout_probability: 0.2
   block_missing_probability: 0.2
   camera_enabled: true
+  # Severe ToF dropout so the camera branch learns to compensate when most of
+  # the range image is missing (the "visual" degraded regime).
+  tof_degraded_probability: 0.25
+  tof_degraded_ratio: 0.6
+  tof_degraded_view_dropout: 0.5
