@@ -335,6 +335,9 @@ ros2 run flyrat_sensors sensor_receiver_node
 ```text
 fps:=N              相机帧率，默认 25
 max_frames:=N       处理 N 帧后退出，0 表示一直运行
+decode:=mpp|cpu     MJPEG 解码器，默认 mpp（失败自动回退 cpu）
+trace:=DIR          设备端开启分阶段计时，退出时拉到 trace/DIR
+slam_cpu:=N         已忽略；并行重投影需要多个核
 trajectory:=PATH    设备端 TUM 轨迹，默认 /tmp/flyrat_pilot.tum
 camera_config:=PATH 主机标定文件，同时推送到设备
 imu_config:=PATH    IMU 标定文件，同时推送到设备

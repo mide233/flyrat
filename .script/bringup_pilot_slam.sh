@@ -18,6 +18,14 @@
 #   FLYRAT_PUSH_PILOT   Set to 0 to skip pushing the binary
 #   ADB_SERIAL          Device serial when several devices are connected
 #
+# Options:
+#   fps:=N              Camera/SLAM rate (default: 25)
+#   decode:=mpp|cpu     MJPEG decoder (default: mpp, falls back to cpu if MPP fails)
+#   trace:=DIR          Enable per-stage CSV tracing on the device. On exit the
+#                       directory is pulled to <repo>/trace/<name>.
+#   slam_cpu:=N         Ignored: parallel stereo reprojection needs more than one
+#                       core, and std::async workers inherit the SLAM affinity.
+#
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,7 +44,9 @@ IMU_CONFIG="${REPO_ROOT}/flyrat_play/ros2_ws/src/flyrat_sensors/config/imu_intri
 FPS=25
 MAX_FRAMES=0
 SLAM_CPU=-1
-DECODE=cpu
+SLAM_CPU_SET=0
+DECODE=mpp
+TRACE=""
 STAMP_SOURCE=device
 TIME_OFFSET=0.0
 TRAJECTORY="/tmp/flyrat_pilot.tum"
@@ -54,8 +64,10 @@ for arg in "$@"; do
         start_foxglove:=*) START_FOXGLOVE=0 ;;
         fps:=*) FPS="${arg#fps:=}" ;;
         max_frames:=*) MAX_FRAMES="${arg#max_frames:=}" ;;
-        slam_cpu:=*) SLAM_CPU="${arg#slam_cpu:=}" ;;
+        slam_cpu:=*) SLAM_CPU="${arg#slam_cpu:=}"; SLAM_CPU_SET=1 ;;
         decode:=*) DECODE="${arg#decode:=}" ;;
+        trace:=off|trace:=0) TRACE="" ;;
+        trace:=*) TRACE="${arg#trace:=}" ;;
         stamp_source:=*) STAMP_SOURCE="${arg#stamp_source:=}" ;;
         time_offset:=*) TIME_OFFSET="${arg#time_offset:=}" ;;
         trajectory:=*) TRAJECTORY="${arg#trajectory:=}" ;;
@@ -67,6 +79,18 @@ for arg in "$@"; do
         *) echo "error: unknown argument: ${arg}" >&2; usage >&2; exit 2 ;;
     esac
 done
+
+case "${DECODE}" in
+    cpu|mpp) ;;
+    *) echo "error: decode must be 'cpu' or 'mpp'" >&2; exit 2 ;;
+esac
+
+if [ "${SLAM_CPU_SET}" -eq 1 ] && [ "${SLAM_CPU}" != "-1" ]; then
+    echo "[bringup] warning: ignoring slam_cpu:=${SLAM_CPU}; parallel stereo" >&2
+    echo "          reprojection workers inherit the affinity mask and would" >&2
+    echo "          be confined to one core." >&2
+    SLAM_CPU=-1
+fi
 
 if [ ! -f "${ROS_SETUP}" ]; then
     echo "error: ROS 2 ${ROS_DISTRO} not found: ${ROS_SETUP}" >&2
@@ -126,6 +150,13 @@ cleanup() {
         wait "${FOXGLOVE_PID}" 2>/dev/null || true
     fi
     "${ADB[@]}" shell "pkill -f '^${DEVICE_BINARY}'" >/dev/null 2>&1 || true
+    if [ -n "${TRACE}" ] \
+        && "${ADB[@]}" shell "test -d ${TRACE}" >/dev/null 2>&1; then
+        mkdir -p "${REPO_ROOT}/trace"
+        if "${ADB[@]}" pull "${TRACE}" "${REPO_ROOT}/trace/" >/dev/null 2>&1; then
+            echo "[bringup] trace saved to ${REPO_ROOT}/trace/$(basename "${TRACE}")"
+        fi
+    fi
     "${ADB[@]}" forward --remove "tcp:${LOCAL_PORT}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
@@ -148,18 +179,23 @@ fi
 
 # Restart a stale device process. The binary path is longer than the 15-char
 # comm limit, so match the anchored command line instead of using pkill -x.
-echo "[bringup] starting onboard SchurVINS (${FPS} fps, decode ${DECODE})"
+echo "[bringup] starting onboard SchurVINS (${FPS} fps, decode ${DECODE}${TRACE:+, trace ${TRACE}})"
+DEVICE_ARGS=(
+    --camera-config "${DEVICE_DIR}/camera.yaml"
+    --imu-config "${DEVICE_DIR}/imu.yaml"
+    --msp-device /dev/ttyS3
+    --camera-device /dev/video10
+    --fps "${FPS}"
+    --max-frames "${MAX_FRAMES}"
+    --slam-cpu "${SLAM_CPU}"
+    --decode "${DECODE}"
+    --trajectory "${TRAJECTORY}"
+)
+if [ -n "${TRACE}" ]; then
+    DEVICE_ARGS+=(--trace "${TRACE}")
+fi
 "${ADB[@]}" shell "pkill -f '^${DEVICE_BINARY}' 2>/dev/null; \
-    exec ${DEVICE_BINARY} \
-    --camera-config ${DEVICE_DIR}/camera.yaml \
-    --imu-config ${DEVICE_DIR}/imu.yaml \
-    --msp-device /dev/ttyS3 \
-    --camera-device /dev/video10 \
-    --fps ${FPS} \
-    --max-frames ${MAX_FRAMES} \
-    --slam-cpu ${SLAM_CPU} \
-    --decode ${DECODE} \
-    --trajectory ${TRAJECTORY}" &
+    exec ${DEVICE_BINARY} ${DEVICE_ARGS[*]}" &
 
 echo "[bringup] host bridge on tcp:${LOCAL_PORT}"
 ros2 launch flyrat_pilot_bridge pilot_bridge.launch.py \

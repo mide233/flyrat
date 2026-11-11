@@ -95,6 +95,17 @@ OpenCV 的 aarch64 sysroot，再执行：
 .script/bringup_pilot_slam.sh fps:=25 max_frames:=0
 ```
 
+默认使用 `decode:=mpp`（VPU 解码，失败自动回退 CPU）。采集分阶段耗时：
+
+```bash
+.script/bringup_pilot_slam.sh fps:=25 trace:=/tmp/flyrat_trace
+# 退出时自动拉取到 trace/flyrat_trace，然后：
+python3 flyrat_pilot/tools/analyze_trace.py trace/flyrat_trace --skip 100
+```
+
+`trace:=` 会增加少量写文件开销，只在分析时启用。`slam_cpu:=` 现在会被
+忽略：双目并行重投影需要多个核，固定 SLAM 线程反而会把工作线程限制在单核。
+
 脚本会：
 
 1. 把 `build-arm/flyrat_pilot`、相机标定和 IMU 标定推到设备 `/tmp/flyrat`；
