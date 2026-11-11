@@ -42,7 +42,7 @@
 ### 里程计
 
 - [`odometry/overview.md`](odometry/overview.md)
-  里程计骨架的 C++ 接口、ROS 2 节点、话题、参数、构建运行方式和后端接入点。
+  里程计 C++ 接口、SchurVINS 后端、ROS 2 节点、话题、参数、构建运行方式和后端接入点。
 - [`odometry/coordinates.md`](odometry/coordinates.md)
   IMU/相机坐标系、`imu.T_body_camera` 方向、TF 链、当前标定外参和逐步调试方法。
 

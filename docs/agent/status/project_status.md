@@ -1,6 +1,6 @@
 # 项目状态
 
-最后更新：2026-11-07
+最后更新：2026-11-10
 
 ## 1. 项目目标
 
@@ -22,7 +22,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - MSP v1 异步客户端 `flyrat::MspInteract`：TCP/串口、轮询、重连、回调与最新快照。
 - `flyrat::hardware::Transport`：串口和 TCP 字节流抽象，单测可注入假传输。
 - 姿态保持 `AttitudeHold`、on-manifold MPC `Ommpc`、`LocalEstimator`、`RcReceiver`。
-- 单元测试 9 个，其中 `test_odometry_api` 覆盖里程计骨架接口和桩行为。
+- 单元测试 10 个，其中 `test_odometry_api` 覆盖里程计接口契约，`test_schurvins_integration` 覆盖 SchurVINS 初始化、跟踪与轨迹输出。
 
 ### 2.2 实机硬件
 
@@ -62,42 +62,55 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   - `/flyrat/sensors/stereo/left/image_raw`
   - `/flyrat/sensors/stereo/right/image_raw`
 
-### 2.4 里程计骨架
+### 2.4 里程计后端
 
 完整接口、配置和接入方式见
 [`odometry/overview.md`](../odometry/overview.md)。
 
-- `flyrat::odometry::Odometry`：ROS 无关的 C++17 接口，支持 `kStereo` 和
-  `kImuStereo` 两种模式，状态为 `kNotInitialized/kTracking/kRecentlyLost/kLost`。
-- 输入使用非拥有型 `ImageView`（8 位灰度）和 `ImuSample` 序列，因此核心库
-  不依赖 OpenCV。
-- 当前为桩实现：构造时校验标定文件，`track()` 校验图像尺寸和关闭状态后返回
-  `kNotInitialized`，不输出有效位姿；`saveTrajectory()` 明确抛出“未实现”。
+- 默认后端为 **SchurVINS**（SVO 2.0 前端 + Schur complement EKF，CVPR 2024），
+  源码内置在 `libflyrat/third_party/schurvins/`，许可证 **GPL-3.0**。
+- `flyrat::odometry::Odometry`：ROS 无关的 C++17 接口，启用 SchurVINS 时仅支持
+  `kImuStereo`；状态为 `kNotInitialized/kTracking/kRecentlyLost/kLost`。
+- 输入使用非拥有型 `ImageView`（8 位灰度）和 `ImuSample` 序列，因此接口头文件
+  不依赖 OpenCV；适配层和第三方代码依赖 OpenCV。
+- 适配层 `libflyrat/src/odometry/schurvins_backend.cpp` 解析 Kalibr 标定、构造
+  `svo::FrameHandlerStereo`、喂入 IMU、输出 `T_world_camera`。
+- `CMake` 选项 `FLYRAT_WITH_SCHURVINS` 默认 `ON`；关闭后退化为桩实现，
+  `track()` 返回 `kNotInitialized`，`saveTrajectory()` 抛异常。
 - 标定文件 `libflyrat/configs/camera/uvc_640x480.yaml` 保留实机 Kalibr 数值
   （双目内参/畸变、`camera.T_left_right`、`imu.T_body_camera`、IMU 噪声）。
-- `flyrat_odometry` 目标默认随 libflyrat 构建，无需额外的视觉算法、Boost 或
-  OpenSSL 依赖；`test_odometry_api` 覆盖接口与桩行为。
+- 会导致进程退出的 IMU 时序已处理：只有帧时间戳落在 IMU 样本区间内才调用前端，
+  ROS 节点提供 `imu_lookahead` 帧后样本。
+- `test_odometry_api` 覆盖接口契约，`test_schurvins_integration` 覆盖初始化、
+  跟踪和轨迹输出；10 个测试全部通过。
+- 实机 28 s 桌面 bag（静止 → 升高 35 cm → 回原位）回放验证：首帧开始跟踪，
+  z 轨迹 0.008 → 0.364 → 0.016 m，最大水平偏移约 2.5 cm，结束时漂移约
+  1.4 cm，输出约 39–45 Hz。
+- 深度范围已按近场调整为 0.25–20 m，初始化阈值为 40/40/30/10 px；上游默认
+  1–50 m 和 60/80/70/30 在 0.4–1 m 桌面场景会初始化失败并导致纯 IMU 漂移。
 
 ### 2.5 ROS 2 里程计节点
 
 坐标链和标定调整见 [`odometry/coordinates.md`](../odometry/coordinates.md)。
 
-- `flyrat_play/ros2_ws/src/flyrat_odometry/`：保留原节点的双目/IMU 同步、
-  IMU 缓冲、worker 线程、TF、轨迹和状态基础设施，移除词袋和旧算法后端。
-- 订阅实机转发的左右目和 IMU，双目用 `ApproximateTime` 同步，IMU 缓存约 1 s，
+- `flyrat_play/ros2_ws/src/flyrat_odometry/`：双目/IMU 同步、IMU 缓冲、worker
+  线程、TF、轨迹和状态，后端为 SchurVINS。
+- 订阅实机转发的左右目和 IMU，双目用 `ApproximateTime` 同步，IMU 缓存约 1 s；
+  每帧取上一帧到 `帧时间 + imu_lookahead` 的 IMU，首帧带约 100 ms 历史。
   跟踪线程忙时丢旧帧。
 - 发布 `/flyrat/odometry/odometry`、`/flyrat/odometry/path`、
   `/flyrat/odometry/status`、`/flyrat/odometry/reset`；静态 TF
   `imu_link -> camera_left_optical_frame` 和
-  `camera_left_optical_frame -> camera_right_optical_frame`。后端输出有效位姿后
-  再发布动态 `odometry_map -> imu_link`。
+  `camera_left_optical_frame -> camera_right_optical_frame`，以及动态
+  `odometry_map -> imu_link`。
 - 参数 `camera_config_path` 指向标定文件，默认使用源码树
   `libflyrat/configs/camera/uvc_640x480.yaml` 或包内安装副本；`body_frame`
   默认 `imu_link`，`world_frame` 默认 `odometry_map`。
+- `trajectory_path` 非空时，节点退出前写 TUM 轨迹。
 - `bringup.launch.py` / `.script/bringup_real.sh`：一条命令拉起 adb forward、
   设备 forwarder、接收节点和 `odometry_node`，可选 Foxglove；退出时自动清理。
-- 当前节点启动后发布 `NOT_INITIALIZED` 状态并提示后端尚未实现，没有有效位姿
-  或轨迹输出。
+- 已用实机 28 s 桌面 bag 验证短时轨迹：0.35 m 升降、水平漂移约 1 cm；
+  尚未做飞行、长距离和长期稳定性验证。
 - IMU 的 scale/misalignment 仍由 `flyrat_sensors/config/imu_intrinsics.yaml`
   在发布前修正；IMU 时间戳扣除约 3.8 ms 的相机–IMU 固定时间差。
 - `imu.T_body_camera` 使用 `kalibr_ws/` 标定的相机→IMU 外参：相机倒置安装，
@@ -114,7 +127,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 | adb 吞吐 | 约 30 MB/s | USB2 链路，`adb exec-out` 实测 |
 | 双目 MJPEG 带宽 | 约 3.2 MB/s | 1280x480@60，适合 adb |
 | 双目原始 NV12 | 约 55 MB/s | 不适合当前 adb，不用于转发 |
-| 里程计骨架状态 | `NOT_INITIALIZED` | 节点可启动，后端尚未实现 |
+| 里程计后端 | SchurVINS 已接入 | 实机 28 s bag：0.35 m 升降、结束水平漂移约 1.4 cm |
 | ROS 2 IMU 输入 | 200.3–200.8 Hz | 开发机接收节点 |
 | ROS 2 双目输入 | 60.0 Hz | 左右各 640x480 mono8 |
 | ROS 2 里程计状态发布 | 1 Hz | `diagnostic_msgs` |
@@ -140,12 +153,20 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - 主飞行程序 `flyrat_pilot` 仍是占位 `main()`；目前实机功能集中在
   `flyrat_sensor_forwarder`。
 - adb 链路约 30 MB/s，不能直接转发 640x480/眼@60 的原始 NV12。
-- 里程计后端尚未实现：`flyrat::odometry` 和 ROS 2 节点只提供接口、同步、
-  TF 和状态，不输出有效位姿或轨迹。
-- 实机标定数值已保留并迁移到 `configs/camera/`，但尚未在新后端上验证尺度、
-  漂移和长期稳定性。
-- 里程计 ROS 节点依赖 OpenCV，目前在开发机运行；泰山派没有 OpenCV，内存也
-  只有 2 GB，能否上机仍需评估。
+- 里程计已用单个实机桌面 bag 验证短时相对尺度和漂移，尚未验证飞行、长距离
+  和长期稳定性。
+- 实机左目约 55.7 Hz、右目 60 Hz，左目有约 8% 丢帧且更模糊、更亮；当前
+  场景仍可跟踪，但高速运动时的鲁棒性需要继续观察。
+- SchurVINS 为 GPL-3.0，链接后的 `odometry_node` 组合二进制受 GPL 约束；
+  libflyrat 自身源文件仍为 MIT。
+- 大段 IMU 断流或长时间跟踪失败后，SVO 可能停在 `kPaused`；需要手动调用
+  `/flyrat/odometry/reset` 重新初始化，尚未实现自动重初始化。
+- 里程计参数（`kfselect_*`、`max_n_kfs` 等）目前写死在适配层，尚未暴露为
+  YAML 参数；实机调参需要重新编译。
+- 实机标定数值已保留并迁移到 `configs/camera/`，并已在新后端上完成桌面
+  短时验证。
+- 里程计 ROS 节点及 SchurVINS 依赖 OpenCV，目前在开发机运行；泰山派没有
+  OpenCV，内存也只有 2 GB，能否上机仍需评估。
 
 ## 6. 最近提交
 
@@ -164,14 +185,12 @@ f2ea59b fix(tof): define result-trimming macros in platform header
 
 ## 7. 下一步
 
-1. 实现 `flyrat::odometry` 后端（例如特征点法或直接法视觉惯性里程计），先用
-   已录制的双目/IMU 数据回放验证，再接入 `odometry_node`。
-2. 用真实运动验证双目内参、双目外参、IMU–相机外参和 Allan 噪声，检查轨迹
-   尺度、漂移和长期稳定性，并补充 ROS `CameraInfo`。
+1. 用已录制的实机双目/IMU 数据回放 SchurVINS，验证轨迹尺度、漂移、跟踪
+   耗时和长期稳定性；根据结果调整 keyframe/feature 参数。
+2. 补充双目/IMU 时间对齐与曝光延迟标定，检查 `imu_lookahead` 是否足够。
 3. 评估 ToF、双目、IMU 的时间对齐策略，必要时增加设备端统一时间戳。
 4. 将传感器转发和里程计整合进正式 `flyrat_pilot` 运行时，加入失效保护与
    链路健康状态。
 5. 视 adb 带宽和算法需求，评估双目降到 30 Hz 或使用硬件编码的长期方案。
 6. 评估里程计在泰山派上的可行性（需要 OpenCV 和更大内存），或维持开发机运算。
-7. 后端输出稳定位姿后，补充跟踪耗时、RSS、漂移等实测指标，并替换当前
-   “里程计骨架”占位状态。
+7. 后端输出稳定位姿后，补充跟踪耗时、RSS、漂移等实测指标。

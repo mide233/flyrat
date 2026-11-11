@@ -5,7 +5,7 @@
 
 - 实机传感器转发：[`hardware/sensor_forwarding.md`](hardware/sensor_forwarding.md)
 - Gazebo + Betaflight SITL：[`simulation/betaflight_sitl_gazebo.md`](simulation/betaflight_sitl_gazebo.md)
-- 里程计骨架：[`odometry/overview.md`](odometry/overview.md)
+- 里程计：[`odometry/overview.md`](odometry/overview.md)
 - 开发镜像与 CI：[`development/docker_image.md`](development/docker_image.md)
 - 项目进度与指标：[`status/project_status.md`](status/project_status.md)
 
@@ -34,8 +34,8 @@ sudo apt install build-essential cmake pkg-config libeigen3-dev libosqp-dev
 
 - ROS 2 的 `setup.bash` 必须在 `bash` 中 source。zsh 下直接 source 会因
   `BASH_SOURCE` 未定义而失败；使用 `bash -lc '...'`。
-- 泰山派（RK3566，Buildroot）没有 OpenCV，内存约 2 GB；ROS 2 里程计节点目前
-  只在开发机运行，后端算法尚未实现。
+- 泰山派（RK3566，Buildroot）没有 OpenCV，内存约 2 GB；ROS 2 里程计节点和
+  SchurVINS 目前只在开发机运行。
 - 仿真和实机使用不同的 DDS/网络环境时，先确认 `ROS_DOMAIN_ID` 一致。
 
 ## 2. 一键构建
@@ -103,7 +103,8 @@ ctest --test-dir libflyrat/build --output-on-failure
 ctest --test-dir libflyrat/build --output-on-failure
 ```
 
-共 9 个测试；其中 `test_odometry_api` 覆盖里程计接口、参数校验和当前桩行为。
+共 10 个测试；其中 `test_odometry_api` 覆盖接口契约，`test_schurvins_integration`
+覆盖 SchurVINS 初始化、跟踪和轨迹输出。
 
 ### 3.3 工具
 
@@ -258,8 +259,8 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
   colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release'
 ```
 
-`flyrat_odometry` 的节点会链接 libflyrat 的里程计骨架，并使用 OpenCV 转换
-图像消息和解析标定文件。
+`flyrat_odometry` 的节点会链接 libflyrat 的 SchurVINS 后端，并使用 OpenCV
+转换图像消息和解析标定文件。
 
 每次运行前 source：
 
@@ -275,7 +276,7 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 |---|---|
 | `flyrat_sensors_interfaces` | `TofZone`、`TofFrame` 自定义消息 |
 | `flyrat_sensors` | TCP 接收、MJPEG 解码、ROS 发布 |
-| `flyrat_odometry` | 里程计节点骨架（双目/IMU 同步、TF、状态；后端待实现） |
+| `flyrat_odometry` | 里程计节点（SchurVINS 双目惯性后端、TF、状态） |
 | `flyrat_msp` | MSP 协议接入 |
 | `flyrat_control` | 控制节点与 SITL launch |
 
@@ -289,7 +290,7 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 `imu_intrinsics_enable` 后，节点按 Kalibr 的 scale/misalignment 模型修正
 加速度和陀螺仪，并从 IMU 时间戳中扣除 `imu_time_offset`（相机到 IMU 的
 固定时间差，约 3.8 ms）。YAML 中 `T_i_b` 为单位阵；零偏不写入配置，由
-里程计后端在线估计（待实现）。关闭该功能后发布的是未修正的原始刻度数据。
+SchurVINS 在线估计。关闭该功能后发布的是未修正的原始刻度数据。
 
 ## 6. Gazebo + Betaflight SITL
 
@@ -351,25 +352,35 @@ ros2 launch flyrat_control flyrat_sitl.launch.py \
 仿真细节、端口和话题见
 [`simulation/betaflight_sitl_gazebo.md`](simulation/betaflight_sitl_gazebo.md)。
 
-## 7. 里程计骨架
+## 7. 里程计
 
-ORB-SLAM3 已从仓库移除。`libflyrat` 现在提供不依赖 OpenCV 的
-`flyrat::odometry` 接口，ROS 2 侧对应 `flyrat_odometry` 包。两者目前都是骨架：
-节点会正常启动、校验标定、发布静态 TF 和状态，但后端返回
-`kNotInitialized`，不会输出有效位姿。算法实现位置和接口细节见
+ORB-SLAM3 已从仓库移除。`libflyrat` 提供 `flyrat::odometry` 接口，默认后端为
+**SchurVINS**（SVO 2.0 前端 + Schur complement EKF），ROS 2 侧对应
+`flyrat_odometry` 包。算法和接口细节见
 [`odometry/overview.md`](odometry/overview.md)。
+
+SchurVINS 及其内置依赖为 **GPL-3.0**；链接后的 `odometry_node` 组合二进制
+受 GPL 约束，libflyrat 自身源文件仍为 MIT。
 
 ### 7.1 构建与测试
 
-`flyrat_odometry` 目标默认随 libflyrat 构建：
+`flyrat_odometry` 目标默认随 libflyrat 构建，并默认启用 SchurVINS：
 
 ```sh
 .script/build_libflyrat.sh
 ctest --test-dir libflyrat/build --output-on-failure
 ```
 
-测试共 9 个，其中 `test_odometry_api` 覆盖状态枚举、参数校验、空图像/尺寸
-不匹配拒绝、桩返回值、重复 `shutdown` 和未实现轨迹保存。
+SchurVINS 需要 OpenCV、yaml-cpp、glog 和 gflags。只构建接口或缺少依赖时：
+
+```sh
+cmake -S libflyrat -B libflyrat/build -DFLYRAT_WITH_SCHURVINS=OFF
+cmake --build libflyrat/build -j
+```
+
+测试共 10 个；`test_odometry_api` 覆盖状态枚举、参数校验、空图像/尺寸不匹配
+拒绝、无 IMU 时的返回值和重复 `shutdown`，`test_schurvins_integration` 覆盖
+初始化、跟踪和 TUM 轨迹写入。
 
 ROS 2 节点：
 
@@ -410,9 +421,24 @@ flyrat::odometry::Odometry odometry(options);
 auto result = odometry.track(left, right, timestamp, imu_samples);
 ```
 
-`ImageView` 是非拥有型的 8 位灰度视图，因此核心库不依赖 OpenCV。实现桩在
-`libflyrat/src/odometry/odometry.cpp`，用 TODO 标出了后端接入位置；`track()`
-当前只做输入校验并返回 `State::kNotInitialized`。
+`ImageView` 是非拥有型的 8 位灰度视图。门面在
+`libflyrat/src/odometry/odometry.cpp`，SchurVINS 适配在
+`libflyrat/src/odometry/schurvins_backend.cpp`；启用后端时只接受
+`Mode::kImuStereo`，`track()` 输出左目 `T_world_camera`。
+
+IMU 必须覆盖帧时间戳两侧：适配层只在 `first_imu <= frame.timestamp <
+last_imu` 时调用前端，否则返回 `kRecentlyLost`。ROS 节点会自动等待
+`imu_lookahead`（默认 15 ms）内的帧后样本。
+
+SchurVINS 的有效深度范围已按近场设为 0.25–20 m，初始化阈值为 40 个特征、
+40 个跟踪点、30 个内点、视差 10 px。更远的室外场景需要重新调整
+`schurvins_backend.cpp` 中的 `stereo.*_depth_inv` 和 `initialization.*`；
+否则点会被深度范围拒绝，初始化延迟期间纯 IMU 积分会造成明显漂移。
+
+`updated seeds are unconverged` 是深度 seed 未收敛的提示，不是崩溃；内置代码
+已节流为每 100 次一条。`Downsizing storage not implemented` 已通过实现
+`Frame::resizeFeatureStorage()` 的缩容分支消除。逐帧调试可用
+`-DFLYRAT_SCHURVINS_VERBOSE=ON` 重新打开。
 
 ### 7.4 ROS 2 节点
 
@@ -428,19 +454,17 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 `body_frame:=imu_link` 是默认机体坐标系；`world_frame` 默认
 `odometry_map`。节点会发布静态 `imu_link -> camera_left_optical_frame` 和
 `camera_left_optical_frame -> camera_right_optical_frame`（来自
-`camera.T_left_right`）。其余参数见 `flyrat_odometry/config/odometry.yaml`。
+`camera.T_left_right`），跟踪成功后发布动态 `odometry_map -> imu_link`。
+其余参数见 `flyrat_odometry/config/odometry.yaml`。
 
-纯双目启动：
+SchurVINS 必须有 IMU，`mode:=stereo` 只对关闭后端后的桩实现有意义；启用
+SchurVINS 时传 `mode:=stereo` 会因模式校验失败而退出。
+
+记录 TUM 轨迹：
 
 ```sh
-ros2 launch flyrat_odometry odometry.launch.py mode:=stereo
+ros2 launch flyrat_odometry odometry.launch.py trajectory_path:=/tmp/flyrat.tum
 ```
-
-`mode:=stereo` 时节点不订阅 IMU；标定文件中的 IMU 参数不会被使用，但
-`imu.T_body_camera` 仍用于静态 TF 和机体位姿换算。
-
-后端实现后，节点会发布动态 `odometry_map -> imu_link`；当前骨架没有有效
-位姿，因此只有静态 TF。
 
 输出：
 
@@ -449,7 +473,7 @@ ros2 launch flyrat_odometry odometry.launch.py mode:=stereo
 /flyrat/odometry/path       nav_msgs/Path，机体轨迹
 /flyrat/odometry/status     diagnostic_msgs/DiagnosticStatus，1 Hz
 /flyrat/odometry/reset      std_srvs/Trigger
-/tf                         静态相机 TF（后端实现后增加动态机体 TF）
+/tf                         动态 odometry_map -> imu_link 与静态相机 TF
 ```
 
 Foxglove 预览：
@@ -466,6 +490,7 @@ Foxglove 预览：
 IMU 的 scale/misalignment 在 `sensor_receiver_node` 发布前按
 `flyrat_sensors/config/imu_intrinsics.yaml` 修正，IMU 时间戳扣除
 `imu_time_offset`（约 3.8 ms）。这些预处理与具体里程计算法无关，继续保留。
+大段 IMU 断流后若跟踪停在 `kPaused`，调用 `/flyrat/odometry/reset` 重新初始化。
 
 ### 7.5 一键 bringup
 
@@ -473,8 +498,8 @@ IMU 的 scale/misalignment 在 `sensor_receiver_node` 发布前按
 `odometry_node` 串成一条启动链：
 
 ```sh
-.script/bringup_real.sh                         # 传感器 + 里程计骨架
-.script/bringup_real.sh mode:=stereo             # 纯双目，不订阅 IMU
+.script/bringup_real.sh                         # 传感器 + 里程计
+.script/bringup_real.sh trajectory_path:=/tmp/flyrat.tum
 .script/bringup_real.sh start_foxglove:=true    # 再加 Foxglove bridge
 .script/bringup_real.sh start_odometry:=false   # 只看传感器
 .script/bringup_real.sh start_adb_forward:=false start_device:=false  # 复用已有转发
@@ -609,5 +634,6 @@ docker exec -it rat-dev-full bash
 | ROS 收不到数据 | 先确认 `adb forward --list`，再确认设备 forwarder 已监听 5000 |
 | ToF 全部 `distance_mm=0` | 确认 C/C++ 没有单独传 `VL53L5CX_DISABLE_*`，重新完整编译 |
 | ToF 初始化失败 | 确认四颗 LPn/INT 接线和 i2c2，检查地址是否被其他器件占用 |
-| 里程计未输出位姿 | 当前后端是桩实现，只发布 `NOT_INITIALIZED` 状态；等待后续算法实现 |
+| 里程计未输出位姿 | 先看 `/flyrat/odometry/status`；确认 `mode:=imu_stereo`、IMU 在发布、`imu_lookahead` 为正，且图像尺寸匹配 640x480 |
+| 里程计数秒后才输出、轨迹漂移数米 | 场景距离超出配置的深度范围（0.25–20 m），初始化一直失败；按实际距离调整 `stereo.*_depth_inv` 和 `initialization.*` |
 | 里程计配置错误 | 检查 `camera_config_path` 指向的 YAML 是否存在、`T_body_camera` 是否为合法等距变换 |

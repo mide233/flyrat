@@ -1,20 +1,27 @@
 # 里程计模块
 
-`flyrat_odometry` 是实机双目/双目惯性里程计的骨架。**算法后端尚未实现**：
-节点会正常接收、同步和缓存数据并发布完整的状态与 TF，但位姿始终为无效值，
-状态始终为 `NOT_INITIALIZED`。
+`flyrat_odometry` 是实机双目惯性里程计。默认后端为 **SchurVINS**（SVO 2.0
+前端 + Schur complement 滤波后端，CVPR 2024），通过 `libflyrat` 内的适配层
+接入，ROS 节点、话题和 TF 接口保持不变。
 
-这样做的目的是先把传感器链路、时间同步、坐标系和 ROS 接口固定下来，后续只
-替换 `libflyrat` 中的后端实现，不需要再改节点和启动脚本。
+关闭 `FLYRAT_WITH_SCHURVINS` 时退化为桩实现：节点仍能接收、同步和缓存数据并
+发布状态与静态 TF，但位姿无效、状态为 `NOT_INITIALIZED`。
+
+> **许可证**：SchurVINS 及其内置的 SVO/vikit/rpg_common/minkindr/fast 代码为
+> **GPL-3.0**，源码位于 `libflyrat/third_party/schurvins/`。链接
+> `flyrat_schurvins` 的 `flyrat_odometry` 组合二进制按 GPL-3.0 分发；
+> libflyrat 自身源文件仍为 MIT。对外分发前请确认合规范围。
 
 ## 1. 组成
 
 | 位置 | 作用 |
 |---|---|
 | `libflyrat/include/flyrat/odometry/odometry.hpp` | ROS 无关的里程计接口 |
-| `libflyrat/src/odometry/odometry.cpp` | 当前为桩实现，后端接入点 |
+| `libflyrat/src/odometry/odometry.cpp` | 接口门面、模式校验、后端转发 |
+| `libflyrat/src/odometry/schurvins_backend.{hpp,cpp}` | 标定解析与 SchurVINS 适配 |
+| `libflyrat/third_party/schurvins/` | 内置的 GPL-3.0 SVO/SchurVINS 源码 |
 | `libflyrat/configs/camera/uvc_640x480.yaml` | 相机内参、双目外参、IMU 噪声和外参 |
-| `libflyrat/tests/test_odometry_api.cpp` | 接口和桩行为测试 |
+| `libflyrat/tests/test_odometry_api.cpp` | 接口、参数校验和桩/后端行为测试 |
 | `flyrat_play/ros2_ws/src/flyrat_odometry/` | ROS 2 节点、参数、launch |
 | `docs/agent/odometry/coordinates.md` | 坐标系、TF 链和标定矩阵说明 |
 
@@ -44,20 +51,58 @@ public:
 - `ImuSample` 包含时间戳、加速度和角速度，单位分别为 m/s²、rad/s。
 - `Result::pose` 是 `T_world_camera`；`State` 为
   `kNotInitialized / kTracking / kRecentlyLost / kLost`。
-- 构造时检查 `camera_config_path` 是否存在；`track()` 检查图像非空且左右尺寸
-  一致；`shutdown()` 后继续 `track()` 会抛 `OdometryError`。
-- 当前实现中 `track()` 返回 `kNotInitialized` 和无效位姿，
+- 构造时检查 `camera_config_path` 是否存在；`track()` 检查图像非空、左右尺寸
+  一致，并拒绝 `shutdown()` 后的调用。
+- 启用 SchurVINS 时只支持 `kImuStereo`，构造 `kStereo` 会抛
+  `OdometryError("SchurVINS requires IMU-stereo mode")`。
+- `track()` 输出 `kTracking` 和有效的 `T_world_camera` 后，节点再转换为
+  `T_world_body` 发布。
+- 未启用 SchurVINS 时 `track()` 返回 `kNotInitialized` 和无效位姿，
   `saveTrajectory()` 抛 `OdometryError`。
 
-### 2.1 接入新算法
+### 2.1 SchurVINS 后端
 
-1. 在 `libflyrat/src/odometry/` 增加实现文件，或在 `odometry.cpp` 中替换
-   `track()` 的函数体。
-2. 从 `configs/camera/uvc_640x480.yaml` 读取标定。当前节点只解析两个 4x4
-   外参；内参和 IMU 噪声留给后端。
-3. 维护自己的状态机并填 `Result`。`Pose` 必须是左目相机在世界系中的位姿。
-4. 需要输出轨迹时实现 `saveTrajectory()`（TUM 格式，每行
-   `timestamp tx ty tz qx qy qz qw`）。
+- 前端：`svo::FrameHandlerStereo`，双目 `kStereo` 初始化，启用 `USE_SCHUR_VINS`。
+- IMU：`svo::ImuHandler` 接收 IMU 样本；噪声密度、随机游走和采样率来自标定
+  YAML 的 `imu.*` 字段。
+- 相机：`vikit` 针孔 + radial-tangential 畸变模型；`T_C_B` 由
+  `imu.T_body_camera` 和 `camera.T_left_right` 推导。
+- 位姿：SVO 输出 `T_world_body`，适配层左乘 `imu.T_body_camera` 得到
+  `T_world_camera`，符合 `Pose` 的接口约定。
+- 轨迹：每个有效位姿追加到内存，`saveTrajectory()` 写 TUM 格式
+  （`timestamp tx ty tz qx qy qz qw`）。
+- `reset()` 重建整个前端和 IMU 处理器，因为只调用 SVO 的 `reset()` 会留下
+  SchurVINS 的 EKF 状态。
+
+**深度与初始化范围（实机）**：适配层按 0.3 m 桌面升降场景调整了 SVO 的默认
+参数。双目有效深度为 0.25–20 m（均值 1.5 m），初始化要求 40 个特征、40 个
+跟踪点、30 个内点、视差 10 px。上游默认值面向室外（最近 1 m、最远 50 m、
+初始化 60/80/70/30），在 0.4–1 m 的桌面场景会长时间初始化失败；这段时间
+没有视觉更新，SchurVINS 只靠 IMU 积分，实测 6 s 后初值已漂移数米。
+
+2026-11-10 的实机 bag（28 s，静止 → 升高约 35 cm → 回到原位）回放结果：
+首帧即开始跟踪，z 从 0.008 m 升到 0.364 m 再回到 0.016 m；相对起点的最大
+水平偏移约 2.5 cm，结束时水平漂移约 1.4 cm；输出约 39–45 Hz。
+
+**日志说明**：`updated seeds are unconverged` 表示深度 seed 尚未收敛，近距离
+低视差时常见，不是崩溃；内置代码已把它节流为每 100 次输出一条。
+`Downsizing storage not implemented` 是上游 `Frame::resizeFeatureStorage()`
+只扩容不缩容的缺陷，内置代码已实现缩容，正常运行时不再出现。
+
+**IMU 时序要求（关键）**：SchurVINS 在每帧时间戳两侧插值 IMU，并在
+`schurvinsBackward()` 中对缺失数据执行 `CHECK(0)`。因此后端只有在
+`first_imu <= frame.timestamp < last_imu` 时才把帧送入前端；ROS 节点通过
+`imu_lookahead` 等待帧后样本，并保留帧前历史。IMU 断流时帧会被跳过并返回
+`kRecentlyLost`，不会让进程 abort。
+
+### 2.2 接入新算法
+
+1. 在 `libflyrat/src/odometry/` 增加实现文件，并在 `odometry.cpp` 的门面中
+   选择后端。
+2. 从 `configs/camera/uvc_640x480.yaml` 读取标定，保持 `T_world_camera` 的
+   输出约定。
+3. 维护自己的状态机并填 `Result`。
+4. 需要输出轨迹时实现 `saveTrajectory()`（TUM 格式）。
 5. 重新构建 libflyrat 和 ROS 包；节点和话题不需要改动。
 
 ## 3. 配置
@@ -85,14 +130,17 @@ imu:
 `odometry_node` 的职责：
 
 - 订阅左右目图像，使用 `message_filters::ApproximateTime` 同步。
-- 订阅 IMU，保留约 1 秒历史，按帧时间戳切分后传给后端。
+- 订阅 IMU，保留约 1 秒历史；每帧取 `(上一帧时间, 帧时间 + imu_lookahead]`
+  的样本，首帧额外带上约 100 ms 历史。`imu_lookahead` 默认 15 ms。
 - 只有最新一帧待处理，后端忙时丢旧帧。
 - 读取 `camera.T_left_right` 和 `imu.T_body_camera`，发布静态 TF。
 - 把 `T_world_camera` 转成 `T_world_body`；纯双目模式下把世界重定基到第一帧
   机体位姿（FLU）。
 - 发布动态 TF、里程计、轨迹、诊断和重置服务。
+- 退出时若设置了 `trajectory_path`，写 TUM 轨迹。
 
-`mode:=stereo` 时不订阅 IMU；默认 `mode:=imu_stereo`。
+SchurVINS 需要 IMU，因此 `mode:=stereo` 只对桩后端有意义；启用 SchurVINS 时
+启动会因模式校验失败而退出。默认 `mode:=imu_stereo`。
 
 ### 4.1 话题与服务
 
@@ -115,17 +163,19 @@ imu:
 |---|---|---|
 | `left_topic` / `right_topic` | `/flyrat/sensors/stereo/*/image_raw` | 双目输入 |
 | `imu_topic` | `/flyrat/sensors/imu` | IMU 输入 |
-| `mode` | `imu_stereo` | `imu_stereo` 或 `stereo` |
+| `mode` | `imu_stereo` | `imu_stereo`（SchurVINS 构建下 `stereo` 不可用） |
 | `world_frame` | `odometry_map` | 世界系 |
 | `body_frame` | `imu_link` | 机体/IMU 系 |
 | `camera_frame` / `right_camera_frame` | 光学系 | 相机 TF |
 | `camera_config_path` | 由 launch 注入 | 标定 YAML |
 | `sync_slop` | `0.010` | 双目同步容差，秒 |
 | `imu_buffer_seconds` | `1.0` | IMU 缓存长度 |
+| `imu_lookahead` | `0.015` | 帧后 IMU 前视窗口，秒；必须为正 |
+| `imu_initial_history` | `0.1` | 首帧携带的帧前 IMU 历史，秒 |
 | `path_max_poses` | `1000` | 轨迹最大长度 |
 | `path_publish_period` | `0.2` | 轨迹发布周期，秒 |
 | `status_period` | `1.0` | 诊断发布周期，秒 |
-| `trajectory_path` | 空 | 退出时写 TUM 轨迹（后端实现后） |
+| `trajectory_path` | 空 | 退出时写 TUM 轨迹 |
 
 ## 5. 构建与运行
 
@@ -133,6 +183,16 @@ imu:
 .script/build_libflyrat.sh
 .script/build_ros2.sh
 ```
+
+`FLYRAT_WITH_SCHURVINS` 默认 `ON`，需要 OpenCV、yaml-cpp、glog 和 gflags。
+只使用接口或在不具备这些依赖的平台上构建：
+
+```sh
+cmake -S libflyrat -B libflyrat/build -DFLYRAT_WITH_SCHURVINS=OFF
+```
+
+SVO 默认关闭逐帧调试输出；需要排查前端行为时加
+`-DFLYRAT_SCHURVINS_VERBOSE=ON`。
 
 单独运行节点：
 
@@ -152,6 +212,12 @@ ros2 launch flyrat_odometry odometry.launch.py
 .script/bringup_real.sh start_odometry:=false
 ```
 
+记录轨迹：
+
+```sh
+.script/bringup_real.sh trajectory_path:=/tmp/flyrat.tum
+```
+
 `bringup.launch.py` 会依次启动 adb forward、设备端 forwarder、接收节点和
 里程计节点，可选 Foxglove，并在退出时清理。
 
@@ -161,13 +227,20 @@ ros2 launch flyrat_odometry odometry.launch.py
 ctest --test-dir libflyrat/build --output-on-failure -R odometry
 ```
 
-测试覆盖：标定路径校验、空图像/尺寸不一致拒绝、桩返回
-`NOT_INITIALIZED`、`reset/shutdown` 幂等、关闭后 `track()` 拒绝。
+测试覆盖：标定路径校验、空图像/尺寸不一致拒绝、无 IMU 时返回
+`NOT_INITIALIZED`、`reset/shutdown` 幂等、关闭后 `track()` 拒绝，以及启用
+SchurVINS 时 TUM 轨迹文件可写。
 
 ## 7. 当前限制
 
-- 没有任何位姿输出；`/flyrat/odometry/odometry` 不会被发布，`/tf` 只有静态
-  外参。
-- 状态固定为 `NOT_INITIALIZED`，诊断级别为 WARN。
-- `saveTrajectory()` 未实现，设置 `trajectory_path` 只会在退出时报错。
-- 双目与 IMU 没有硬件同步，时间对齐仍依赖接收节点的时间戳修正。
+- 双目与 IMU 没有硬件同步；`imu_lookahead` 只能补偿软件时间戳，不能消除
+  曝光/传输抖动。
+- 大段 IMU 断流或长时间跟踪失败后，SVO 可能停在 `kPaused`；此时需要调用
+  `/flyrat/odometry/reset` 重新初始化，尚未实现自动重初始化。
+- 已在单个实机桌面 bag 上验证短时相对尺度和漂移（0.35 m 升降、水平漂移约
+  1 cm），尚未做飞行、长距离和长期稳定性验证；`kfselect_*`、`max_n_kfs`
+  等参数目前直接写入适配层，尚未暴露为 YAML 参数。
+- 实机左目约 55.7 Hz（右目 60 Hz），存在约 8% 丢帧且画面比右目更模糊、
+  更亮；当前 bag 上仍可跟踪，但会影响高速运动时的鲁棒性。
+- 组合二进制受 GPL-3.0 约束，详见文首。
+- 后端计算在开发机运行；泰山派没有 OpenCV 且内存约 2 GB，上机可行性未验证。
