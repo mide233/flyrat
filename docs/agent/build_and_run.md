@@ -186,6 +186,19 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 `python3 flyrat_pilot/tools/analyze_trace.py DIR` 汇总 p50/p95/p99 和阶段
 占比。不传 `--trace` 时不产生文件。
 
+录制/回放机载传感器（相机 JPEG + IMU）：
+
+```sh
+# 录制到 <DIR>/sensor_bag.bin
+./flyrat_pilot/build/flyrat_pilot ... --record /tmp/bag1 --max-frames 600
+# 回放：不打开相机和 MSP，按原始时间间隔重放
+./flyrat_pilot/build/flyrat_pilot ... --replay /tmp/bag1
+```
+
+回放同样支持 `--trace`、`--trajectory`、`--decode` 和 `--max-frames`，播完
+最后一个图像帧后自动退出。`--record` 与 `--replay` 互斥。bringup 脚本可用
+`record:=DIR` / `replay:=DIR`。
+
 只校验标定、不打开硬件：
 
 ```sh

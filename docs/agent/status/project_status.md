@@ -172,6 +172,12 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   的 NEON 实现，并开启双目并行重投影。25 fps 600 帧 `track()` p50 由
   27.5 ms 降到 16.6 ms，`reproject` 12.7 → 10.4 ms，30 fps 21.6 → 16.0 ms；
   不改变算法参数。启用并行重投影时不能用 `--slam-cpu` 固定 SLAM 线程。
+- 传感器录制/回放（2026-11-11）：`flyrat_pilot --record DIR` 把原始 MJPEG
+  和已标定 IMU 写入 `DIR/sensor_bag.bin`（独立写线程，队列 64，满则丢帧并
+  计数），`--replay DIR` 跳过相机/MSP，按原始时间间隔重放并自动退出。
+  设备实测 300 帧：录制 `frames=300 imu=2632 dropped=0`（约 23.5 MB），
+  回放 300 帧、25 fps，轨迹和 trace 正常。bringup 脚本支持
+  `record:=DIR` / `replay:=DIR`。
 - SchurVINS 的初始化器原先固定使用 1–50 m 深度范围，已改为读取适配层的
   0.25–20 m 近场参数，解决实机近距桌面场景无法初始化的问题。
 - `SchurVINS::Prediction()` 原会对 `dt >= 15 ms` 直接 `CHECK` 退出；200 Hz

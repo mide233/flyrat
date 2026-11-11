@@ -106,6 +106,15 @@ python3 flyrat_pilot/tools/analyze_trace.py trace/flyrat_trace --skip 100
 `trace:=` 会增加少量写文件开销，只在分析时启用。`slam_cpu:=` 现在会被
 忽略：双目并行重投影需要多个核，固定 SLAM 线程反而会把工作线程限制在单核。
 
+录制与回放传感器（详见 5.4）：
+
+```bash
+.script/bringup_pilot_slam.sh record:=/tmp/bag1 fps:=25 max_frames:=600
+.script/bringup_pilot_slam.sh replay:=/tmp/bag1
+```
+
+`record:=` 在采集的同时写 bag；`replay:=` 跳过相机和 MSP，只重放 bag。
+
 脚本会：
 
 1. 把 `build-arm/flyrat_pilot`、相机标定和 IMU 标定推到设备 `/tmp/flyrat`；
@@ -252,6 +261,37 @@ python3 flyrat_pilot/tools/analyze_trace.py trace
 - 左目约 55.7 Hz、右目 60 Hz，左目有约 8% 丢帧且画面更模糊、更亮。
 - SchurVINS 为 **GPL-3.0**，`flyrat_pilot` 链接后组合二进制受 GPL 约束；
   libflyrat 自身源文件仍为 MIT。
+
+### 5.4 传感器录制与回放（`--record` / `--replay`）
+
+用于在机载现场录下原始相机 JPEG 与已标定 IMU，回到同一台设备重放，复现
+算法问题；不改算法参数，也不需要主机参与。
+
+```bash
+# 录制：相机 JPEG + IMU 写入 <DIR>/sensor_bag.bin
+flyrat_pilot --record /tmp/bag1 --max-frames 600
+
+# 回放：不打开相机和 MSP，按原始时间间隔重放
+flyrat_pilot --replay /tmp/bag1
+
+# 回放时同样支持 --trace / --trajectory / --decode / --max-frames
+flyrat_pilot --replay /tmp/bag1 --trace /tmp/replay_trace
+```
+
+- bag 为单文件二进制：24 字节文件头（`FLYRATB1`、宽高、fps），之后是
+  24 字节记录头（类型、长度、序号、时间戳）+ payload。类型 1 是完整 MJPEG，
+  类型 2 是 6 个 `double`（加速度 xyz、角速度 xyz）。
+- 写入在独立线程完成，队列上限 64 条；写盘跟不上时丢弃并计入
+  `dropped`，不会阻塞相机解码线程。退出时打印
+  `bag ... frames= imu= dropped= bytes=`。
+- 回放以第一条记录为基准，把 bag 内时间戳整体映射到当前 `steady_clock`，
+  因此 SLAM 的 0.5 s 过期检查、IMU lookahead 和 `age_ms` 统计保持原义。
+  回放遇到最后一个图像帧后 0.5 s 内的 IMU 记录就停止，不会播放关机阶段的
+  IMU 尾巴。
+- 回放不会启动 `MspInteract` 和 `StereoJpegSource`，PoseStream、轨迹、
+  trace 均照常工作；结束后自动退出，不需要 `--max-frames`。
+- bag 在设备本地，需要取回时用 `adb pull /tmp/bag1`。尺寸与当前
+  `--width/--height` 不一致时会在启动日志给出警告。
 
 ## 6. 预留的飞控接入点
 

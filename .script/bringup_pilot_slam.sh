@@ -23,6 +23,8 @@
 #   decode:=mpp|cpu     MJPEG decoder (default: mpp, falls back to cpu if MPP fails)
 #   trace:=DIR          Enable per-stage CSV tracing on the device. On exit the
 #                       directory is pulled to <repo>/trace/<name>.
+#   record:=DIR         Record camera JPEG + IMU to <DIR>/sensor_bag.bin.
+#   replay:=DIR         Replay a recorded bag; skips camera and MSP.
 #   slam_cpu:=N         Ignored: parallel stereo reprojection needs more than one
 #                       core, and std::async workers inherit the SLAM affinity.
 #
@@ -47,6 +49,8 @@ SLAM_CPU=-1
 SLAM_CPU_SET=0
 DECODE=mpp
 TRACE=""
+RECORD=""
+REPLAY=""
 STAMP_SOURCE=device
 TIME_OFFSET=0.0
 TRAJECTORY="/tmp/flyrat_pilot.tum"
@@ -68,6 +72,8 @@ for arg in "$@"; do
         decode:=*) DECODE="${arg#decode:=}" ;;
         trace:=off|trace:=0) TRACE="" ;;
         trace:=*) TRACE="${arg#trace:=}" ;;
+        record:=*) RECORD="${arg#record:=}" ;;
+        replay:=*) REPLAY="${arg#replay:=}" ;;
         stamp_source:=*) STAMP_SOURCE="${arg#stamp_source:=}" ;;
         time_offset:=*) TIME_OFFSET="${arg#time_offset:=}" ;;
         trajectory:=*) TRAJECTORY="${arg#trajectory:=}" ;;
@@ -79,6 +85,11 @@ for arg in "$@"; do
         *) echo "error: unknown argument: ${arg}" >&2; usage >&2; exit 2 ;;
     esac
 done
+
+if [ -n "${RECORD}" ] && [ -n "${REPLAY}" ]; then
+    echo "error: record:= and replay:= are mutually exclusive" >&2
+    exit 2
+fi
 
 case "${DECODE}" in
     cpu|mpp) ;;
@@ -179,7 +190,11 @@ fi
 
 # Restart a stale device process. The binary path is longer than the 15-char
 # comm limit, so match the anchored command line instead of using pkill -x.
-echo "[bringup] starting onboard SchurVINS (${FPS} fps, decode ${DECODE}${TRACE:+, trace ${TRACE}})"
+SOURCE="camera"
+if [ -n "${REPLAY}" ]; then
+    SOURCE="replay ${REPLAY}"
+fi
+echo "[bringup] starting onboard SchurVINS (${FPS} fps, decode ${DECODE}, ${SOURCE}${TRACE:+, trace ${TRACE}})"
 DEVICE_ARGS=(
     --camera-config "${DEVICE_DIR}/camera.yaml"
     --imu-config "${DEVICE_DIR}/imu.yaml"
@@ -193,6 +208,12 @@ DEVICE_ARGS=(
 )
 if [ -n "${TRACE}" ]; then
     DEVICE_ARGS+=(--trace "${TRACE}")
+fi
+if [ -n "${RECORD}" ]; then
+    DEVICE_ARGS+=(--record "${RECORD}")
+fi
+if [ -n "${REPLAY}" ]; then
+    DEVICE_ARGS+=(--replay "${REPLAY}")
 fi
 "${ADB[@]}" shell "pkill -f '^${DEVICE_BINARY}' 2>/dev/null; \
     exec ${DEVICE_BINARY} ${DEVICE_ARGS[*]}" &

@@ -40,6 +40,7 @@ find_package(Threads REQUIRED)
 
 add_executable(flyrat_pilot
   src/main.cpp
+  src/sensor_bag.cpp
   src/slam/imu_converter.cpp
   src/slam/pose_stream.cpp)
 target_include_directories(flyrat_pilot PRIVATE src ${OpenCV_INCLUDE_DIRS})

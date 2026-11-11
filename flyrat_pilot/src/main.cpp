@@ -47,10 +47,14 @@
 
 #include "slam/imu_converter.hpp"
 #include "slam/pose_stream.hpp"
+#include "sensor_bag.hpp"
 
 namespace {
 
 using Clock = std::chrono::steady_clock;
+using flyrat::pilot::BagReader;
+using flyrat::pilot::BagRecord;
+using flyrat::pilot::BagWriter;
 
 std::atomic<bool> g_stop { false };
 std::atomic<bool> g_reset { false };
@@ -87,6 +91,8 @@ struct Options {
     double warmup_s = 1.0;
     int max_frames = 0;
     std::string trace_dir;
+    std::string record_dir;
+    std::string replay_dir;
     bool check_config = false;
 };
 
@@ -114,6 +120,8 @@ void printUsage(const char* program)
         << "  --warmup SEC           drop camera frames before SLAM starts (default 1.0)\n"
         << "  --max-frames N         stop after N processed frames (testing)\n"
         << "  --trace DIR            write per-frame timing CSVs to DIR\n"
+        << "  --record DIR           record camera JPEG + IMU into DIR\n"
+        << "  --replay DIR           replay a recorded DIR instead of camera/MSP\n"
         << "  --check-config         validate calibration files and exit\n";
 }
 
@@ -166,6 +174,10 @@ Options parseOptions(int argc, char** argv)
             options.max_frames = std::stoi(value("--max-frames"));
         } else if (arg == "--trace") {
             options.trace_dir = value("--trace");
+        } else if (arg == "--record") {
+            options.record_dir = value("--record");
+        } else if (arg == "--replay") {
+            options.replay_dir = value("--replay");
         } else if (arg == "--check-config") {
             options.check_config = true;
         } else if (arg == "--help" || arg == "-h") {
@@ -183,6 +195,9 @@ Options parseOptions(int argc, char** argv)
     }
     if (options.decode != "cpu" && options.decode != "mpp") {
         throw std::runtime_error("decode must be 'cpu' or 'mpp'");
+    }
+    if (!options.record_dir.empty() && !options.replay_dir.empty()) {
+        throw std::runtime_error("--record and --replay are mutually exclusive");
     }
     if (options.imu_lookahead < 0.0 || options.imu_lookahead > 0.1
         || options.imu_history <= 0.0) {
@@ -565,35 +580,55 @@ int main(int argc, char** argv)
         flyrat::pilot::PoseStream pose_stream(stream_config);
 
         ImuBuffer imu_buffer;
-        flyrat::MspConfig msp_config;
-        msp_config.poll.imu_hz = 200;
-        msp_config.poll.attitude_hz = 0;
-        msp_config.poll.status_hz = 0;
-        msp_config.poll.altitude_hz = 0;
-        msp_config.poll.rc_hz = 0;
-        msp_config.poll.analog_hz = 0;
-        msp_config.poll.motor_hz = 0;
-        msp_config.poll.gps_hz = 0;
-        msp_config.poll.debug_hz = 0;
-
-        flyrat::MspInteract msp(msp_config,
-            std::make_unique<flyrat::hardware::SerialTransport>(
-                options.msp_device, options.msp_baud));
-        msp.set_imu_callback([&](const flyrat::Sample<flyrat::ImuSample>& sample) {
-            flyrat::sensors::ImuPayload raw;
-            for (std::size_t i = 0; i < 3; ++i) {
-                raw.acc[i] = sample.value.acc[i];
-                raw.gyro[i] = sample.value.gyro[i];
-                raw.mag[i] = sample.value.mag[i];
+        std::unique_ptr<BagWriter> bag;
+        if (!options.record_dir.empty()) {
+            bag = std::make_unique<BagWriter>();
+            if (!bag->open(options.record_dir, options.width, options.height,
+                    options.fps)) {
+                throw std::runtime_error(
+                    "cannot create sensor bag in " + options.record_dir);
             }
-            const double stamp_s = clock.toEpoch(sample.stamp);
-            imu_buffer.push(
-                flyrat::pilot::convertImuSample(intrinsics, raw, stamp_s));
-        });
-        msp.set_link_callback([](bool connected, const std::string& why) {
-            std::cerr << "msp: " << (connected ? "connected" : "disconnected")
-                      << (why.empty() ? "" : " (" + why + ")") << "\n";
-        });
+            std::cerr << "flyrat_pilot: recording to " << bag->path() << "\n";
+        }
+        const bool replaying = !options.replay_dir.empty();
+
+        std::unique_ptr<flyrat::MspInteract> msp;
+        if (!replaying) {
+            flyrat::MspConfig msp_config;
+            msp_config.poll.imu_hz = 200;
+            msp_config.poll.attitude_hz = 0;
+            msp_config.poll.status_hz = 0;
+            msp_config.poll.altitude_hz = 0;
+            msp_config.poll.rc_hz = 0;
+            msp_config.poll.analog_hz = 0;
+            msp_config.poll.motor_hz = 0;
+            msp_config.poll.gps_hz = 0;
+            msp_config.poll.debug_hz = 0;
+
+            msp = std::make_unique<flyrat::MspInteract>(msp_config,
+                std::make_unique<flyrat::hardware::SerialTransport>(
+                    options.msp_device, options.msp_baud));
+            msp->set_imu_callback(
+                [&](const flyrat::Sample<flyrat::ImuSample>& sample) {
+                    flyrat::sensors::ImuPayload raw;
+                    for (std::size_t i = 0; i < 3; ++i) {
+                        raw.acc[i] = sample.value.acc[i];
+                        raw.gyro[i] = sample.value.gyro[i];
+                        raw.mag[i] = sample.value.mag[i];
+                    }
+                    const double stamp_s = clock.toEpoch(sample.stamp);
+                    const auto converted
+                        = flyrat::pilot::convertImuSample(intrinsics, raw, stamp_s);
+                    imu_buffer.push(converted);
+                    if (bag) {
+                        bag->writeImu(converted);
+                    }
+                });
+            msp->set_link_callback([](bool connected, const std::string& why) {
+                std::cerr << "msp: " << (connected ? "connected" : "disconnected")
+                          << (why.empty() ? "" : " (" + why + ")") << "\n";
+            });
+        }
 
         FrameBuffer frame_buffer;
         std::atomic<std::uint64_t> decode_errors { 0 };
@@ -618,12 +653,80 @@ int main(int argc, char** argv)
         flyrat::hardware::StereoJpegSource camera(camera_config);
 
         std::thread camera_thread;
+        std::thread replay_thread;
+        std::atomic<std::uint64_t> replay_frames { 0 };
+        std::atomic<bool> replay_finished { false };
+        int consecutive_failures = 0;
+
+        auto decode_and_push = [&](const std::vector<std::uint8_t>& jpeg,
+                                   std::uint64_t sequence, double stamp_s) {
+            const auto decode_start = Clock::now();
+            if (hardware_decode) {
+                flyrat::hardware::DecodedJpeg decoded;
+                if (mpp_decoder.decode(jpeg.data(), jpeg.size(), decoded)
+                    && decoded.width == options.width
+                    && decoded.height == options.height
+                    && decoded.stride >= decoded.width
+                    && decoded.luma.size()
+                        >= static_cast<std::size_t>(decoded.stride)
+                            * static_cast<std::size_t>(decoded.height)) {
+                    FramePacket packet;
+                    const int half = decoded.width / 2;
+                    packet.storage = std::make_shared<std::vector<std::uint8_t>>(
+                        std::move(decoded.luma));
+                    packet.left = cv::Mat(decoded.height, half, CV_8UC1,
+                        packet.storage->data(), decoded.stride);
+                    packet.right = cv::Mat(decoded.height, half, CV_8UC1,
+                        packet.storage->data() + half, decoded.stride);
+                    packet.stamp_s = stamp_s;
+                    packet.sequence = sequence;
+                    packet.decoded_at = Clock::now();
+                    packet.decode_ms = std::chrono::duration<double, std::milli>(
+                        packet.decoded_at - decode_start)
+                                           .count();
+                    frame_buffer.push(std::move(packet));
+                    consecutive_failures = 0;
+                    return;
+                }
+
+                ++decode_fallbacks;
+                ++consecutive_failures;
+                if (consecutive_failures >= 10) {
+                    hardware_decode = false;
+                    std::cerr << "flyrat_pilot: MPP decode failed "
+                              << consecutive_failures
+                              << " frames in a row, using cv::imdecode\n";
+                }
+            }
+
+            cv::Mat encoded(1, static_cast<int>(jpeg.size()), CV_8UC1,
+                const_cast<std::uint8_t*>(jpeg.data()));
+            cv::Mat image = cv::imdecode(encoded, cv::IMREAD_GRAYSCALE);
+            if (image.empty() || image.cols != options.width
+                || image.rows != options.height) {
+                ++decode_errors;
+                return;
+            }
+
+            FramePacket packet;
+            const int half = image.cols / 2;
+            packet.owner = image;
+            packet.left = image.colRange(0, half);
+            packet.right = image.colRange(half, image.cols);
+            packet.stamp_s = stamp_s;
+            packet.sequence = sequence;
+            packet.decoded_at = Clock::now();
+            packet.decode_ms = std::chrono::duration<double, std::milli>(
+                packet.decoded_at - decode_start)
+                                   .count();
+            frame_buffer.push(std::move(packet));
+        };
+
         auto camera_loop = [&] {
             const auto warmup_end = Clock::now()
                 + std::chrono::duration_cast<Clock::duration>(
                       std::chrono::duration<double>(options.warmup_s));
             double last_stamp = -1.0;
-            int consecutive_failures = 0;
             while (!g_stop) {
                 auto frame = camera.takeLatest();
                 if (!frame) {
@@ -638,84 +741,108 @@ int main(int argc, char** argv)
                     continue;
                 }
                 last_stamp = stamp_s;
-
-                const auto decode_start = Clock::now();
-                if (hardware_decode) {
-                    flyrat::hardware::DecodedJpeg decoded;
-                    if (mpp_decoder.decode(frame->jpeg.data(),
-                            frame->jpeg.size(), decoded)
-                        && decoded.width == options.width
-                        && decoded.height == options.height
-                        && decoded.stride >= decoded.width
-                        && decoded.luma.size()
-                            >= static_cast<std::size_t>(decoded.stride)
-                                * static_cast<std::size_t>(decoded.height)) {
-                        FramePacket packet;
-                        const int half = decoded.width / 2;
-                        packet.storage = std::make_shared<std::vector<std::uint8_t>>(
-                            std::move(decoded.luma));
-                        packet.left = cv::Mat(decoded.height, half, CV_8UC1,
-                            packet.storage->data(), decoded.stride);
-                        packet.right = cv::Mat(decoded.height, half, CV_8UC1,
-                            packet.storage->data() + half, decoded.stride);
-                        packet.stamp_s = stamp_s;
-                        packet.sequence = frame->sequence;
-                        packet.decoded_at = Clock::now();
-                        packet.decode_ms
-                            = std::chrono::duration<double, std::milli>(
-                                  packet.decoded_at - decode_start)
-                                  .count();
-                        frame_buffer.push(std::move(packet));
-                        consecutive_failures = 0;
-                        continue;
-                    }
-
-                    ++decode_fallbacks;
-                    ++consecutive_failures;
-                    if (consecutive_failures >= 10) {
-                        hardware_decode = false;
-                        std::cerr << "flyrat_pilot: MPP decode failed "
-                                  << consecutive_failures
-                                  << " frames in a row, using cv::imdecode\n";
-                    }
+                if (bag) {
+                    bag->writeFrame(frame->sequence, stamp_s,
+                        frame->jpeg.data(), frame->jpeg.size());
                 }
-
-                cv::Mat encoded(1, static_cast<int>(frame->jpeg.size()), CV_8UC1,
-                    const_cast<std::uint8_t*>(frame->jpeg.data()));
-                cv::Mat image = cv::imdecode(encoded, cv::IMREAD_GRAYSCALE);
-                if (image.empty() || image.cols != options.width
-                    || image.rows != options.height) {
-                    ++decode_errors;
-                    continue;
-                }
-
-                FramePacket packet;
-                const int half = image.cols / 2;
-                packet.owner = image;
-                packet.left = image.colRange(0, half);
-                packet.right = image.colRange(half, image.cols);
-                packet.stamp_s = stamp_s;
-                packet.sequence = frame->sequence;
-                packet.decoded_at = Clock::now();
-                packet.decode_ms
-                    = std::chrono::duration<double, std::milli>(
-                          packet.decoded_at - decode_start)
-                          .count();
-                frame_buffer.push(std::move(packet));
+                decode_and_push(frame->jpeg, frame->sequence, stamp_s);
             }
         };
 
-        msp.start();
+        auto replay_loop = [&] {
+            BagReader reader;
+            if (!reader.open(options.replay_dir)) {
+                std::cerr << "flyrat_pilot: " << reader.lastError() << "\n";
+                g_stop = true;
+                return;
+            }
+            const auto& info = reader.info();
+            std::cerr << "flyrat_pilot: replaying " << reader.path() << ": "
+                      << info.frames << " frames, " << info.imu_samples
+                      << " IMU samples, " << info.duration_s << " s, "
+                      << info.width << "x" << info.height << "@" << info.fps
+                      << " fps\n";
+            if (info.width != static_cast<std::uint32_t>(options.width)
+                || info.height != static_cast<std::uint32_t>(options.height)) {
+                std::cerr << "flyrat_pilot: warning: bag is " << info.width
+                          << "x" << info.height << ", expected " << options.width
+                          << "x" << options.height << "\n";
+            }
+
+            // Replay sensor time on the wall clock so the SLAM stale-frame
+            // check, IMU lookahead and age metrics keep their usual meaning.
+            const auto wall_start = Clock::now() + std::chrono::seconds(1);
+            const double base_stamp = info.first_stamp_s;
+            const double base_epoch
+                = std::chrono::duration<double>(
+                      std::chrono::system_clock::now().time_since_epoch())
+                      .count()
+                + 1.0;
+
+            BagRecord record;
+            while (!g_stop && reader.next(record)) {
+                const double stamp_s = base_epoch + (record.stamp_s - base_stamp);
+                const auto target = wall_start
+                    + std::chrono::duration_cast<Clock::duration>(
+                        std::chrono::duration<double>(record.stamp_s - base_stamp));
+                while (!g_stop && Clock::now() < target) {
+                    const auto left = target - Clock::now();
+                    std::this_thread::sleep_for(std::min<Clock::duration>(left,
+                        std::chrono::milliseconds(20)));
+                }
+                if (g_stop) {
+                    break;
+                }
+                // Stop after the last image frame (plus a small margin): the
+                // tail of a live bag may contain IMU-only records written while
+                // the process was shutting down.
+                if (reader.info().last_frame_stamp_s > 0.0
+                    && record.stamp_s > reader.info().last_frame_stamp_s + 0.5) {
+                    break;
+                }
+                if (record.type
+                    == static_cast<std::uint32_t>(BagReader::Type::kFrame)) {
+                    ++replay_frames;
+                    decode_and_push(record.payload, record.sequence, stamp_s);
+                } else if (record.type
+                    == static_cast<std::uint32_t>(BagReader::Type::kImu)) {
+                    if (record.payload.size() != 6 * sizeof(double)) {
+                        continue;
+                    }
+                    double values[6];
+                    std::memcpy(values, record.payload.data(), sizeof(values));
+                    flyrat::odometry::ImuSample sample;
+                    sample.timestamp = stamp_s;
+                    sample.accel = Eigen::Vector3d(values[0], values[1], values[2]);
+                    sample.gyro = Eigen::Vector3d(values[3], values[4], values[5]);
+                    imu_buffer.push(sample);
+                }
+            }
+            // Let the SLAM loop consume the last decoded frame.
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            replay_finished = true;
+        };
+
+        if (!replaying) {
+            msp->start();
+            camera.start();
+        }
         pose_stream.start();
-        camera.start();
         pinThread(options.slam_cpu);
-        camera_thread = std::thread(camera_loop);
+        if (replaying) {
+            replay_thread = std::thread(replay_loop);
+        } else {
+            camera_thread = std::thread(camera_loop);
+        }
 
         std::cerr << "flyrat_pilot: SLAM started; pose stream on "
                   << options.pose_address << ":" << options.pose_port
-                  << ", camera " << options.width << "x" << options.height
+                  << ", " << (replaying ? "replay " + options.replay_dir
+                                        : "camera " + options.camera_device)
+                  << " " << options.width << "x" << options.height
                   << "@" << options.fps << " fps"
                   << ", decode " << (hardware_decode ? "mpp" : "cpu")
+                  << (bag ? ", record " + bag->path() : "")
                   << (trace.enabled() ? ", trace " + options.trace_dir : "")
                   << "\n";
 
@@ -747,6 +874,9 @@ int main(int argc, char** argv)
 
             auto frame = frame_buffer.takeLatest();
             if (!frame) {
+                if (replaying && replay_finished) {
+                    break;
+                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(2));
                 continue;
             }
@@ -867,6 +997,10 @@ int main(int argc, char** argv)
                     / wall_s * 100.0;
                 const auto received = frame_buffer.received();
                 const auto camera_stats = camera.stats();
+                const std::uint64_t source_frames
+                    = replaying ? replay_frames.load() : camera_stats.frames;
+                const int source_running = replaying ? 1 : camera_stats.running;
+                const int source_errors = replaying ? 0 : camera_stats.errors;
                 const double camera_fps
                     = (received - last_report_received) / wall_s;
                 const double slam_fps
@@ -883,9 +1017,9 @@ int main(int argc, char** argv)
                           << " imu=" << imu_buffer.size()
                           << " camera_drops=" << decode_errors.load()
                           << " decode_fallbacks=" << decode_fallbacks.load()
-                          << " cam_frames=" << camera_stats.frames
-                          << " cam_running=" << camera_stats.running
-                          << " cam_errors=" << camera_stats.errors
+                          << " cam_frames=" << source_frames
+                          << " cam_running=" << source_running
+                          << " cam_errors=" << source_errors
                           << " camera_fps=" << camera_fps
                           << " slam_fps=" << slam_fps
                           << " track_ms=" << track_avg << "/" << track_ms_max
@@ -910,12 +1044,29 @@ int main(int argc, char** argv)
             }
         }
 
+        // Stop recording before the camera/MPP teardown: the IMU callback keeps
+        // running until MSP stops, and a slow teardown would otherwise append
+        // tens of seconds of IMU-only data to a bag that already covered the
+        // final image frame.
+        if (bag) {
+            const auto stats = bag->close();
+            std::cerr << "flyrat_pilot: bag " << bag->path()
+                      << " frames=" << stats.frames
+                      << " imu=" << stats.imu_samples
+                      << " dropped=" << stats.dropped
+                      << " bytes=" << stats.bytes << "\n";
+        }
         camera.stop();
         if (camera_thread.joinable()) {
             camera_thread.join();
         }
+        if (replay_thread.joinable()) {
+            replay_thread.join();
+        }
         mpp_decoder.stop();
-        msp.stop();
+        if (msp) {
+            msp->stop();
+        }
         pose_stream.stop();
         if (!options.trajectory.empty()) {
             odometry.saveTrajectory(options.trajectory);
