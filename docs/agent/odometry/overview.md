@@ -184,7 +184,7 @@ SchurVINS 需要 IMU，因此 `mode:=stereo` 只对桩后端有意义；启用 S
 .script/build_ros2.sh
 ```
 
-`FLYRAT_WITH_SCHURVINS` 默认 `ON`，需要 OpenCV、yaml-cpp、glog 和 gflags。
+`FLYRAT_WITH_SCHURVINS` 默认 `ON`，需要 OpenCV、yaml-cpp 和 glog。
 只使用接口或在不具备这些依赖的平台上构建：
 
 ```sh
@@ -221,6 +221,24 @@ ros2 launch flyrat_odometry odometry.launch.py
 `bringup.launch.py` 会依次启动 adb forward、设备端 forwarder、接收节点和
 里程计节点，可选 Foxglove，并在退出时清理。
 
+### 5.1 机载模式
+
+开发机模式把双目和 IMU 经 adb 传到主机，再由 `odometry_node` 计算。机载模式
+把 SchurVINS 放到 RK3566 上，主机只接收位姿：
+
+```sh
+.script/build_pilot_arm.sh
+.script/bringup_pilot_slam.sh start_foxglove:=true
+```
+
+设备端 `flyrat_pilot` 直接读取 V4L2 MJPEG 和 MSP IMU，在本地完成标定修正与
+跟踪，通过 TCP 5001 发送 64 字节 `T_world_body` 位姿。主机
+`flyrat_pilot_bridge` 发布与开发机模式同名的话题和 TF，因此 Foxglove 配置可以
+复用。IMU 的前视窗口和首帧历史与 ROS 节点一致（默认 15 ms / 100 ms）。
+
+机载构建使用最小静态 OpenCV，目标端不需要安装 OpenCV；交叉编译和部署细节见
+[`build_and_run.md`](../build_and_run.md) 的“机载 SLAM”。
+
 ## 6. 测试
 
 ```sh
@@ -243,4 +261,6 @@ SchurVINS 时 TUM 轨迹文件可写。
 - 实机左目约 55.7 Hz（右目 60 Hz），存在约 8% 丢帧且画面比右目更模糊、
   更亮；当前 bag 上仍可跟踪，但会影响高速运动时的鲁棒性。
 - 组合二进制受 GPL-3.0 约束，详见文首。
-- 后端计算在开发机运行；泰山派没有 OpenCV 且内存约 2 GB，上机可行性未验证。
+- 机载模式已在 RK3566 静态桌面场景验证到 30 fps、RSS 约 90 MB；完全静止时
+  跟踪会间歇进入 `RECENTLY_LOST`，移动后恢复，长时间失败需发送 `SIGUSR1`
+  重建前端。尚未做飞行和长期漂移验证。

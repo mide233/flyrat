@@ -20,8 +20,8 @@
 ### 构建与运行
 
 - [`build_and_run.md`](build_and_run.md)
-  环境依赖、一键构建脚本、核心库与工具、实机程序、交叉编译、ROS 2、SITL、
-  里程计、Docker/CI、清理和常见问题。
+  环境依赖、一键构建脚本、核心库与工具、实机程序、交叉编译、机载 SLAM、
+  ROS 2、SITL、里程计、Docker/CI、清理和常见问题。
 
 ### 状态
 
@@ -42,7 +42,8 @@
 ### 里程计
 
 - [`odometry/overview.md`](odometry/overview.md)
-  里程计 C++ 接口、SchurVINS 后端、ROS 2 节点、话题、参数、构建运行方式和后端接入点。
+  里程计 C++ 接口、SchurVINS 后端、ROS 2 节点与机载模式、话题、参数、
+  构建运行方式和后端接入点。
 - [`odometry/coordinates.md`](odometry/coordinates.md)
   IMU/相机坐标系、`imu.T_body_camera` 方向、TF 链、当前标定外参和逐步调试方法。
 

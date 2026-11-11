@@ -447,15 +447,17 @@ mpc: cmd=(...) att_err=.. vel=(.. .. ..) att_thr=.. thr2acc=.. thr=.. err=(.. ..
 
 ### 8.2 `flyrat_pilot/`
 
-实机端程序，**不依赖 ROS**，链接同一份 `libflyrat`。目前是**占位骨架**：
-只保留可编译的 `main()` 和 CMake 配置，运行时逻辑尚未实现。
+实机端程序，**不依赖 ROS**，链接同一份 `libflyrat`。目前 `flyrat_pilot`
+已经可以在 RK3566 上采集双目 MJPEG 与 IMU，运行 SchurVINS，并通过 TCP 5001
+把 `T_world_body` 回传主机（主机 `flyrat_pilot_bridge` 转成 ROS 2 话题/TF）。
+飞控的主飞行逻辑（姿态/位置控制、失效保护）仍是预留接口，尚未实现。
 
 ```bash
-.script/build_flyrat_pilot.sh
-./flyrat_pilot/build/flyrat_pilot
+.script/build_pilot_arm.sh          # aarch64 静态交叉编译
+.script/bringup_pilot_slam.sh       # 推送、启动设备 pilot 与主机 bridge
 ```
 
-预留的接入点：`flyrat::MspInteract`（TCP / 串口）、`flyrat::RcReceiver`（UDP 9004）、
+飞控侧预留的接入点：`flyrat::MspInteract`（TCP / 串口）、`flyrat::RcReceiver`（UDP 9004）、
 `flyrat::Autopilot`（算法）。建议采用“固定频率发送线程 + 独立遥测/算法线程”的结构。
 详见 `flyrat_pilot/README.md`。
 

@@ -1,0 +1,12 @@
+pilot_bridge_node:
+  ros__parameters:
+    host: 127.0.0.1
+    port: 5001
+    reconnect_ms: 1000
+    world_frame: odometry_map
+    body_frame: imu_link
+    camera_frame: camera_left_optical_frame
+    right_camera_frame: camera_right_optical_frame
+    path_max_poses: 2000
+    publish_tf: true
+    status_period: 1.0

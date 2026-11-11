@@ -154,11 +154,23 @@ flyrat_pilot/build/flyrat_pilot
 flyrat_pilot/build/flyrat_sensor_forwarder
 ```
 
-运行主程序（目前仍是占位逻辑）：
+运行主程序（机载 SLAM；需要相机、飞控串口和标定文件）：
 
 ```sh
-./flyrat_pilot/build/flyrat_pilot
+./flyrat_pilot/build/flyrat_pilot \
+  --camera-config libflyrat/configs/camera/uvc_640x480.yaml \
+  --imu-config flyrat_play/ros2_ws/src/flyrat_sensors/config/imu_intrinsics.yaml
 ```
+
+只校验标定、不打开硬件：
+
+```sh
+./flyrat_pilot/build/flyrat_pilot --check-config \
+  --camera-config libflyrat/configs/camera/uvc_640x480.yaml \
+  --imu-config flyrat_play/ros2_ws/src/flyrat_sensors/config/imu_intrinsics.yaml
+```
+
+完整参数见 [`flyrat_pilot/README.md`](../../flyrat_pilot/README.md)。
 
 运行传感器转发：
 
@@ -182,35 +194,72 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 
 ### 4.2 交叉编译到泰山派
 
-`flyrat_pilot` 的 CMake 会链接依赖 Eigen/OSQP 的 `flyrat::flyrat`，目前没有为
-aarch64 提供完整 toolchain。传感器转发程序用脚本交叉编译：
+`flyrat_sensor_forwarder` 不依赖 OpenCV，直接用交叉编译器编译：
 
 ```sh
 .script/build_sensor_forwarder_arm.sh
 ```
 
-产物是 `build-arm/flyrat_sensor_forwarder`（AArch64 静态链接）。脚本参数：
+产物是 `build-arm/flyrat_sensor_forwarder`（AArch64 静态链接）。
 
-```text
---clean                 先删除 build-arm/
-CROSS_COMPILE=...       工具链前缀，默认 aarch64-linux-gnu-
-BUILD_DIR=...           输出目录
-```
-
-编译 C 和 C++ 时不要额外传 `VL53L5CX_DISABLE_*`；这些宏统一定义在
-`libflyrat/third_party/vl53l5cx/platform/platform.h`，只给 C 文件传会导致结果
-结构体布局不一致、距离全 0。
-
-手动推送：
+`flyrat_pilot` 需要 OpenCV、yaml-cpp 和 glog。目标 rootfs 没有这些库，因此
+使用 `.script/build_pilot_arm.sh` 链接 sysroot 中的静态依赖：
 
 ```sh
+.script/build_pilot_arm.sh
+```
+
+产物是 `build-arm/flyrat_pilot`（约 11 MB，`readelf -d` 只依赖
+`libc/libm/ld-linux`）。脚本参数：
+
+```text
+--clean                 先删除 build-arm/pilot-cmake 和旧二进制
+FLYRAT_SYSROOT=...      默认 /opt/sysroots/arm64
+BUILD_DIR=...           默认 <repo>/build-arm
+JOBS=...                默认 4，避免构建内存不足
+```
+
+### 4.2.1 最小静态 OpenCV
+
+`/opt/sysroots/arm64` 需要一份关闭 OpenGL/TBB/GTK 的静态 OpenCV，安装到
+`$FLYRAT_SYSROOT/usr/local`。参考配置（OpenCV 4.10.0）：
+
+```sh
+cmake -S opencv-4.10.0 -B opencv-arm-build \
+  -DCMAKE_TOOLCHAIN_FILE=$PWD/.script/toolchains/aarch64-linux-gnu.cmake \
+  -DCMAKE_INSTALL_PREFIX=/opt/sysroots/arm64/usr/local \
+  -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+  -DBUILD_LIST=core,imgproc,imgcodecs,highgui,video,calib3d \
+  -DWITH_OPENGL=OFF -DWITH_TBB=OFF -DWITH_IPP=OFF -DWITH_ITT=OFF \
+  -DWITH_GTK=OFF -DWITH_QT=OFF -DWITH_OPENCL=OFF -DWITH_LAPACK=OFF \
+  -DWITH_FFMPEG=OFF -DWITH_GSTREAMER=OFF -DWITH_V4L=OFF \
+  -DWITH_JASPER=OFF -DWITH_WEBP=OFF -DWITH_TIFF=OFF \
+  -DWITH_OPENJPEG=OFF -DWITH_OPENEXR=OFF -DWITH_GDAL=OFF -DWITH_GDCM=OFF \
+  -DWITH_JPEG=ON -DBUILD_JPEG=ON -DWITH_PNG=ON -DBUILD_PNG=ON \
+  -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF -DBUILD_EXAMPLES=OFF \
+  -DBUILD_opencv_apps=OFF -DBUILD_JAVA=OFF -DBUILD_opencv_python3=OFF \
+  -DCPU_BASELINE=NEON -DCPU_DISPATCH=
+cmake --build opencv-arm-build -j4
+sudo cmake --install opencv-arm-build
+sudo aarch64-linux-gnu-ar rcs \
+  /opt/sysroots/arm64/usr/local/lib/opencv4/3rdparty/libade.a
+```
+
+最后一条创建空 `libade.a`，因为 OpenCV 导出的链接列表引用了它，但 G-API
+没有构建，实际不会链接。glog、yaml-cpp、gflags 使用 sysroot
+`/usr/lib/aarch64-linux-gnu` 下的静态库。
+
+### 4.2.2 手动推送
+
+```sh
+adb -s 4c24d56142f3d0e3 push build-arm/flyrat_pilot /tmp/
+adb -s 4c24d56142f3d0e3 shell chmod +x /tmp/flyrat_pilot
 adb -s 4c24d56142f3d0e3 push build-arm/flyrat_sensor_forwarder /tmp/
 adb -s 4c24d56142f3d0e3 shell chmod +x /tmp/flyrat_sensor_forwarder
 ```
 
-`.script/bringup_real.sh` 每次启动都会自动把 `build-arm/flyrat_sensor_forwarder`
-推到设备，因此重启后 `/tmp` 被清空也不需要手动处理。设备上缺少二进制且本地也
-没有编译产物时，脚本会直接报错并提示先运行上面的交叉编译命令。
+`.script/bringup_real.sh` 和 `.script/bringup_pilot_slam.sh` 每次启动都会
+自动推送对应二进制，因此重启后 `/tmp` 被清空也不需要手动处理。
 
 ### 4.3 转发到 ROS 2
 
@@ -242,6 +291,51 @@ ros2 run flyrat_sensors sensor_receiver_node
 
 默认 `stereo_color=false`，发布 mono8；需要彩色时设置
 `stereo_color:=true`，发布 bgr8。
+
+### 4.4 机载 SLAM 与位姿回传
+
+`flyrat_pilot` 在设备上本地运行 SchurVINS，只通过 TCP 5001 回传 64 字节
+位姿；主机 `flyrat_pilot_bridge` 发布 ROS 2 话题和 TF。这样相机/IMU 数据不再
+经过 adb，主机只负责可视化和录包。
+
+```sh
+# 推送 + adb forward + 设备 SLAM + 主机 bridge + Foxglove
+.script/bringup_pilot_slam.sh start_foxglove:=true
+
+# 只跑 30 fps，不启动 Foxglove，跑到手动 Ctrl-C
+.script/bringup_pilot_slam.sh fps:=30
+```
+
+可选参数：
+
+```text
+fps:=N              相机帧率，默认 30
+max_frames:=N       处理 N 帧后退出，0 表示一直运行
+trajectory:=PATH    设备端 TUM 轨迹，默认 /tmp/flyrat_pilot.tum
+camera_config:=PATH 主机标定文件，同时推送到设备
+imu_config:=PATH    IMU 标定文件，同时推送到设备
+start_foxglove:=true 启动 foxglove_bridge
+world_frame:=...    bridge 的 world frame，默认 odometry_map
+body_frame:=...     bridge 的 body frame，默认 imu_link
+FLYRAT_PUSH_PILOT=0 跳过二进制推送
+```
+
+主机话题：
+
+```text
+/flyrat/odometry/odometry   nav_msgs/Odometry，odometry_map -> imu_link
+/flyrat/odometry/path       nav_msgs/Path
+/flyrat/odometry/status     diagnostic_msgs/DiagnosticStatus，1 Hz
+```
+
+静态 TF 为 `imu_link -> camera_left_optical_frame` 和
+`camera_left_optical_frame -> camera_right_optical_frame`，动态 TF 为
+`odometry_map -> imu_link`。Foxglove 中把 Fixed frame 设为 `odometry_map`，
+添加 Odometry、Path 和 TF 面板即可。
+
+设备位于 `RECENTLY_LOST` 时不发布无效位姿，因此 Foxglove 上的轨迹会暂停；
+状态话题中的 `state` 会显示当前状态。跟踪失败后发送 `adb shell kill -USR1
+$(pidof flyrat_pilot)` 可重建前端并重新初始化。
 
 ## 5. ROS 2
 
@@ -277,6 +371,7 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 | `flyrat_sensors_interfaces` | `TofZone`、`TofFrame` 自定义消息 |
 | `flyrat_sensors` | TCP 接收、MJPEG 解码、ROS 发布 |
 | `flyrat_odometry` | 里程计节点（SchurVINS 双目惯性后端、TF、状态） |
+| `flyrat_pilot_bridge` | 接收设备位姿流，发布 Odometry/Path/TF |
 | `flyrat_msp` | MSP 协议接入 |
 | `flyrat_control` | 控制节点与 SITL launch |
 

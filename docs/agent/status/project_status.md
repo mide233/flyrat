@@ -1,6 +1,6 @@
 # 项目状态
 
-最后更新：2026-11-10
+最后更新：2026-11-11
 
 ## 1. 项目目标
 
@@ -8,12 +8,12 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 
 - `libflyrat/`：不依赖 ROS 的 C++17 核心库，包含 MSP 通信、IMU 读取、姿态控制、
   MPC、状态估计和硬件抽象。
-- `flyrat_pilot/`：实机端程序。主飞行逻辑仍在实现中；传感器转发程序已可用。
+- `flyrat_pilot/`：实机端程序。已支持机载 SchurVINS 和位姿回传；飞控主逻辑仍在实现中。
 - `flyrat_play/`：Gazebo + Betaflight SITL 仿真与 ROS 2 适配层。
 - `docs/`：构建、仿真、MSP 链路和传感器转发文档。
 
-当前重点是把实机传感器通过 adb 转发到开发机 ROS 2，用真实 IMU、ToF 和双目数据
-驱动算法测试，同时保持与仿真相同的 libflyrat 代码路径。
+当前重点是把里程计从开发机搬到实机：RK3566 本地运行 SchurVINS，通过 TCP 回传
+位姿，主机只负责可视化与录包；传感器转发路径继续保留用于调试和录包。
 
 ## 2. 已完成模块
 
@@ -116,6 +116,29 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - `imu.T_body_camera` 使用 `kalibr_ws/` 标定的相机→IMU 外参：相机倒置安装，
   相机原点在 IMU 前方 0.0403 m、右侧 0.0446 m、上方 0.0089 m，基线 0.06475 m。
 
+### 2.6 机载 SLAM 与位姿回传
+
+- `flyrat_pilot`：设备端解码双目 MJPEG（1280x480@30，左右各 640x480）、读取
+  200 Hz MSP IMU、按 `imu_intrinsics.yaml` 做 scale/misalignment 和时间偏移
+  修正，在本地运行 SchurVINS。
+- 位姿语义为 `T_world_body`，body 为 `imu_link`；只通过 TCP 5001 发送 64 字节
+  `kPose` 包（位置、四元数、valid、state、epoch 时间戳）。
+- 新增 `libflyrat` 协议消息 `kPose` 和 `PosePayload`；IMU 转换、TCP 位姿流分别
+  在 `flyrat_pilot/src/slam/` 下实现。
+- 新增主机 ROS 2 包 `flyrat_pilot_bridge`：发布
+  `/flyrat/odometry/odometry`、`/flyrat/odometry/path`、
+  `/flyrat/odometry/status`，以及 `odometry_map -> imu_link` 动态 TF 和相机
+  静态 TF。
+- `.script/build_pilot_arm.sh`：用最小静态 OpenCV + sysroot 静态 glog/
+  yaml-cpp/gflags 交叉编译，`build-arm/flyrat_pilot` 约 11 MB，只依赖
+  `libc/libm/ld-linux`。
+- `.script/bringup_pilot_slam.sh`：推送二进制和标定、adb forward 5001、
+  启动设备 SLAM、主机 bridge 和可选 Foxglove，退出时自动清理。
+- 实机 RK3566 实测：30 fps 处理 250 帧全部成功，RSS 约 90 MB；随后 450 帧
+  连续运行中初始化成功，静态场景下跟踪会间歇进入 `RECENTLY_LOST`。
+- SchurVINS 的初始化器原先固定使用 1–50 m 深度范围，已改为读取适配层的
+  0.25–20 m 近场参数，解决实机近距桌面场景无法初始化的问题。
+
 ## 3. 实测指标
 
 | 项目 | 实测值 | 说明 |
@@ -131,6 +154,8 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 | ROS 2 IMU 输入 | 200.3–200.8 Hz | 开发机接收节点 |
 | ROS 2 双目输入 | 60.0 Hz | 左右各 640x480 mono8 |
 | ROS 2 里程计状态发布 | 1 Hz | `diagnostic_msgs` |
+| 机载 SLAM | 30 fps，RSS 约 90 MB | RK3566，640x480/眼，静态桌面场景 |
+| 机载二进制 | 约 11 MB | 静态 OpenCV/glog/yaml-cpp，只依赖 libc/libm |
 
 ## 4. 构建与运行
 
@@ -150,8 +175,8 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - IMU 原始计数默认按 `acc_lsb_per_g=2048`、`gyro_lsb_per_dps=16.4` 换算；
   当前实机已用 Kalibr 标定 scale/misalignment 并在发布前修正，但这两个
   原始量程常数仍需与飞控实际配置一致。
-- 主飞行程序 `flyrat_pilot` 仍是占位 `main()`；目前实机功能集中在
-  `flyrat_sensor_forwarder`。
+- `flyrat_pilot` 目前只实现机载 SLAM 和位姿回传，飞控主逻辑（MSP 指令、
+  失效保护、位置控制）仍未实现。
 - adb 链路约 30 MB/s，不能直接转发 640x480/眼@60 的原始 NV12。
 - 里程计已用单个实机桌面 bag 验证短时相对尺度和漂移，尚未验证飞行、长距离
   和长期稳定性。
@@ -165,8 +190,10 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   YAML 参数；实机调参需要重新编译。
 - 实机标定数值已保留并迁移到 `configs/camera/`，并已在新后端上完成桌面
   短时验证。
-- 里程计 ROS 节点及 SchurVINS 依赖 OpenCV，目前在开发机运行；泰山派没有
-  OpenCV，内存也只有 2 GB，能否上机仍需评估。
+- 泰山派没有系统 OpenCV；机载版本依赖交叉编译的最小静态 OpenCV，构建前缀
+  默认为 `/opt/sysroots/arm64/usr/local`。
+- 机载 SLAM 只在静态桌面场景短时验证；完全静止时跟踪质量会下降，进入
+  `RECENTLY_LOST` 后需要移动恢复或发送 `SIGUSR1` 重建前端。
 
 ## 6. 最近提交
 
@@ -189,8 +216,8 @@ f2ea59b fix(tof): define result-trimming macros in platform header
    耗时和长期稳定性；根据结果调整 keyframe/feature 参数。
 2. 补充双目/IMU 时间对齐与曝光延迟标定，检查 `imu_lookahead` 是否足够。
 3. 评估 ToF、双目、IMU 的时间对齐策略，必要时增加设备端统一时间戳。
-4. 将传感器转发和里程计整合进正式 `flyrat_pilot` 运行时，加入失效保护与
-   链路健康状态。
+4. 在 `flyrat_pilot` 中加入飞控主逻辑、失效保护和链路健康状态；位姿接口
+   已经具备，可直接接到位置环。
 5. 视 adb 带宽和算法需求，评估双目降到 30 Hz 或使用硬件编码的长期方案。
-6. 评估里程计在泰山派上的可行性（需要 OpenCV 和更大内存），或维持开发机运算。
+6. 在实机飞行/手持移动场景验证机载 SchurVINS 的尺度、漂移和实时率。
 7. 后端输出稳定位姿后，补充跟踪耗时、RSS、漂移等实测指标。
