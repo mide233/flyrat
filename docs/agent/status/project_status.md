@@ -134,10 +134,16 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   `libc/libm/ld-linux`。
 - `.script/bringup_pilot_slam.sh`：推送二进制和标定、adb forward 5001、
   启动设备 SLAM、主机 bridge 和可选 Foxglove，退出时自动清理。
-- 实机 RK3566 实测：30 fps 处理 250 帧全部成功，RSS 约 90 MB；随后 450 帧
-  连续运行中初始化成功，静态场景下跟踪会间歇进入 `RECENTLY_LOST`。
+- 实机 RK3566 实测：30 fps 处理 250 帧全部成功；随后 450 帧、600 帧和
+  1800 帧（60 s）连续运行均完成，进程峰值 RSS 约 27–30 MB。静态场景下跟踪
+  会间歇进入 `RECENTLY_LOST`。
+- 性能基线（30 fps，640x480/眼）：CPU 约 1.5–2.0 个核（135–200%），单帧
+  `track()` 稳态约 18–21 ms，最新帧年龄约 41 ms，端到端约 70–100 ms；
+  30 fps 下实时裕量较小，20 fps 时 CPU 降至约 1.6 个核、裕量约 15 ms。
 - SchurVINS 的初始化器原先固定使用 1–50 m 深度范围，已改为读取适配层的
   0.25–20 m 近场参数，解决实机近距桌面场景无法初始化的问题。
+- `SchurVINS::Prediction()` 原会对 `dt >= 15 ms` 直接 `CHECK` 退出；200 Hz
+  IMU 偶发 15.15 ms 间隔已在实机触发。现改为拆分子步长，进程不再中止。
 
 ## 3. 实测指标
 
@@ -154,7 +160,10 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 | ROS 2 IMU 输入 | 200.3–200.8 Hz | 开发机接收节点 |
 | ROS 2 双目输入 | 60.0 Hz | 左右各 640x480 mono8 |
 | ROS 2 里程计状态发布 | 1 Hz | `diagnostic_msgs` |
-| 机载 SLAM | 30 fps，RSS 约 90 MB | RK3566，640x480/眼，静态桌面场景 |
+| 机载 SLAM（30 fps） | CPU 1.5–2.0 核，RSS 27–30 MB | 640x480/眼，单帧 track 18–21 ms，age 约 41 ms |
+| 机载 SLAM（20 fps） | CPU 约 1.6 核，RSS 22 MB | 单帧 track 约 35 ms，实时裕量约 15 ms |
+| 机载 SLAM 吞吐 | 29.9 fps / 28.5 fps | 30 fps 长跑 / 600 帧样本 |
+| 机载端到端延迟 | 约 70–100 ms | 采集到主机接收；设备时钟快 55–64 ms，`ros2 topic delay` 需校正 |
 | 机载二进制 | 约 11 MB | 静态 OpenCV/glog/yaml-cpp，只依赖 libc/libm |
 
 ## 4. 构建与运行

@@ -10,6 +10,8 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include <sys/resource.h>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -440,6 +442,16 @@ int main(int argc, char** argv)
         std::uint64_t invalid = 0;
         std::uint64_t skipped = 0;
         auto last_report = Clock::now();
+        std::uint64_t last_report_processed = 0;
+        std::uint64_t last_report_received = frame_buffer.received();
+        double track_ms_sum = 0.0;
+        double track_ms_max = 0.0;
+        double age_ms_sum = 0.0;
+        double age_ms_max = 0.0;
+        std::uint64_t report_frames = 0;
+        struct rusage last_cpu {
+        };
+        getrusage(RUSAGE_SELF, &last_cpu);
 
         while (!g_stop) {
             if (g_reset.exchange(false)) {
@@ -480,6 +492,13 @@ int main(int argc, char** argv)
                 last_frame_s = frame->stamp_s;
                 continue;
             }
+            const auto track_start = Clock::now();
+            const double track_age_ms
+                = (std::chrono::duration<double>(
+                       std::chrono::system_clock::now().time_since_epoch())
+                          .count()
+                      - frame->stamp_s)
+                * 1000.0;
             const auto result = odometry.track(
                 flyrat::odometry::ImageView { frame->left.cols, frame->left.rows,
                     static_cast<int>(frame->left.step),
@@ -488,6 +507,15 @@ int main(int argc, char** argv)
                     static_cast<int>(frame->right.step),
                     frame->right.ptr<std::uint8_t>() },
                 frame->stamp_s, imu);
+            const double track_ms
+                = std::chrono::duration<double, std::milli>(
+                      Clock::now() - track_start)
+                      .count();
+            track_ms_sum += track_ms;
+            track_ms_max = std::max(track_ms_max, track_ms);
+            age_ms_sum += track_age_ms;
+            age_ms_max = std::max(age_ms_max, track_age_ms);
+            ++report_frames;
             last_frame_s = frame->stamp_s;
             ++processed;
 
@@ -519,7 +547,28 @@ int main(int argc, char** argv)
 
             const auto now = Clock::now();
             if (now - last_report >= std::chrono::seconds(2)) {
-                last_report = now;
+                const double wall_s
+                    = std::chrono::duration<double>(now - last_report).count();
+                struct rusage cpu {
+                };
+                getrusage(RUSAGE_SELF, &cpu);
+                const double cpu_pct
+                    = (((cpu.ru_utime.tv_sec - last_cpu.ru_utime.tv_sec)
+                           + (cpu.ru_utime.tv_usec - last_cpu.ru_utime.tv_usec)
+                                 * 1e-6)
+                          + ((cpu.ru_stime.tv_sec - last_cpu.ru_stime.tv_sec)
+                             + (cpu.ru_stime.tv_usec - last_cpu.ru_stime.tv_usec)
+                                   * 1e-6))
+                    / wall_s * 100.0;
+                const auto received = frame_buffer.received();
+                const double camera_fps
+                    = (received - last_report_received) / wall_s;
+                const double slam_fps
+                    = (processed - last_report_processed) / wall_s;
+                const double track_avg
+                    = report_frames > 0 ? track_ms_sum / report_frames : 0.0;
+                const double age_avg
+                    = report_frames > 0 ? age_ms_sum / report_frames : 0.0;
                 std::cerr << "flyrat_pilot: state=" << stateName(result.state)
                           << " frames=" << processed
                           << " poses=" << published
@@ -527,7 +576,22 @@ int main(int argc, char** argv)
                           << " skipped=" << skipped
                           << " imu=" << imu_buffer.size()
                           << " camera_drops=" << decode_errors.load()
+                          << " camera_fps=" << camera_fps
+                          << " slam_fps=" << slam_fps
+                          << " track_ms=" << track_avg << "/" << track_ms_max
+                          << " age_ms=" << age_avg << "/" << age_ms_max
+                          << " cpu=" << cpu_pct
+                          << "% rss_mb=" << cpu.ru_maxrss / 1024.0
                           << " t=" << last_pose_s << "\n";
+                last_report = now;
+                last_report_processed = processed;
+                last_report_received = received;
+                last_cpu = cpu;
+                track_ms_sum = 0.0;
+                track_ms_max = 0.0;
+                age_ms_sum = 0.0;
+                age_ms_max = 0.0;
+                report_frames = 0;
             }
 
             if (options.max_frames > 0

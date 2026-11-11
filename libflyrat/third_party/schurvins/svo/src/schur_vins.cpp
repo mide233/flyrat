@@ -18,6 +18,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 #include <svo/schur_vins.h>
 
 #include <boost/math/distributions/chi_squared.hpp>
+#include <cmath>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -154,7 +155,22 @@ void SchurVINS::PredictionState(const Eigen::Vector3d& acc, const Eigen::Vector3
 }
 
 void SchurVINS::Prediction(double _dt, const Eigen::Vector3d& _acc, const Eigen::Vector3d& _gyr) {
-    CHECK(_dt >= 0 && _dt < 0.015) << "dt: " << _dt;
+    // The upstream code aborts on dt >= 15 ms. A 200 Hz IMU can occasionally
+    // deliver a 15.2 ms gap (scheduling jitter on the vehicle), which used to
+    // kill the whole SLAM process. Subdivide long intervals instead of
+    // terminating; the zero-order hold on acc/gyro is adequate for such a
+    // short gap.
+    constexpr double kMaxPredictionStep = 0.0149;
+    if (_dt > kMaxPredictionStep) {
+        const int steps = static_cast<int>(std::ceil(_dt / kMaxPredictionStep));
+        for (int i = 0; i < steps; ++i) {
+            Prediction(_dt / steps, _acc, _gyr);
+        }
+        return;
+    }
+    if (_dt <= 0.0) {
+        return;
+    }
     Eigen::Vector3d acc = _acc - curr_state->ba;
     Eigen::Vector3d gyr = _gyr - curr_state->bg;
 

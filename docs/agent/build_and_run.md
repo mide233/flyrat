@@ -333,6 +333,19 @@ FLYRAT_PUSH_PILOT=0 跳过二进制推送
 `odometry_map -> imu_link`。Foxglove 中把 Fixed frame 设为 `odometry_map`，
 添加 Odometry、Path 和 TF 面板即可。
 
+性能基线（RK3566，640x480/眼，静态近距桌面）：
+
+| 模式 | CPU | RSS | `track()` | 帧年龄 | 处理帧率 |
+|---|---:|---:|---:|---:|---:|
+| 30 fps | 1.5–2.0 核 | 27–30 MB | 18–21 ms | 约 41 ms | 29.9 fps |
+| 20 fps | 约 1.6 核 | 22 MB | 约 35 ms | 约 57 ms | 19.7 fps |
+
+30 fps 的帧预算只有 33 ms，CPU 峰值接近 2 核；飞行建议先用
+`fps:=20` 或 `fps:=25`，留出飞控和通信余量。端到端（采集到主机收到）约
+70–100 ms，其中设备时钟比主机快 55–64 ms，`ros2 topic delay` 需要先校正。
+pilot 每 2 s 输出的 `camera_fps/slam_fps/track_ms/age_ms/cpu/rss_mb` 可用于
+复测；`track_ms` 是单帧后端耗时，`age_ms` 含 15 ms IMU lookahead 等待。
+
 设备位于 `RECENTLY_LOST` 时不发布无效位姿，因此 Foxglove 上的轨迹会暂停；
 状态话题中的 `state` 会显示当前状态。跟踪失败后发送 `adb shell kill -USR1
 $(pidof flyrat_pilot)` 可重建前端并重新初始化。

@@ -45,6 +45,10 @@ Only the libraries needed by `svo::FrameHandlerStereo` are kept: `svo`,
    fallback to index `img_pyr[level]` instead of the undefined `img_pyr[L]`.
 8. `fast/src/faster_corner_10_sse.cpp` is only compiled on x86; the file is
    x86 SSE code and cannot be built for the aarch64 target.
+9. `svo/src/schur_vins.cpp`: `SchurVINS::Prediction()` no longer aborts when an
+   IMU interval reaches 15 ms. A 200 Hz IMU occasionally delivers a 15.1 ms gap
+   under scheduling jitter; the interval is now split into sub-steps and an
+   out-of-order/zero interval is ignored instead of terminating the process.
 
 The adapter that parses the flyrat calibration and drives the frontend lives in
 `libflyrat/src/odometry/schurvins_backend.cpp`.
