@@ -9,7 +9,7 @@
 # cross the USB link, so the camera and IMU streams stay on the device.
 #
 # Usage:
-#   .script/bringup_pilot_slam.sh [start_foxglove:=true] [fps:=30] ...
+#   .script/bringup_pilot_slam.sh [start_foxglove:=true] [fps:=25] ...
 #
 # Environment:
 #   ROS_DISTRO          ROS 2 distribution (default: jazzy)
@@ -33,7 +33,7 @@ DEVICE_DIR="/tmp/flyrat/config"
 LOCAL_PORT=5001
 CAMERA_CONFIG="${REPO_ROOT}/libflyrat/configs/camera/uvc_640x480.yaml"
 IMU_CONFIG="${REPO_ROOT}/flyrat_play/ros2_ws/src/flyrat_sensors/config/imu_intrinsics.yaml"
-FPS=30
+FPS=25
 MAX_FRAMES=0
 TRAJECTORY="/tmp/flyrat_pilot.tum"
 START_FOXGLOVE=0

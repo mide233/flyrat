@@ -67,7 +67,7 @@ struct Options {
     std::string camera_device = "/dev/video10";
     int width = 1280;
     int height = 480;
-    int fps = 30;
+    int fps = 25;
     std::string pose_address = "127.0.0.1";
     int pose_port = 5001;
     std::string trajectory = "/tmp/flyrat_pilot.tum";
@@ -88,7 +88,7 @@ void printUsage(const char* program)
         << "  --camera-device DEV    V4L2 MJPEG device (default /dev/video10)\n"
         << "  --width N              side-by-side width (default 1280)\n"
         << "  --height N             image height (default 480)\n"
-        << "  --fps N                camera frame rate (default 30)\n"
+        << "  --fps N                camera frame rate (default 25)\n"
         << "  --pose-address ADDR    pose stream listen address\n"
         << "  --pose-port PORT       pose stream port (default 5001)\n"
         << "  --trajectory PATH      TUM output, empty disables\n"

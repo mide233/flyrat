@@ -40,7 +40,7 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 --msp-baud N           默认 921600
 --camera-device DEV    V4L2 MJPEG 设备，默认 /dev/video10
 --width/--height N     左右拼接图尺寸，默认 1280x480
---fps N                相机帧率，默认 30
+--fps N                相机帧率，默认 25
 --pose-address ADDR    位姿流监听地址，默认 127.0.0.1
 --pose-port PORT       位姿流端口，默认 5001
 --trajectory PATH      TUM 轨迹，空字符串关闭
@@ -87,7 +87,7 @@ OpenCV 的 aarch64 sysroot，再执行：
 只启动指定帧率，不启动 Foxglove：
 
 ```bash
-.script/bringup_pilot_slam.sh fps:=30 max_frames:=0
+.script/bringup_pilot_slam.sh fps:=25 max_frames:=0
 ```
 
 脚本会：
@@ -146,14 +146,16 @@ RK3566（4 核 A55，2 GB），640x480/眼，静态近距桌面场景：
 |---|---:|---:|---:|---:|---:|
 | 30 fps，60 s | 1.5–2.0 核（135–200%） | 27–30 MB | 18–21 ms | 约 41 ms | 29.9 fps |
 | 30 fps，600 帧 | 约 1.85 核 | 28 MB | 约 33 ms | 约 52 ms | 28.5 fps |
+| 25 fps，150 帧（默认） | 约 1.3 核（133%） | 27 MB | 约 28 ms | 约 47 ms | 25.1 fps |
 | 20 fps，400 帧 | 约 1.6 核 | 22 MB | 约 35 ms | 约 57 ms | 19.7 fps |
 
 - `track()` 是 SchurVINS 单帧耗时，`age` 是图像时间戳到开始跟踪的延迟（含
   15 ms IMU lookahead 等待）。
 - 30 fps 的帧预算是 33 ms，单帧稳态已占 18–21 ms，CPU 峰值接近 2 核，
-  留给飞控和其他线程的余量较小。
-- 20 fps 的帧预算是 50 ms，单帧约 35 ms，实时裕量约 15 ms，更适合飞行；
-  代价是帧间位移变大，快速运动时跟踪难度上升。建议飞行先用 **20–25 fps**。
+  留给飞控和其他线程的余量较小。默认已限制为 **25 fps**（预算 40 ms），
+  兼顾跟踪质量和实时裕量；需要更大余量时可降到 20 fps。
+- 20 fps 的帧预算是 50 ms，单帧约 35 ms，实时裕量约 15 ms；代价是帧间位移
+  变大，快速运动时跟踪难度上升。
 - 端到端（采集 → 主机 ROS 2 收到）约 **70–100 ms**。设备与主机系统时钟有
   **+55～64 ms** 偏差，`ros2 topic delay` 的原始值需要先扣除该偏差。
 - `camera_drops=0`、`skipped=0`，RSS 稳定在 22–30 MB，无内存压力；SoC 热区

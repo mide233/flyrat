@@ -302,14 +302,14 @@ ros2 run flyrat_sensors sensor_receiver_node
 # 推送 + adb forward + 设备 SLAM + 主机 bridge + Foxglove
 .script/bringup_pilot_slam.sh start_foxglove:=true
 
-# 只跑 30 fps，不启动 Foxglove，跑到手动 Ctrl-C
-.script/bringup_pilot_slam.sh fps:=30
+# 只跑 25 fps，不启动 Foxglove，跑到手动 Ctrl-C
+.script/bringup_pilot_slam.sh fps:=25
 ```
 
 可选参数：
 
 ```text
-fps:=N              相机帧率，默认 30
+fps:=N              相机帧率，默认 25
 max_frames:=N       处理 N 帧后退出，0 表示一直运行
 trajectory:=PATH    设备端 TUM 轨迹，默认 /tmp/flyrat_pilot.tum
 camera_config:=PATH 主机标定文件，同时推送到设备
@@ -337,11 +337,12 @@ FLYRAT_PUSH_PILOT=0 跳过二进制推送
 
 | 模式 | CPU | RSS | `track()` | 帧年龄 | 处理帧率 |
 |---|---:|---:|---:|---:|---:|
+| 25 fps（默认） | 约 1.3 核 | 27 MB | 约 28 ms | 约 47 ms | 25.1 fps |
 | 30 fps | 1.5–2.0 核 | 27–30 MB | 18–21 ms | 约 41 ms | 29.9 fps |
 | 20 fps | 约 1.6 核 | 22 MB | 约 35 ms | 约 57 ms | 19.7 fps |
 
-30 fps 的帧预算只有 33 ms，CPU 峰值接近 2 核；飞行建议先用
-`fps:=20` 或 `fps:=25`，留出飞控和通信余量。端到端（采集到主机收到）约
+30 fps 的帧预算只有 33 ms，CPU 峰值接近 2 核；默认已限制为 **25 fps**
+（预算 40 ms），飞行需要更大余量时可用 `fps:=20`。端到端（采集到主机收到）约
 70–100 ms，其中设备时钟比主机快 55–64 ms，`ros2 topic delay` 需要先校正。
 pilot 每 2 s 输出的 `camera_fps/slam_fps/track_ms/age_ms/cpu/rss_mb` 可用于
 复测；`track_ms` 是单帧后端耗时，`age_ms` 含 15 ms IMU lookahead 等待。

@@ -118,9 +118,9 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 
 ### 2.6 机载 SLAM 与位姿回传
 
-- `flyrat_pilot`：设备端解码双目 MJPEG（1280x480@30，左右各 640x480）、读取
-  200 Hz MSP IMU、按 `imu_intrinsics.yaml` 做 scale/misalignment 和时间偏移
-  修正，在本地运行 SchurVINS。
+- `flyrat_pilot`：设备端解码双目 MJPEG（1280x480，默认 25 fps，左右各
+  640x480）、读取 200 Hz MSP IMU、按 `imu_intrinsics.yaml` 做
+  scale/misalignment 和时间偏移修正，在本地运行 SchurVINS。
 - 位姿语义为 `T_world_body`，body 为 `imu_link`；只通过 TCP 5001 发送 64 字节
   `kPose` 包（位置、四元数、valid、state、epoch 时间戳）。
 - 新增 `libflyrat` 协议消息 `kPose` 和 `PosePayload`；IMU 转换、TCP 位姿流分别
@@ -134,12 +134,13 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   `libc/libm/ld-linux`。
 - `.script/bringup_pilot_slam.sh`：推送二进制和标定、adb forward 5001、
   启动设备 SLAM、主机 bridge 和可选 Foxglove，退出时自动清理。
-- 实机 RK3566 实测：30 fps 处理 250 帧全部成功；随后 450 帧、600 帧和
-  1800 帧（60 s）连续运行均完成，进程峰值 RSS 约 27–30 MB。静态场景下跟踪
-  会间歇进入 `RECENTLY_LOST`。
+- 实机 RK3566 实测：默认 25 fps；30 fps 压力测试处理 250 帧全部成功，随后
+  450 帧、600 帧和 1800 帧（60 s）连续运行均完成，进程峰值 RSS 约
+  27–30 MB。静态场景下跟踪会间歇进入 `RECENTLY_LOST`。
 - 性能基线（30 fps，640x480/眼）：CPU 约 1.5–2.0 个核（135–200%），单帧
   `track()` 稳态约 18–21 ms，最新帧年龄约 41 ms，端到端约 70–100 ms；
   30 fps 下实时裕量较小，20 fps 时 CPU 降至约 1.6 个核、裕量约 15 ms。
+  因此运行默认限制为 **25 fps**（预算 40 ms）。
 - SchurVINS 的初始化器原先固定使用 1–50 m 深度范围，已改为读取适配层的
   0.25–20 m 近场参数，解决实机近距桌面场景无法初始化的问题。
 - `SchurVINS::Prediction()` 原会对 `dt >= 15 ms` 直接 `CHECK` 退出；200 Hz
@@ -160,6 +161,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 | ROS 2 IMU 输入 | 200.3–200.8 Hz | 开发机接收节点 |
 | ROS 2 双目输入 | 60.0 Hz | 左右各 640x480 mono8 |
 | ROS 2 里程计状态发布 | 1 Hz | `diagnostic_msgs` |
+| 机载 SLAM（25 fps，默认） | CPU 约 1.3 核，RSS 约 27 MB | 单帧 track 约 28 ms，age 约 47 ms |
 | 机载 SLAM（30 fps） | CPU 1.5–2.0 核，RSS 27–30 MB | 640x480/眼，单帧 track 18–21 ms，age 约 41 ms |
 | 机载 SLAM（20 fps） | CPU 约 1.6 核，RSS 22 MB | 单帧 track 约 35 ms，实时裕量约 15 ms |
 | 机载 SLAM 吞吐 | 29.9 fps / 28.5 fps | 30 fps 长跑 / 600 帧样本 |
