@@ -250,7 +250,7 @@ def generate_launch_description():
             description='Start odometry_node.'),
         DeclareLaunchArgument(
             'mode', default_value='imu_stereo',
-            description="Odometry mode: 'imu_stereo' or 'stereo'."),
+            description="Odometry mode: 'imu_stereo' (SchurVINS); 'stereo' is unavailable in this build."),
         DeclareLaunchArgument(
             'start_foxglove', default_value='false',
             description='Start foxglove_bridge as well.'),

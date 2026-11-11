@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 #
 # Start the odometry node on the forwarded real-vehicle topics. Start
-# flyrat_sensors first. The estimator backend is not implemented yet: the node
-# publishes NOT_INITIALIZED diagnostics until it is.
+# flyrat_sensors first. The default backend is SchurVINS, which tracks the
+# stereo pair together with IMU measurements.
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -40,7 +40,7 @@ def generate_launch_description():
         DeclareLaunchArgument('imu_topic', default_value='/flyrat/sensors/imu'),
         DeclareLaunchArgument(
             'mode', default_value='imu_stereo',
-            description="Odometry mode: 'imu_stereo' or 'stereo'."),
+            description="Odometry mode: 'imu_stereo' (SchurVINS); 'stereo' is unavailable in this build."),
         DeclareLaunchArgument('world_frame', default_value='odometry_map'),
         DeclareLaunchArgument(
             'body_frame', default_value='imu_link',

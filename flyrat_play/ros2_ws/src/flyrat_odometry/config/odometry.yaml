@@ -10,6 +10,8 @@ odometry_node:
     right_camera_frame: camera_right_optical_frame
     sync_slop: 0.010
     imu_buffer_seconds: 1.0
+    imu_lookahead: 0.015
+    imu_initial_history: 0.1
     path_max_poses: 1000
     path_publish_period: 0.2
     status_period: 1.0

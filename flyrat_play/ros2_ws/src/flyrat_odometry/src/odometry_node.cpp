@@ -8,9 +8,10 @@
 // unsynchronised stereo pair is kept, so a slow estimator drops frames instead
 // of building latency.
 //
-// The backend is still a stub (see flyrat::odometry::Odometry): it reports
-// NOT_INITIALIZED until the estimator is implemented. Everything around it -
-// synchronisation, TF, path, diagnostics and reset - is ready.
+// The backend is SchurVINS (stereo-inertial). This node owns the ROS-facing
+// concerns - synchronisation, TF, path, diagnostics and reset - and feeds the
+// estimator a small IMU window that includes samples slightly after the image
+// stamp, which the SchurVINS/SVO frontend needs for its propagation step.
 
 #include <algorithm>
 #include <atomic>
@@ -155,6 +156,8 @@ public:
             "right_camera_frame", "camera_right_optical_frame");
         sync_slop_ = declare_parameter<double>("sync_slop", 0.010);
         imu_buffer_seconds_ = declare_parameter<double>("imu_buffer_seconds", 1.0);
+        imu_lookahead_ = declare_parameter<double>("imu_lookahead", 0.015);
+        imu_initial_history_ = declare_parameter<double>("imu_initial_history", 0.1);
         path_max_poses_ = declare_parameter<int>("path_max_poses", 1000);
         path_publish_period_ = declare_parameter<double>("path_publish_period", 0.2);
         status_period_ = declare_parameter<double>("status_period", 1.0);
@@ -180,6 +183,14 @@ public:
         if (sync_slop_ <= 0.0 || imu_buffer_seconds_ <= 0.0 ||
             path_publish_period_ <= 0.0 || status_period_ <= 0.0) {
             throw std::runtime_error("time parameters must be positive");
+        }
+        if (imu_initial_history_ <= 0.0 || imu_lookahead_ < 0.0 ||
+            imu_lookahead_ > 0.1) {
+            throw std::runtime_error(
+                "imu_initial_history must be positive and imu_lookahead must be in [0, 0.1]");
+        }
+        if (mode_ == "imu_stereo" && imu_lookahead_ <= 0.0) {
+            throw std::runtime_error("imu_stereo mode requires imu_lookahead > 0");
         }
         if (path_max_poses_ < 2) {
             throw std::runtime_error("path_max_poses must be at least 2");
@@ -228,8 +239,7 @@ public:
         RCLCPP_INFO(get_logger(), "loading %s odometry calibration %s",
             use_imu ? "IMU-stereo" : "stereo", camera_config_path_.c_str());
         odometry_ = std::make_unique<Odometry>(options);
-        RCLCPP_WARN(get_logger(),
-            "odometry backend is not implemented; reporting NOT_INITIALIZED");
+        RCLCPP_INFO(get_logger(), "odometry backend initialized");
         const std::string imu_suffix = use_imu ? ", " + imu_topic_ : "";
         RCLCPP_INFO(get_logger(),
             "subscribed to %s, %s%s; publishing /flyrat/odometry/{odometry,path,status}",
@@ -400,6 +410,7 @@ private:
             imu_buffer_size_.store(imu_buffer_.size());
         }
         last_imu_stamp_.store(timestamp);
+        imu_cv_.notify_all();
     }
 
     void on_stereo(const Image::ConstSharedPtr& left_msg,
@@ -476,18 +487,34 @@ private:
         }
 
         std::vector<ImuSample> imu;
-        if (previous_stamp >= 0.0) {
-            std::lock_guard<std::mutex> lock(imu_mutex_);
+        if (use_imu_) {
+            std::unique_lock<std::mutex> lock(imu_mutex_);
+            // SchurVINS propagates the state up to the image timestamp and
+            // needs at least one IMU sample after it for the backward pass.
+            // Wait briefly for that look-ahead sample; the image stamps are
+            // slightly behind the IMU stream.
+            if (!imu_buffer_.empty() &&
+                imu_buffer_.back().timestamp > frame.stamp_s - 0.5) {
+                imu_cv_.wait_for(lock,
+                    std::chrono::duration<double>(imu_lookahead_ + 0.05),
+                    [&] {
+                        return !imu_buffer_.empty() &&
+                               imu_buffer_.back().timestamp >=
+                                   frame.stamp_s + imu_lookahead_;
+                    });
+            }
+            const double begin = previous_stamp >= 0.0
+                                     ? previous_stamp
+                                     : frame.stamp_s - imu_initial_history_;
+            const double end = frame.stamp_s + imu_lookahead_;
             for (const ImuSample& sample : imu_buffer_) {
-                if (sample.timestamp > previous_stamp &&
-                    sample.timestamp <= frame.stamp_s) {
+                if (sample.timestamp > begin && sample.timestamp <= end) {
                     imu.push_back(sample);
                 }
             }
-            while (!imu_buffer_.empty() &&
-                imu_buffer_.front().timestamp <= frame.stamp_s) {
-                imu_buffer_.pop_front();
-            }
+            // Keep the buffer intact: the next frame re-reads the tail and the
+            // backend deduplicates by timestamp. The producer trims samples
+            // older than imu_buffer_seconds_.
             imu_buffer_size_.store(imu_buffer_.size());
         }
 
@@ -650,7 +677,9 @@ private:
                 std::lock_guard<std::mutex> lock(imu_mutex_);
                 imu_buffer_.clear();
                 imu_buffer_size_.store(0);
+                last_imu_stamp_.store(-1.0);
             }
+            imu_cv_.notify_all();
             {
                 std::lock_guard<std::mutex> lock(queue_mutex_);
                 pending_.reset();
@@ -757,6 +786,8 @@ private:
     std::mutex world_origin_mutex_;
     double sync_slop_ = 0.010;
     double imu_buffer_seconds_ = 1.0;
+    double imu_lookahead_ = 0.015;
+    double imu_initial_history_ = 0.1;
     int path_max_poses_ = 1000;
     double path_publish_period_ = 0.2;
     double status_period_ = 1.0;
@@ -784,6 +815,7 @@ private:
     std::thread worker_;
 
     std::mutex imu_mutex_;
+    std::condition_variable imu_cv_;
     std::deque<ImuSample> imu_buffer_;
     std::atomic<double> last_imu_stamp_ { -1.0 };
     std::atomic<std::size_t> imu_buffer_size_ { 0 };

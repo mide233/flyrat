@@ -3,12 +3,14 @@
 <package format="3">
   <name>flyrat_odometry</name>
   <version>0.1.0</version>
-  <description>Odometry scaffold for the real-vehicle sensor stream. It
-    synchronises stereo images and IMU samples forwarded over adb, maintains
-    the body/camera TF tree, and publishes odometry, path and status topics.
-    The estimator backend is not implemented yet.</description>
+  <description>Stereo-inertial odometry for the real-vehicle sensor stream. It
+    synchronises stereo images and IMU samples forwarded over adb, runs the
+    SchurVINS backend, maintains the body/camera TF tree, and publishes
+    odometry, path and status topics.</description>
   <maintainer email="flyrat@example.com">flyrat maintainers</maintainer>
+  <!-- The ROS node is MIT; the vendored SchurVINS/SVO frontend is GPL-3.0. -->
   <license>MIT</license>
+  <license>GPL-3.0-only</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
