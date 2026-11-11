@@ -25,6 +25,7 @@ enum class MessageType : std::uint16_t {
     kTof = 3,
     kStereoJpeg = 4,
     kStats = 5,
+    kPose = 6,
 };
 
 struct Header {
@@ -94,6 +95,14 @@ inline void put_i64(std::vector<std::uint8_t>& out, std::int64_t value)
     put_u64(out, static_cast<std::uint64_t>(value));
 }
 
+inline void put_f64(std::vector<std::uint8_t>& out, double value)
+{
+    static_assert(sizeof(double) == sizeof(std::uint64_t), "IEEE-754 double required");
+    std::uint64_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    put_u64(out, bits);
+}
+
 inline std::uint16_t get_u16(const std::uint8_t* data)
 {
     return static_cast<std::uint16_t>(data[0]) |
@@ -125,6 +134,14 @@ inline std::int16_t get_i16(const std::uint8_t* data)
 inline std::int64_t get_i64(const std::uint8_t* data)
 {
     return static_cast<std::int64_t>(get_u64(data));
+}
+
+inline double get_f64(const std::uint8_t* data)
+{
+    const std::uint64_t bits = get_u64(data);
+    double value = 0.0;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
 }
 
 inline std::vector<std::uint8_t> encode_header(const Header& header)
@@ -259,6 +276,53 @@ inline bool decode_stereo_jpeg(const std::uint8_t* data, std::size_t size,
     view.jpeg = data + 8;
     view.size = size - 8;
     return view.width != 0 && view.height != 0 && view.size != 0;
+}
+
+// Pose of the vehicle body in the SLAM world frame. The pilot runs the
+// estimator on the vehicle and sends this message to the host, which publishes
+// it as nav_msgs/Odometry. Position is in metres, orientation is a unit
+// quaternion in x, y, z, w order.
+struct PosePayload {
+    std::array<double, 3> position {};
+    std::array<double, 4> orientation { 0.0, 0.0, 0.0, 1.0 };
+    std::uint8_t valid = 0;
+    std::uint8_t state = 0;
+    std::array<std::uint8_t, 6> reserved {};
+};
+
+inline std::vector<std::uint8_t> encode_pose(const PosePayload& pose)
+{
+    std::vector<std::uint8_t> out;
+    out.reserve(64);
+    for (double value : pose.position) {
+        put_f64(out, value);
+    }
+    for (double value : pose.orientation) {
+        put_f64(out, value);
+    }
+    out.push_back(pose.valid);
+    out.push_back(pose.state);
+    out.insert(out.end(), pose.reserved.begin(), pose.reserved.end());
+    return out;
+}
+
+inline bool decode_pose(const std::uint8_t* data, std::size_t size, PosePayload& pose)
+{
+    if (size != 64) {
+        return false;
+    }
+    for (std::size_t i = 0; i < pose.position.size(); ++i) {
+        pose.position[i] = get_f64(data + i * 8);
+    }
+    for (std::size_t i = 0; i < pose.orientation.size(); ++i) {
+        pose.orientation[i] = get_f64(data + 24 + i * 8);
+    }
+    pose.valid = data[56];
+    pose.state = data[57];
+    for (std::size_t i = 0; i < pose.reserved.size(); ++i) {
+        pose.reserved[i] = data[58 + i];
+    }
+    return true;
 }
 
 } // namespace flyrat::sensors

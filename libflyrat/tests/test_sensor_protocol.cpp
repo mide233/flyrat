@@ -119,6 +119,28 @@ int main()
     check(!decode_stereo_jpeg(stereo_payload.data(), 7, view),
         "reject short stereo header");
 
+    PosePayload pose;
+    pose.position = { 1.25, -2.5, 0.75 };
+    pose.orientation = { 0.5, -0.5, 0.5, 0.5 };
+    pose.valid = 1;
+    pose.state = 2;
+    const std::vector<std::uint8_t> pose_payload = encode_pose(pose);
+    check(pose_payload.size() == 64, "pose payload size");
+    PosePayload decoded_pose;
+    check(decode_pose(pose_payload.data(), pose_payload.size(), decoded_pose),
+        "decode pose");
+    check(decoded_pose.position[0] == 1.25 &&
+            decoded_pose.position[1] == -2.5 &&
+            decoded_pose.position[2] == 0.75,
+        "pose position");
+    check(decoded_pose.orientation[0] == 0.5 &&
+            decoded_pose.orientation[3] == 0.5,
+        "pose orientation");
+    check(decoded_pose.valid == 1 && decoded_pose.state == 2, "pose flags");
+    check(!decode_pose(pose_payload.data(), pose_payload.size() - 1,
+              decoded_pose),
+        "reject short pose");
+
     const std::vector<std::uint8_t> frame = encode_frame(
         MessageType::kImu, 42, 987654321, imu_payload);
     check(frame.size() == kHeaderSize + imu_payload.size(), "frame size");
