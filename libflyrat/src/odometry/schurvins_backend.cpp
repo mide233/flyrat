@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -186,8 +188,9 @@ struct TrajectorySample {
 } // namespace
 
 struct SchurvinsBackend::Impl {
-    explicit Impl(const std::string& path)
+    explicit Impl(const std::string& path, const std::string& trace)
         : camera_config_path(path)
+        , trace_dir(trace)
         , calibration(load_calibration(path))
     {
         static std::once_flag glog_once;
@@ -233,7 +236,17 @@ struct SchurvinsBackend::Impl {
         base.img_align_prior_lambda_rot = 0.5;
         base.img_align_prior_lambda_trans = 0.0;
         base.update_seeds_with_old_keyframes = true;
-        base.trace_statistics = false;
+        if (!trace_dir.empty()) {
+            std::error_code error;
+            std::filesystem::create_directories(trace_dir, error);
+            if (error) {
+                std::fprintf(stderr,
+                    "schurvins: cannot create trace directory %s: %s\n",
+                    trace_dir.c_str(), error.message().c_str());
+            }
+            base.trace_statistics = true;
+            base.trace_dir = trace_dir;
+        }
         base.window_size_ = 4;
         base.obs_dev_ = 2.0;
 
@@ -364,6 +377,7 @@ struct SchurvinsBackend::Impl {
     }
 
     std::string camera_config_path;
+    std::string trace_dir;
     Calibration calibration;
     svo::FrameHandlerStereo::Ptr frontend;
     svo::ImuHandlerPtr imu_handler;
@@ -378,8 +392,9 @@ struct SchurvinsBackend::Impl {
     std::vector<TrajectorySample, Eigen::aligned_allocator<TrajectorySample>> trajectory;
 };
 
-SchurvinsBackend::SchurvinsBackend(const std::string& camera_config_path)
-    : impl_(std::make_unique<Impl>(camera_config_path))
+SchurvinsBackend::SchurvinsBackend(const std::string& camera_config_path,
+    const std::string& trace_dir)
+    : impl_(std::make_unique<Impl>(camera_config_path, trace_dir))
 {}
 
 SchurvinsBackend::~SchurvinsBackend() = default;

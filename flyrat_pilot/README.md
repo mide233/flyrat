@@ -51,6 +51,7 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 --imu-lookahead SEC    每帧之后的 IMU 样本，默认 0.010
 --imu-history SEC      首帧 IMU 历史，默认 0.1
 --max-frames N         处理 N 帧后退出，0 表示一直运行
+--trace DIR            写出逐帧耗时 CSV 到 DIR
 --check-config         只校验配置并退出
 ```
 
@@ -193,7 +194,36 @@ RK3566（4 核 A55，2 GB），640x480/眼，静态近距桌面场景：
 - `camera_drops=0`、`skipped=0`，RSS 稳定在 22–30 MB，无内存压力；SoC 热区
   约 60–61°C。
 
-### 5.2 行为与限制
+### 5.2 分阶段耗时（`--trace`）
+
+`--trace DIR` 在 `DIR` 下写两个逐帧 CSV；不传该参数时不创建文件，计时分支
+也不会进入。
+
+- `trace_pilot.csv`：
+  `seq,stamp_s,queue_ms,decode_ms,imu_wait_ms,collect_ms,track_ms,publish_ms,age_ms,state,valid`
+  — 解码完成到 SLAM 取帧的排队、解码、IMU 等待、IMU 收集、`track()` 和发布耗时。
+- `trace_frontend.csv`：SVO 内置计时器，单位为秒。`pyramid_creation` 包含
+  `imgs[i].clone()` 和金字塔构建；`sparse_img_align` 对应 SchurVINS `Forward`；
+  `pose_optimizer` 对应 `Backward`；其余为 `reproject`、`point_optimizer` 和
+  `frontend_time`。
+
+```bash
+adb shell '/tmp/flyrat_pilot --decode mpp --trace /tmp/trace --max-frames 1500'
+adb pull /tmp/trace .
+python3 flyrat_pilot/tools/analyze_trace.py trace
+```
+
+分析脚本输出各列的 p50/p95/p99/max，并给出 `frontend_time` 与各阶段的占比和
+未计入阶段的时间。两个 CSV 按行号对齐（每个成功跟踪的帧一行）；启动阶段建议
+加 `--skip 100`。
+
+首次实测（25 fps、600 帧、`--decode mpp`、跳过前 100 帧）：`track()` p50
+27.5 ms，其中 `reproject` 12.7 ms（53%）、`pose_optimizer` 6.8 ms（26%）、
+`pyramid_creation` 2.9 ms（12%）、`sparse_img_align` 1.0 ms；解码 7.0 ms
+不在关键路径上，帧年龄 48.7 ms。完整数据和 30 fps 对比见
+[`docs/agent/odometry/performance_profiling.md`](../docs/agent/odometry/performance_profiling.md)。
+
+### 5.3 行为与限制
 
 - 静态近距桌面场景能完成初始化并输出位姿；长时间完全静止时跟踪质量会下降，
   状态可能进入 `RECENTLY_LOST`，轻微移动后恢复。

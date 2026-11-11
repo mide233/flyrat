@@ -228,6 +228,9 @@ ros2 launch flyrat_odometry odometry.launch.py
 MPP 异步接口，`decode_bench` 在 25 fps 下连续 60 s 无停流；`flyrat_pilot`
 可通过 `--decode mpp` 启用，默认仍使用 CPU 解码。
 
+`--trace DIR` 可写出逐帧耗时（pilot 时间线和 SVO 阶段），实测与优化候选见
+[`performance_profiling.md`](performance_profiling.md)。
+
 开发机模式把双目和 IMU 经 adb 传到主机，再由 `odometry_node` 计算。机载模式
 把 SchurVINS 放到 RK3566 上，主机只接收位姿：
 

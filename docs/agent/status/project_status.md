@@ -158,6 +158,13 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   25/30 fps 各 3 次 600 帧验证：无 UVC 停流、`camera_drops=0`、
   `decode_fallbacks=0`；25 fps CPU 约 126–130%（CPU 解码 135%），30 fps 约
   136–140%（CPU 解码 142%），帧年龄基本不变。
+- 分阶段计时（2026-11-11）：`flyrat_pilot` 新增 `--trace DIR`，输出
+  `trace_pilot.csv`（排队/解码/IMU/`track()`/发布/帧年龄）和
+  `trace_frontend.csv`（SVO 各阶段），并提供
+  `tools/analyze_trace.py`。25 fps 600 帧实测：`track()` p50 27.5 ms，
+  `reproject` 12.7 ms（53%）、`pose_optimizer` 6.8 ms（26%）、
+  `pyramid_creation` 2.9 ms（12%）、`sparse_img_align` 1.0 ms；解码 7.0 ms
+  不在关键路径。详见 `docs/agent/odometry/performance_profiling.md`。
 - SchurVINS 的初始化器原先固定使用 1–50 m 深度范围，已改为读取适配层的
   0.25–20 m 近场参数，解决实机近距桌面场景无法初始化的问题。
 - `SchurVINS::Prediction()` 原会对 `dt >= 15 ms` 直接 `CHECK` 退出；200 Hz

@@ -25,6 +25,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -83,6 +86,7 @@ struct Options {
     int slam_cpu = -1;
     double warmup_s = 1.0;
     int max_frames = 0;
+    std::string trace_dir;
     bool check_config = false;
 };
 
@@ -108,6 +112,7 @@ void printUsage(const char* program)
         << "  --slam-cpu N           pin the SLAM thread to CPU N (default off)\n"
         << "  --warmup SEC           drop camera frames before SLAM starts (default 1.0)\n"
         << "  --max-frames N         stop after N processed frames (testing)\n"
+        << "  --trace DIR            write per-frame timing CSVs to DIR\n"
         << "  --check-config         validate calibration files and exit\n";
 }
 
@@ -158,6 +163,8 @@ Options parseOptions(int argc, char** argv)
             options.warmup_s = std::stod(value("--warmup"));
         } else if (arg == "--max-frames") {
             options.max_frames = std::stoi(value("--max-frames"));
+        } else if (arg == "--trace") {
+            options.trace_dir = value("--trace");
         } else if (arg == "--check-config") {
             options.check_config = true;
         } else if (arg == "--help" || arg == "-h") {
@@ -290,6 +297,8 @@ struct FramePacket {
     cv::Mat right;
     double stamp_s = 0.0;
     std::uint64_t sequence = 0;
+    Clock::time_point decoded_at {};
+    double decode_ms = 0.0;
 };
 
 class FrameBuffer {
@@ -326,6 +335,125 @@ private:
     std::condition_variable cv_;
     std::optional<FramePacket> latest_;
     std::uint64_t received_ = 0;
+};
+
+// Per-frame latency samples used by --trace. Percentiles are computed at exit
+// because the pilot leaves with std::_Exit(0) and never runs destructors.
+struct TraceSamples {
+    std::vector<double> values;
+
+    void add(double value) { values.push_back(value); }
+
+    double percentile(double fraction) const
+    {
+        if (values.empty()) {
+            return 0.0;
+        }
+        std::vector<double> sorted = values;
+        std::sort(sorted.begin(), sorted.end());
+        const double position = fraction * static_cast<double>(sorted.size() - 1);
+        const auto lower = static_cast<std::size_t>(position);
+        const auto upper = std::min(lower + 1, sorted.size() - 1);
+        const double weight = position - static_cast<double>(lower);
+        return sorted[lower] * (1.0 - weight) + sorted[upper] * weight;
+    }
+
+    double maximum() const
+    {
+        return values.empty() ? 0.0 : *std::max_element(values.begin(), values.end());
+    }
+};
+
+class TraceWriter {
+public:
+    bool open(const std::string& directory)
+    {
+        if (directory.empty()) {
+            return false;
+        }
+        std::error_code error;
+        std::filesystem::create_directories(directory, error);
+        if (error) {
+            std::cerr << "flyrat_pilot: cannot create trace directory "
+                      << directory << ": " << error.message() << "\n";
+            return false;
+        }
+        path_ = directory + "/trace_pilot.csv";
+        stream_.open(path_);
+        if (!stream_) {
+            std::cerr << "flyrat_pilot: cannot open " << path_ << "\n";
+            return false;
+        }
+        stream_ << "seq,stamp_s,queue_ms,decode_ms,imu_wait_ms,collect_ms,"
+                   "track_ms,publish_ms,age_ms,state,valid\n";
+        stream_ << std::fixed;
+        return true;
+    }
+
+    bool enabled() const { return stream_.is_open(); }
+
+    void row(std::uint64_t sequence, double stamp_s, double queue_ms,
+        double decode_ms, double imu_wait_ms, double collect_ms, double track_ms,
+        double publish_ms, double age_ms, int state, int valid)
+    {
+        if (!enabled()) {
+            return;
+        }
+        // Flush every row: the process exits through std::_Exit(0), which skips
+        // ofstream destruction.
+        stream_ << sequence << ',' << std::setprecision(6) << stamp_s << ','
+                << std::setprecision(3) << queue_ms << ',' << decode_ms << ','
+                << imu_wait_ms << ',' << collect_ms << ',' << track_ms << ','
+                << publish_ms << ',' << age_ms << ',' << state << ',' << valid
+                << '\n';
+        stream_.flush();
+
+        queue_.add(queue_ms);
+        decode_.add(decode_ms);
+        imu_wait_.add(imu_wait_ms);
+        collect_.add(collect_ms);
+        track_.add(track_ms);
+        publish_.add(publish_ms);
+        age_.add(age_ms);
+    }
+
+    void summary() const
+    {
+        if (!enabled()) {
+            return;
+        }
+        std::cerr << "flyrat_pilot: trace rows=" << track_.values.size()
+                  << " file=" << path_ << "\n";
+        report("queue_ms", queue_);
+        report("decode_ms", decode_);
+        report("imu_wait_ms", imu_wait_);
+        report("collect_ms", collect_);
+        report("track_ms", track_);
+        report("publish_ms", publish_);
+        report("age_ms", age_);
+    }
+
+    void close() { stream_.close(); }
+
+private:
+    static void report(const char* name, const TraceSamples& samples)
+    {
+        std::cerr << "flyrat_pilot: trace " << name
+                  << " p50=" << samples.percentile(0.50)
+                  << " p95=" << samples.percentile(0.95)
+                  << " p99=" << samples.percentile(0.99)
+                  << " max=" << samples.maximum() << "\n";
+    }
+
+    std::ofstream stream_;
+    std::string path_;
+    TraceSamples queue_;
+    TraceSamples decode_;
+    TraceSamples imu_wait_;
+    TraceSamples collect_;
+    TraceSamples track_;
+    TraceSamples publish_;
+    TraceSamples age_;
 };
 
 cv::Matx44d loadBodyCamera(const std::string& path)
@@ -403,9 +531,15 @@ int main(int argc, char** argv)
 
         cv::setNumThreads(options.opencv_threads);
 
+        TraceWriter trace;
+        const bool trace_enabled = trace.open(options.trace_dir);
+
         flyrat::odometry::Options odometry_options;
         odometry_options.mode = flyrat::odometry::Mode::kImuStereo;
         odometry_options.camera_config_path = options.camera_config;
+        if (trace_enabled) {
+            odometry_options.trace_dir = options.trace_dir;
+        }
         flyrat::odometry::Odometry odometry(odometry_options);
 
         if (options.check_config) {
@@ -498,6 +632,7 @@ int main(int argc, char** argv)
                 }
                 last_stamp = stamp_s;
 
+                const auto decode_start = Clock::now();
                 if (hardware_decode) {
                     flyrat::hardware::DecodedJpeg decoded;
                     if (mpp_decoder.decode(frame->jpeg.data(),
@@ -518,6 +653,11 @@ int main(int argc, char** argv)
                             packet.storage->data() + half, decoded.stride);
                         packet.stamp_s = stamp_s;
                         packet.sequence = frame->sequence;
+                        packet.decoded_at = Clock::now();
+                        packet.decode_ms
+                            = std::chrono::duration<double, std::milli>(
+                                  packet.decoded_at - decode_start)
+                                  .count();
                         frame_buffer.push(std::move(packet));
                         consecutive_failures = 0;
                         continue;
@@ -549,6 +689,11 @@ int main(int argc, char** argv)
                 packet.right = image.colRange(half, image.cols);
                 packet.stamp_s = stamp_s;
                 packet.sequence = frame->sequence;
+                packet.decoded_at = Clock::now();
+                packet.decode_ms
+                    = std::chrono::duration<double, std::milli>(
+                          packet.decoded_at - decode_start)
+                          .count();
                 frame_buffer.push(std::move(packet));
             }
         };
@@ -563,7 +708,9 @@ int main(int argc, char** argv)
                   << options.pose_address << ":" << options.pose_port
                   << ", camera " << options.width << "x" << options.height
                   << "@" << options.fps << " fps"
-                  << ", decode " << (hardware_decode ? "mpp" : "cpu") << "\n";
+                  << ", decode " << (hardware_decode ? "mpp" : "cpu")
+                  << (trace.enabled() ? ", trace " + options.trace_dir : "")
+                  << "\n";
 
         double last_frame_s = -1.0;
         double last_pose_s = -1.0;
@@ -596,6 +743,11 @@ int main(int argc, char** argv)
                 std::this_thread::sleep_for(std::chrono::milliseconds(2));
                 continue;
             }
+            const auto dequeued_at = Clock::now();
+            const double queue_ms
+                = std::chrono::duration<double, std::milli>(
+                      dequeued_at - frame->decoded_at)
+                      .count();
             if (frame->stamp_s <= last_frame_s + 1e-6) {
                 continue;
             }
@@ -608,15 +760,23 @@ int main(int argc, char** argv)
             }
 
             const double end_s = frame->stamp_s + options.imu_lookahead;
+            const auto wait_start = Clock::now();
             if (!imu_buffer.waitFor(end_s, std::chrono::milliseconds(100))) {
                 ++skipped;
                 last_frame_s = frame->stamp_s;
                 continue;
             }
+            const double imu_wait_ms = std::chrono::duration<double, std::milli>(
+                Clock::now() - wait_start)
+                                           .count();
             const double begin_s = last_frame_s >= 0.0
                 ? last_frame_s
                 : frame->stamp_s - options.imu_history;
+            const auto collect_start = Clock::now();
             auto imu = imu_buffer.collect(begin_s, end_s);
+            const double collect_ms = std::chrono::duration<double, std::milli>(
+                Clock::now() - collect_start)
+                                          .count();
             if (imu.empty()) {
                 ++skipped;
                 last_frame_s = frame->stamp_s;
@@ -650,6 +810,7 @@ int main(int argc, char** argv)
             ++processed;
 
             flyrat::sensors::PosePayload payload;
+            const auto publish_start = Clock::now();
             payload.state = stateCode(result.state);
             if (result.pose.valid) {
                 Eigen::Matrix4d T_world_camera = Eigen::Matrix4d::Identity();
@@ -674,6 +835,13 @@ int main(int argc, char** argv)
             pose_stream.publish(payload,
                 static_cast<std::int64_t>(std::llround(
                     (result.pose.valid ? result.timestamp : frame->stamp_s) * 1e9)));
+            const double publish_ms = std::chrono::duration<double, std::milli>(
+                Clock::now() - publish_start)
+                                          .count();
+
+            trace.row(frame->sequence, frame->stamp_s, queue_ms,
+                frame->decode_ms, imu_wait_ms, collect_ms, track_ms, publish_ms,
+                track_age_ms, stateCode(result.state), result.pose.valid ? 1 : 0);
 
             const auto now = Clock::now();
             if (now - last_report >= std::chrono::seconds(2)) {
@@ -748,6 +916,8 @@ int main(int argc, char** argv)
                       << "\n";
         }
         std::cerr << "flyrat_pilot: stopped after " << processed << " frames\n";
+        trace.summary();
+        trace.close();
         // The vendored SVO and the Rockchip MPP decoder both own worker threads
         // whose teardown can block on this kernel. All application state has
         // been saved above, so leave without running those global destructors.

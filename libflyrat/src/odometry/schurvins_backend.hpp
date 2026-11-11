@@ -16,7 +16,8 @@ namespace flyrat::odometry {
 // contract. Only built when FLYRAT_WITH_SCHURVINS is enabled.
 class SchurvinsBackend {
 public:
-    explicit SchurvinsBackend(const std::string& camera_config_path);
+    explicit SchurvinsBackend(const std::string& camera_config_path,
+        const std::string& trace_dir = {});
     ~SchurvinsBackend();
 
     SchurvinsBackend(const SchurvinsBackend&) = delete;

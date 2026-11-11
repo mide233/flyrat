@@ -46,8 +46,8 @@ Odometry::Odometry(Options options)
     if (impl_->options.mode != Mode::kImuStereo) {
         throw OdometryError("SchurVINS requires IMU-stereo mode");
     }
-    impl_->backend =
-        std::make_unique<SchurvinsBackend>(impl_->options.camera_config_path);
+    impl_->backend = std::make_unique<SchurvinsBackend>(
+        impl_->options.camera_config_path, impl_->options.trace_dir);
 #endif
 }
 

@@ -83,6 +83,9 @@ struct Options {
     // Camera/IMU calibration in the neutral YAML schema stored under
     // libflyrat/configs/camera/.
     std::string camera_config_path;
+    // When non-empty, the backend writes per-stage timings to
+    // <trace_dir>/trace_frontend.csv. Leaving it empty disables tracing.
+    std::string trace_dir;
 };
 
 class Odometry {

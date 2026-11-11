@@ -179,6 +179,13 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 解码（`MppJpegDecoder`，需 `librockchip_mpp.so`）；MPP 初始化失败或连续
 10 帧解码失败会自动回退到 CPU，并在统计行累加 `decode_fallbacks`。
 
+加 `--trace DIR` 可写出逐帧耗时：`DIR/trace_pilot.csv`（排队、解码、IMU
+等待、收集、`track()`、发布、帧年龄）和 `DIR/trace_frontend.csv`（SVO 的
+`pyramid_creation`、`sparse_img_align`、`reproject`、`pose_optimizer`、
+`point_optimizer`、`frontend_time`）。随后用
+`python3 flyrat_pilot/tools/analyze_trace.py DIR` 汇总 p50/p95/p99 和阶段
+占比。不传 `--trace` 时不产生文件。
+
 只校验标定、不打开硬件：
 
 ```sh
