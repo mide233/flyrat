@@ -146,7 +146,8 @@ uint8  reserved[6]
 `libflyrat` 的 `StereoCamera` 已支持 `mppjpegdec` 硬件 MJPEG 解码并保留 V4L2 PTS，
 但当前机载 `flyrat_pilot` 默认仍使用 CPU `cv::imdecode`：在这块 RK3566 上，
 GStreamer `v4l2src + mppjpegdec` 在 25/30 fps 时会在数帧后停流，20 fps 可稳定，
-但 CPU/延迟并不优于 CPU 解码。硬件路径保留给后续驱动/管线修复。
+但 CPU/延迟并不优于 CPU 解码。硬件路径保留给后续驱动/管线修复；详细实验数据见
+[`docs/agent/odometry/mjpeg_decode_research.md`](../docs/agent/odometry/mjpeg_decode_research.md)。
 
 解码线程只消费 `StereoJpegSource::takeLatest()` 的最新 JPEG，不再在 V4L2 采集
 回调里解码；`StereoJpegSource` 在无回调时也改为移动帧而不是复制。

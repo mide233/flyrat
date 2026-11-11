@@ -223,6 +223,10 @@ ros2 launch flyrat_odometry odometry.launch.py
 
 ### 5.1 机载模式
 
+机载 MJPEG 硬件解码的调研和实测结论见
+[`mjpeg_decode_research.md`](mjpeg_decode_research.md)。当前默认使用 CPU 解码；
+硬件 MPP 路径在完整 pilot 中仍存在相机停流问题。
+
 开发机模式把双目和 IMU 经 adb 传到主机，再由 `odometry_node` 计算。机载模式
 把 SchurVINS 放到 RK3566 上，主机只接收位姿：
 
