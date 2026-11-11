@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Build the flyrat_pilot onboard program. It is ROS-free and links the shared
-# libflyrat core; the runtime logic is still a placeholder.
+# Build the flyrat_pilot onboard program. It is ROS-free and links the
+# static libflyrat hardware/odometry libraries; the binary runs SchurVINS
+# onboard and streams body poses over TCP.
 #
 # Usage:
 #   .script/build_flyrat_pilot.sh [--clean] [--debug]

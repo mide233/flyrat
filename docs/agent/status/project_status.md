@@ -33,10 +33,12 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   - 输出裁剪宏统一定义在 `platform/platform.h`，保证 C 驱动和 C++ 读取端
     的 `VL53L5CX_ResultsData` 布局一致。
 - `hardware::Imu`：读取 `MspInteract` 的最新 `MSP_RAW_IMU` 快照。
-- `hardware::StereoCamera`：UVC 双目相机 V4L2 采集。
+- `hardware::StereoCamera`：UVC 双目相机 V4L2 采集，仅 YUYV。
   - `kYuyv`：原始 YUYV，可输出 YUYV 或 GRAY8。
-  - `kMjpeg`：Rockchip MPP 硬解，输出 GRAY8 或 NV12。
+  - `kGray8`：直接输出灰度（可选）。
 - `hardware::StereoJpegSource`：不解码的原始 MJPEG 采集，供 adb 转发使用。
+- `hardware::MppJpegDecoder`：`dlopen` 加载 `librockchip_mpp`，异步解码
+  MJPEG 为 NV12/NV16 的 Y 平面；由 `flyrat_pilot --decode mpp` 使用。
 
 ### 2.3 实机传感器转发
 
@@ -190,6 +192,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 | ROS 2 IMU 输入 | 200.3–200.8 Hz | 开发机接收节点 |
 | ROS 2 双目输入 | 60.0 Hz | 左右各 640x480 mono8 |
 | ROS 2 里程计状态发布 | 1 Hz | `diagnostic_msgs` |
+| 机载 SLAM（25 fps，NEON + 并行重投影） | CPU 约 1.23 核，RSS 约 22 MB | 单帧 track 16–17 ms，age 约 50 ms |
 | 机载 SLAM（25 fps，P0 优化后） | CPU 约 1.3 核，RSS 18–19 MB | 单帧 track 25–30 ms，age 约 51 ms |
 | 机载 SLAM（25 fps，优化前） | CPU 约 1.3 核，RSS 约 27 MB | 单帧 track 约 28 ms，age 约 47 ms |
 | 机载 SLAM（30 fps） | CPU 1.5–2.0 核，RSS 27–30 MB | 640x480/眼，单帧 track 18–21 ms，age 约 41 ms |

@@ -43,7 +43,7 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 --fps N                相机帧率，默认 25
 --decode MODE          MJPEG 解码器：cpu（默认）或 mpp
 --opencv-threads N    OpenCV 工作线程数，默认 2
---slam-cpu N          把 SLAM 主线程绑定到 CPU N（默认不绑定）
+--slam-cpu N          把 SLAM 主线程绑定到 CPU N（默认不绑定；与并行重投影冲突，不建议使用）
 --warmup SEC          启动后丢弃相机帧的预热时间，默认 1.0
 --pose-address ADDR    位姿流监听地址，默认 127.0.0.1
 --pose-port PORT       位姿流端口，默认 5001
@@ -162,7 +162,8 @@ uint8  reserved[6]
 100 ms 的间隔，硬件解码平均 11.3 ms、p99 12.1 ms，进程 CPU 约 27%，
 而 CPU `cv::imdecode` 约 56%；输出与 OpenCV 平均差 0.01 LSB。
 
-机载 `flyrat_pilot` 默认仍使用 CPU `cv::imdecode`；硬件解码需显式启用：
+机载 `flyrat_pilot` 二进制的默认值仍是 CPU `cv::imdecode`
+（`bringup_pilot_slam.sh` 默认传 `--decode mpp`）。手动运行时可显式选择：
 
 ```text
 flyrat_pilot --decode mpp ...
@@ -183,11 +184,11 @@ RK3566（4 核 A55，2 GB），640x480/眼，静态近距桌面场景：
 
 | 模式 | CPU | 进程 RSS | `track()` | 帧年龄 | 处理帧率 |
 |---|---:|---:|---:|---:|---:|
-| 30 fps，60 s | 1.5–2.0 核（135–200%） | 27–30 MB | 18–21 ms | 约 41 ms | 29.9 fps |
-| 30 fps，600 帧 | 约 1.85 核 | 28 MB | 约 33 ms | 约 52 ms | 28.5 fps |
+| 30 fps，60 s（优化前） | 1.5–2.0 核（135–200%） | 27–30 MB | 18–21 ms | 约 41 ms | 29.9 fps |
+| 30 fps，600 帧（优化前） | 约 1.85 核 | 28 MB | 约 33 ms | 约 52 ms | 28.5 fps |
 | 25 fps，582 帧（P0 优化后） | 约 1.3 核（133%） | 18–19 MB | 25–30 ms | 约 51 ms | 25.0 fps |
-| 25 fps，600 帧，`--decode mpp` | 约 1.28 核（126–130%） | 20–22 MB | 25–26 ms | 约 50 ms | 25.0 fps |
-| 30 fps，600 帧，`--decode mpp` | 约 1.38 核（136–140%） | 20–22 MB | 21–23 ms | 42–43 ms | 30.0 fps |
+| 25 fps，600 帧，`--decode mpp`（优化前） | 约 1.28 核（126–130%） | 20–22 MB | 25–26 ms | 约 50 ms | 25.0 fps |
+| 30 fps，600 帧，`--decode mpp`（优化前） | 约 1.38 核（136–140%） | 20–22 MB | 21–23 ms | 42–43 ms | 30.0 fps |
 | 25 fps，600 帧，NEON + 并行重投影 | 约 1.23 核（123%） | 约 22 MB | **16–17 ms** | 约 50 ms | 25.0 fps |
 | 30 fps，600 帧，NEON + 并行重投影 | 约 1.44 核（144%） | 约 22 MB | **15–16 ms** | 约 43 ms | 30.0 fps |
 | 25 fps，150 帧（优化前） | 约 1.3 核（133%） | 27 MB | 约 28 ms | 约 47 ms | 25.1 fps |
@@ -196,10 +197,11 @@ RK3566（4 核 A55，2 GB），640x480/眼，静态近距桌面场景：
 - `track()` 是 SchurVINS 单帧耗时，`age` 是图像时间戳到开始跟踪的延迟（含
   10 ms IMU lookahead 等待）。
 - P0 优化后，解码已从采集回调移到独立线程，只解码最新帧；JPEG 不再双重拷贝；
-  主机 bridge 改为收到即发布；默认 IMU lookahead 降到 10 ms。25 fps 下
-  `track_ms` 25–30 ms，帧预算 40 ms，仍有约 10 ms 余量。
-- 30 fps 的帧预算是 33 ms，单帧稳态已占 18–21 ms，CPU 峰值接近 2 核，
-  留给飞控和其他线程的余量较小。默认保持 **25 fps**；需要更大余量时可降到 20 fps。
+  主机 bridge 改为收到即发布；默认 IMU lookahead 降到 10 ms。
+- 当前最优实现（NEON + 并行重投影）在 25 fps 下 `track_ms` 16–17 ms，帧预算
+  40 ms，余量约 23 ms；30 fps 下 15–16 ms，预算 33 ms，余量约 17 ms。
+- 30 fps 的 CPU 峰值仍接近 1.5 核，留给飞控和其他线程的余量比 25 fps 小。
+  默认保持 **25 fps**；需要更大余量时可降到 20 fps。
 - 20 fps 的帧预算是 50 ms，单帧约 35 ms，实时裕量约 15 ms；代价是帧间位移
   变大，快速运动时跟踪难度上升。
 - 端到端（采集 → 主机 ROS 2 收到）约 **70–100 ms**。设备与主机系统时钟有

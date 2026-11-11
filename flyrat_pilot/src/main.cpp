@@ -109,7 +109,8 @@ void printUsage(const char* program)
         << "  --imu-lookahead SEC    IMU samples after each frame (default 0.010)\n"
         << "  --imu-history SEC      IMU history for the first frame (default 0.1)\n"
         << "  --opencv-threads N     OpenCV worker threads (default 2)\n"
-        << "  --slam-cpu N           pin the SLAM thread to CPU N (default off)\n"
+        << "  --slam-cpu N           pin the SLAM thread to CPU N (deprecated:\n"
+        << "                         conflicts with parallel reprojection)\n"
         << "  --warmup SEC           drop camera frames before SLAM starts (default 1.0)\n"
         << "  --max-frames N         stop after N processed frames (testing)\n"
         << "  --trace DIR            write per-frame timing CSVs to DIR\n"
@@ -522,6 +523,12 @@ int main(int argc, char** argv)
         std::cerr << "flyrat_pilot: " << error.what() << "\n";
         printUsage(argv[0]);
         return 2;
+    }
+
+    if (options.slam_cpu >= 0) {
+        std::cerr << "flyrat_pilot: warning: --slam-cpu conflicts with parallel "
+                     "stereo reprojection; the worker threads inherit the "
+                     "restricted CPU mask and reprojection may get slower\n";
     }
 
     try {

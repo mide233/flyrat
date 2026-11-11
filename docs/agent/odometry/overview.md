@@ -226,7 +226,7 @@ ros2 launch flyrat_odometry odometry.launch.py
 机载 MJPEG 硬件解码的调研和实测结论见
 [`mjpeg_decode_research.md`](mjpeg_decode_research.md)。硬件路径直接调用
 MPP 异步接口，`decode_bench` 在 25 fps 下连续 60 s 无停流；`flyrat_pilot`
-可通过 `--decode mpp` 启用，默认仍使用 CPU 解码。
+可通过 `--decode mpp` 启用（启动脚本默认 `mpp`，二进制默认仍是 CPU）。
 
 `--trace DIR` 可写出逐帧耗时（pilot 时间线和 SVO 阶段），实测与优化候选见
 [`performance_profiling.md`](performance_profiling.md)。

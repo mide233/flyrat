@@ -86,3 +86,6 @@ develop_ws
 .mimo/
 CLAUDE.md
 AGENTS.md
+
+# Python bytecode
+__pycache__/

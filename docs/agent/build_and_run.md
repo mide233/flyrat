@@ -136,8 +136,8 @@ ctest --test-dir libflyrat/build --output-on-failure
   --width 1280 --height 480 --fps 30 --seconds 5
 ```
 
-`--gray` 输出 GRAY8，`--save DIR` 保存左右图。MJPEG 采集和解码分别由
-`StereoJpegSource` 与 `MppJpegDecoder` 负责。
+`--gray` 输出 GRAY8，`--save PREFIX` 指定左右 PGM 的文件名前缀。MJPEG 采集
+和解码分别由 `StereoJpegSource` 与 `MppJpegDecoder` 负责。
 
 `decode_bench`：MJPEG 硬件解码连续运行验收，只使用实时相机，交叉编译时由
 `.script/build_pilot_arm.sh` 一并生成到 `build-arm/decode_bench`。
@@ -364,14 +364,16 @@ FLYRAT_PUSH_PILOT=0 跳过二进制推送
 
 | 模式 | CPU | RSS | `track()` | 帧年龄 | 处理帧率 |
 |---|---:|---:|---:|---:|---:|
+| 25 fps（NEON + 并行重投影） | 约 1.23 核 | 约 22 MB | 16–17 ms | 约 50 ms | 25.0 fps |
+| 30 fps（NEON + 并行重投影） | 约 1.44 核 | 约 22 MB | 15–16 ms | 约 43 ms | 30.0 fps |
 | 25 fps（P0 优化后） | 约 1.3 核 | 18–19 MB | 25–30 ms | 约 51 ms | 25.0 fps |
 | 25 fps（优化前） | 约 1.3 核 | 27 MB | 约 28 ms | 约 47 ms | 25.1 fps |
-| 30 fps | 1.5–2.0 核 | 27–30 MB | 18–21 ms | 约 41 ms | 29.9 fps |
+| 30 fps（优化前） | 1.5–2.0 核 | 27–30 MB | 18–21 ms | 约 41 ms | 29.9 fps |
 | 20 fps | 约 1.6 核 | 22 MB | 约 35 ms | 约 57 ms | 19.7 fps |
 
-P0 优化后解码在独立线程、只处理最新帧，bridge 收到即发布，25 fps 下
-`track_ms` 约 25–30 ms；30 fps 的帧预算只有 33 ms，CPU 峰值接近 2 核；默认保持 **25 fps**
-（预算 40 ms），飞行需要更大余量时可用 `fps:=20`。端到端（采集到主机收到）约
+当前版本启用 NEON 与双目并行重投影后，25 fps 下 `track_ms` 约 16–17 ms，
+40 ms 帧预算余量约 23 ms；30 fps 约 15–16 ms，预算 33 ms，余量约 17 ms。
+默认保持 **25 fps**，飞行需要更大余量时可用 `fps:=20`。端到端（采集到主机收到）约
 70–100 ms，其中设备时钟比主机快 55–64 ms，`ros2 topic delay` 需要先校正。
 pilot 每 2 s 输出的 `camera_fps/slam_fps/track_ms/age_ms/cpu/rss_mb` 可用于
 复测；`track_ms` 是单帧后端耗时，`age_ms` 含 10 ms IMU lookahead 等待。

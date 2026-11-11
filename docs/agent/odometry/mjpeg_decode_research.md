@@ -5,13 +5,14 @@
 ## 结论
 
 RK3566 的 VPU 可以连续解码 1280x480 MJPEG，硬件解码明显低于软件解码的
-CPU 占用，输出与 OpenCV 一致。当前实现只作为独立解码器和验收工具存在，
-**尚未接入 `flyrat_pilot` 默认路径**，机载默认仍是 CPU `cv::imdecode`。
+CPU 占用，输出与 OpenCV 一致。`flyrat_pilot` 已通过 `--decode mpp` 接入该
+路径，并做过 6 次 600 帧的 25/30 fps 验证；启动脚本默认使用 `mpp`，
+二进制本身的默认值仍是 `cpu`，需要确定行为时显式传参。
 
 ```text
 V4L2 MMAP 采集 -> StereoJpegSource -> 解码线程 -> SchurVINS
-                                      |-- cv::imdecode（默认）
-                                      `-- MppJpegDecoder（已实现，未接入）
+                                      |-- cv::imdecode（二进制默认/回退）
+                                      `-- MppJpegDecoder（--decode mpp，脚本默认）
 ```
 
 ## 实现
