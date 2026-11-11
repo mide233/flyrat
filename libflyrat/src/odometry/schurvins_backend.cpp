@@ -232,6 +232,10 @@ struct SchurvinsBackend::Impl {
         base.img_align_max_level = 4;
         base.img_align_min_level = 2;
         base.use_imu = true;
+        // The stereo reprojector processes both cameras sequentially. Running
+        // them concurrently uses the spare cores on the pilot SoC and cuts the
+        // reprojection wall time from sum(cam) to max(cam).
+        base.use_async_reprojectors = true;
         base.poseoptim_prior_lambda = 0.0;
         base.img_align_prior_lambda_rot = 0.5;
         base.img_align_prior_lambda_trans = 0.0;

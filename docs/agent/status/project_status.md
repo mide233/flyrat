@@ -165,6 +165,11 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   `reproject` 12.7 ms（53%）、`pose_optimizer` 6.8 ms（26%）、
   `pyramid_creation` 2.9 ms（12%）、`sparse_img_align` 1.0 ms；解码 7.0 ms
   不在关键路径。详见 `docs/agent/odometry/performance_profiling.md`。
+- 前端优化（2026-11-11）：修正 vendored 代码里失效的 `__ARM_NEON__` 判断
+  （aarch64 只定义 `__ARM_NEON`），启用金字塔/patch score/feature alignment
+  的 NEON 实现，并开启双目并行重投影。25 fps 600 帧 `track()` p50 由
+  27.5 ms 降到 16.6 ms，`reproject` 12.7 → 10.4 ms，30 fps 21.6 → 16.0 ms；
+  不改变算法参数。启用并行重投影时不能用 `--slam-cpu` 固定 SLAM 线程。
 - SchurVINS 的初始化器原先固定使用 1–50 m 深度范围，已改为读取适配层的
   0.25–20 m 近场参数，解决实机近距桌面场景无法初始化的问题。
 - `SchurVINS::Prediction()` 原会对 `dt >= 15 ms` 直接 `CHECK` 退出；200 Hz

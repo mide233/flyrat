@@ -177,6 +177,8 @@ RK3566（4 核 A55，2 GB），640x480/眼，静态近距桌面场景：
 | 25 fps，582 帧（P0 优化后） | 约 1.3 核（133%） | 18–19 MB | 25–30 ms | 约 51 ms | 25.0 fps |
 | 25 fps，600 帧，`--decode mpp` | 约 1.28 核（126–130%） | 20–22 MB | 25–26 ms | 约 50 ms | 25.0 fps |
 | 30 fps，600 帧，`--decode mpp` | 约 1.38 核（136–140%） | 20–22 MB | 21–23 ms | 42–43 ms | 30.0 fps |
+| 25 fps，600 帧，NEON + 并行重投影 | 约 1.23 核（123%） | 约 22 MB | **16–17 ms** | 约 50 ms | 25.0 fps |
+| 30 fps，600 帧，NEON + 并行重投影 | 约 1.44 核（144%） | 约 22 MB | **15–16 ms** | 约 43 ms | 30.0 fps |
 | 25 fps，150 帧（优化前） | 约 1.3 核（133%） | 27 MB | 约 28 ms | 约 47 ms | 25.1 fps |
 | 20 fps，400 帧 | 约 1.6 核 | 22 MB | 约 35 ms | 约 57 ms | 19.7 fps |
 
@@ -193,6 +195,10 @@ RK3566（4 核 A55，2 GB），640x480/眼，静态近距桌面场景：
   **+55～64 ms** 偏差，`ros2 topic delay` 的原始值需要先扣除该偏差。
 - `camera_drops=0`、`skipped=0`，RSS 稳定在 22–30 MB，无内存压力；SoC 热区
   约 60–61°C。
+- NEON 路径与双目并行重投影把 `track()` 从 25–27 ms 降到 16–17 ms；注意
+  启用并行重投影时不要用 `--slam-cpu` 固定 SLAM 线程（工作线程会继承单核
+  亲和性）。细节见
+  [`docs/agent/odometry/performance_profiling.md`](../docs/agent/odometry/performance_profiling.md)。
 
 ### 5.2 分阶段耗时（`--trace`）
 

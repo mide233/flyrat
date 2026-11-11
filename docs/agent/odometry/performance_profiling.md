@@ -93,3 +93,89 @@ python3 flyrat_pilot/tools/analyze_trace.py trace --skip 100
    Schur 补 / `StateUpdate`。
 4. 关键帧路径：用更长或更运动的序列触发 `local_ba`，确认尖峰来源。
 5. 线程与发布：`publish` 已只有 0.02 ms，暂不需要移出 SLAM 线程。
+
+## 优化实验（2026-11-11）
+
+在不改算法参数的前提下，逐项试验了以下实现级优化，并在同一设备上用
+`--trace` 对比。场景会随时间变化（`invalid` 帧数波动），因此每轮交替运行
+不同二进制，取 `invalid` 较少的健康轮次比较。
+
+### 方案 A：启用 ARM NEON 路径
+
+问题根因：vendored 代码用 `#ifdef __ARM_NEON__` 判断 NEON，而 aarch64 GCC
+只定义 `__ARM_NEON`，导致金字塔、patch score、feature alignment 的 NEON
+实现全部未编译。
+
+改动文件：
+
+- `viking_common/src/vision.cpp`（`halfSample`，3 处）
+- `svo_direct/include/svo/direct/patch_score.h`（3 处）
+- `svo_direct/src/feature_alignment.cpp`（4 处）
+- `fast/include/fast/faster_corner_utilities.h`（1 处）
+
+统一改为 `#if defined(__ARM_NEON) || defined(__ARM_NEON__)`。
+
+效果：
+
+- `pyramid_creation` 3–4 ms → **1.2–1.5 ms**，约省 2 ms/帧；
+- `reproject`（SSD patch 匹配 + 1D/2D 对齐）再省 1–3 ms；
+- 金字塔 NEON 与标量实现都是整数 `/4` 截断，输出逐位一致；patch score 的
+  ZMSSD 也是整数运算。属于无算法行为变化的加速。
+
+### 方案 B：双目重投影并行
+
+`base.use_async_reprojectors = true`，让 `projectMapInFrame()` 对左右目
+各起一个 `std::async` 任务并等待完成。原来两目顺序执行，墙钟是
+`cam0 + cam1`；并行后约为 `max(cam0, cam1)`。
+
+效果（`invalid` 较少的轮次）：`reproject` 18–20 ms → **10–13 ms**，
+约省 6–8 ms/帧。
+
+注意：
+
+- `--slam-cpu` 与并行重投影冲突。`std::async` 工作线程继承 SLAM 线程的
+  CPU 亲和性，单核会退化为串行甚至更慢；启用并行时不要固定 SLAM 线程。
+- 两目共享点上的 `n_failed/succeeded_reproj_` 计数存在良性竞争，上游本来
+  就提供该选项；点删除在 join 之后统一执行。
+
+### 方案 C：减少帧拷贝（未采用）
+
+去掉 `addImageBundle()` 里的 `imgs[i].clone()`，预计只省 0.15–0.3 ms，
+而且要求 MPP 输出直接成为 `Frame` 拥有的 `cv::Mat`。当前 `FramePacket`
+用 `shared_ptr<vector<uint8_t>>` 持有 luma 并用 stride 视图切左右目，
+强行复用会让关键帧图像的所有权变复杂，收益与风险不成比例，暂不采用。
+
+### 方案 D：OpenCV 线程数（无收益）
+
+`--opencv-threads 1` 与默认 2 对比，`track`/`reproject` 无稳定差异，
+保持默认 2。
+
+### 最终对比（600 帧，`--decode mpp`，跳过前 100 帧，p50/p95 ms）
+
+| 指标 | 基线 25 fps | 优化后 25 fps | 基线 30 fps | 优化后 30 fps |
+|---|---:|---:|---:|---:|
+| `track` | 27.51 / 31.13 | **16.57 / 18.20** | 21.61 / 23.85 | **15.99 / 18.26** |
+| `pyramid_creation` | 2.93 / 4.23 | 1.43 / 1.52 | 3.94 / 4.11 | 1.39 / 1.58 |
+| `reproject` | 12.70 / 19.81 | 10.41 / 10.70 | 14.12 / 15.60 | 10.72 / 12.55 |
+| `pose_optimizer` | 6.83 / 8.29 | 1.85 / 3.02 | 1.82 / 2.01 | 1.59 / 2.30 |
+| `frontend_time` | 24.18 / 28.61 | 14.89 / 16.44 | 18.15 / 19.66 | 14.38 / 16.51 |
+| 进程 CPU | 约 125–142% | 约 123% | 约 142% | 约 144% |
+| 帧年龄 | 48.7 / 50.4 | 49.8 / 51.1 | 42.1 / 46.5 | 42.3 / 46.4 |
+
+（`pose_optimizer` 随窗口/场景状态在 1.6–8.4 ms 间波动，是整轮对比中最大
+的不确定项；优化后 25 fps 的 `track` 在健康场景下稳定在 16–17 ms。）
+
+### 结论
+
+最优组合是 **方案 A + 方案 B**：
+
+- 单帧 `track()` 从 25–27 ms 降到 **16–17 ms**（约 −35%），30 fps 也有
+  15–16 ms；
+- 25 fps 帧预算 40 ms，优化后余量约 23 ms；30 fps 预算 33 ms，余量约 17 ms；
+- `reproject` 仍是最大头（约 10.5 ms，占 67–72%），但已从 p95 接近 20 ms
+  降到 11–13 ms，延迟波动明显收敛；
+- 这两项都不改变算法参数：NEON 是同一套整数运算，异步重投影只是把两目的
+  独立工作并行执行。
+
+后续若要继续压低 `track()`，优先级应是 `reproject` 内部（候选点循环与临时
+对象）和 `pose_optimizer`（`SchurVINS::Backward`）的微优化，而不是解码。

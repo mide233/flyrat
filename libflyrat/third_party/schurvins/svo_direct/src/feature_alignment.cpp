@@ -11,7 +11,7 @@
 #ifdef __SSE2__
 # include <emmintrin.h>
 #endif
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
 # include <arm_neon.h>
 #endif
 
@@ -220,7 +220,7 @@ bool align2D(
     bool no_simd,
     std::vector<Eigen::Vector2f> *each_step)
 {
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
   if(!no_simd)
     return align2D_NEON(cur_img, ref_patch_with_border,
                         ref_patch, n_iter, cur_px_estimate);
@@ -626,7 +626,7 @@ bool align2D_NEON (const cv::Mat& cur_img,
     const float subpix_y = v-v_r;
     float b1=0, b2=0;
 
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
     const int SHIFT_BITS = 7;
     const uint16_t wTL = static_cast<uint16_t>((1.0f-subpix_x)*(1.0f-subpix_y)*(1<<SHIFT_BITS));
     const uint16_t wTR = static_cast<uint16_t>(subpix_x*(1.0f-subpix_y)*(1<<SHIFT_BITS));
@@ -871,7 +871,7 @@ bool alignPyr2D(
       uint8_t* it_ref = ref_patch;
       Eigen::Vector2f Jres; Jres.setZero();
 
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
       // initialize result to zero
       int32x4_t vb1 = vdupq_n_s32(0);
       int32x4_t vb2 = vdupq_n_s32(0);

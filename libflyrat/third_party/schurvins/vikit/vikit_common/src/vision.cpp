@@ -9,7 +9,7 @@
 
 #if __SSE2__
 # include <emmintrin.h>
-#elif __ARM_NEON__
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
 # include <arm_neon.h>
 #endif
 
@@ -44,7 +44,7 @@ void halfSampleSSE2(const unsigned char* in, unsigned char* out, int w, int h)
 }
 #endif 
 
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
 void halfSampleNEON( const cv::Mat& in, cv::Mat& out )
 {
   const int in_stride = in.step.p[0];
@@ -87,7 +87,7 @@ halfSample(const cv::Mat& in, cv::Mat& out)
   }
 #endif
 
-#ifdef __ARM_NEON__ 
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
   if( (in.cols % 16) == 0 )
   {
     halfSampleNEON(in, out);

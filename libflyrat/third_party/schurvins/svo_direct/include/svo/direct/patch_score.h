@@ -13,7 +13,7 @@
 #if __SSSE3__
 # include <tmmintrin.h>
 #endif
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
 # include <arm_neon.h>
 #endif
 
@@ -53,7 +53,7 @@ public:
   ZMSSD(uint8_t* ref_patch) :
     ref_patch_(ref_patch)
   {
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
     if(patch_size_ == 0)
     {
       uint16x8_t tpl_x8;
@@ -225,7 +225,7 @@ public:
     }
     else
 #endif
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
     if(patch_size_ == 8)
     {
       uint16x8_t img_x8, tpl_x8;
