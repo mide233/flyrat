@@ -56,9 +56,72 @@ else()
 endif()
 target_compile_options(flyrat PRIVATE -Wall -Wextra)
 
-# Odometry interface. The backend is a stub for now: it validates the camera
-# calibration and reports NOT_INITIALIZED so the ROS pipeline can be developed
-# independently of the estimator.
+# Odometry interface. With SchurVINS enabled this is a stereo-inertial VIO
+# backend; without it the stub validates the calibration and reports
+# NOT_INITIALIZED so the ROS pipeline can still be developed.
+#
+# SchurVINS is GPL-3.0. Linking it into flyrat_odometry makes the combined
+# binary subject to the GPL; libflyrat's own sources remain MIT.
+option(FLYRAT_WITH_SCHURVINS "Build the SchurVINS stereo-inertial odometry backend" ON)
+option(FLYRAT_SCHURVINS_VERBOSE "Enable the very chatty SVO debug traces" OFF)
+
+if(FLYRAT_WITH_SCHURVINS)
+  find_package(OpenCV QUIET COMPONENTS core imgproc highgui optflow video)
+  find_package(yaml-cpp QUIET)
+  find_package(glog QUIET)
+  find_package(gflags QUIET)
+  if(NOT OpenCV_FOUND OR NOT yaml-cpp_FOUND OR NOT glog_FOUND OR NOT gflags_FOUND)
+    message(FATAL_ERROR
+      "FLYRAT_WITH_SCHURVINS=ON needs OpenCV (core/imgproc/highgui/optflow/video), "
+      "yaml-cpp, glog and gflags. Install them or configure with "
+      "-DFLYRAT_WITH_SCHURVINS=OFF.")
+  endif()
+
+  set(SCHURVINS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/schurvins)
+  file(GLOB SCHURVINS_SOURCES
+    ${SCHURVINS_DIR}/svo/src/*.cpp
+    ${SCHURVINS_DIR}/svo_common/src/*.cpp
+    ${SCHURVINS_DIR}/svo_direct/src/*.cpp
+    ${SCHURVINS_DIR}/svo_img_align/src/sparse_img_align.cpp
+    ${SCHURVINS_DIR}/svo_img_align/src/sparse_img_align_base.cpp
+    ${SCHURVINS_DIR}/svo_tracker/src/*.cpp
+    ${SCHURVINS_DIR}/svo_vio_common/src/vio_common.cpp
+    ${SCHURVINS_DIR}/vikit/vikit_common/src/*.cpp
+    ${SCHURVINS_DIR}/vikit/vikit_cameras/src/*.cpp
+    ${SCHURVINS_DIR}/vikit/vikit_solver/src/*.cpp
+    ${SCHURVINS_DIR}/fast/src/fast_10.cpp
+    ${SCHURVINS_DIR}/fast/src/fast_10_score.cpp
+    ${SCHURVINS_DIR}/fast/src/nonmax_3x3.cpp
+    ${SCHURVINS_DIR}/fast/src/faster_corner_10_sse.cpp)
+
+  add_library(flyrat_schurvins STATIC ${SCHURVINS_SOURCES})
+  target_include_directories(flyrat_schurvins PUBLIC
+    $<BUILD_INTERFACE:${SCHURVINS_DIR}/svo/include>
+    $<BUILD_INTERFACE:${SCHURVINS_DIR}/svo_common/include>
+    $<BUILD_INTERFACE:${SCHURVINS_DIR}/svo_direct/include>
+    $<BUILD_INTERFACE:${SCHURVINS_DIR}/svo_img_align/include>
+    $<BUILD_INTERFACE:${SCHURVINS_DIR}/svo_tracker/include>
+    $<BUILD_INTERFACE:${SCHURVINS_DIR}/svo_vio_common/include>
+    $<BUILD_INTERFACE:${SCHURVINS_DIR}/vikit/vikit_common/include>
+    $<BUILD_INTERFACE:${SCHURVINS_DIR}/vikit/vikit_cameras/include>
+    $<BUILD_INTERFACE:${SCHURVINS_DIR}/vikit/vikit_solver/include>
+    $<BUILD_INTERFACE:${SCHURVINS_DIR}/rpg_common/include>
+    $<BUILD_INTERFACE:${SCHURVINS_DIR}/minkindr/include>
+    $<BUILD_INTERFACE:${SCHURVINS_DIR}/fast/include>
+    $<BUILD_INTERFACE:${OpenCV_INCLUDE_DIRS}>)
+  # USE_SCHUR_VINS selects the EKF/Schur-complement path in the SVO frontend.
+  # svo/global.h defines it for every translation unit; redefining it here
+  # would only add a warning.
+  # The vendored code predates modern warning hygiene; keep its warnings out of
+  # the flyrat build log.
+  target_compile_options(flyrat_schurvins PRIVATE -w)
+  if(FLYRAT_SCHURVINS_VERBOSE)
+    target_compile_definitions(flyrat_schurvins PRIVATE SVO_ENABLE_DEBUG_LOGGING)
+  endif()
+  target_link_libraries(flyrat_schurvins PUBLIC
+    ${OpenCV_LIBS} yaml-cpp glog::glog gflags Threads::Threads Eigen3::Eigen)
+endif()
+
 add_library(flyrat_odometry src/odometry/odometry.cpp)
 add_library(flyrat::odometry ALIAS flyrat_odometry)
 target_include_directories(flyrat_odometry PUBLIC
@@ -66,6 +129,13 @@ target_include_directories(flyrat_odometry PUBLIC
   $<INSTALL_INTERFACE:include>)
 target_link_libraries(flyrat_odometry PUBLIC Threads::Threads Eigen3::Eigen)
 target_compile_options(flyrat_odometry PRIVATE -Wall -Wextra)
+if(FLYRAT_WITH_SCHURVINS)
+  target_sources(flyrat_odometry PRIVATE
+    src/odometry/schurvins_backend.cpp)
+  target_compile_definitions(flyrat_odometry PRIVATE
+    FLYRAT_ODOMETRY_WITH_SCHURVINS)
+  target_link_libraries(flyrat_odometry PRIVATE flyrat_schurvins)
+endif()
 
 # ST VL53L5CX user-space driver (ULD). The output is trimmed to the blocks the
 # flight stack needs: distance, target status, target count and temperature.
@@ -122,6 +192,14 @@ install(TARGETS flyrat flyrat_odometry flyrat_hardware flyrat_msp_interact flyra
   EXPORT flyrat_targets
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib)
+if(FLYRAT_WITH_SCHURVINS)
+  install(TARGETS flyrat_schurvins
+    EXPORT flyrat_targets
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib)
+  install(FILES third_party/schurvins/LICENSE third_party/schurvins/README.md
+    DESTINATION share/doc/flyrat)
+endif()
 install(DIRECTORY include/ DESTINATION include)
 install(FILES third_party/vl53l5cx/LICENSE DESTINATION share/doc/flyrat)
 if(FLYRAT_STANDALONE)
@@ -207,5 +285,18 @@ if(FLYRAT_BUILD_TESTS)
   target_compile_options(test_odometry_api PRIVATE -Wall -Wextra)
   target_compile_definitions(test_odometry_api PRIVATE
     FLYRAT_TEST_CAMERA_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/configs/camera/uvc_640x480.yaml")
+  if(FLYRAT_WITH_SCHURVINS)
+    target_compile_definitions(test_odometry_api PRIVATE FLYRAT_TEST_SCHURVINS=1)
+  endif()
   add_test(NAME test_odometry_api COMMAND test_odometry_api)
+
+  if(FLYRAT_WITH_SCHURVINS)
+    add_executable(test_schurvins_integration tests/test_schurvins_integration.cpp)
+    target_link_libraries(test_schurvins_integration PRIVATE flyrat_odometry)
+    target_include_directories(test_schurvins_integration PRIVATE ${OpenCV_INCLUDE_DIRS})
+    target_compile_options(test_schurvins_integration PRIVATE -Wall -Wextra)
+    target_compile_definitions(test_schurvins_integration PRIVATE
+      FLYRAT_TEST_CAMERA_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/configs/camera/uvc_640x480.yaml")
+    add_test(NAME test_schurvins_integration COMMAND test_schurvins_integration)
+  endif()
 endif()

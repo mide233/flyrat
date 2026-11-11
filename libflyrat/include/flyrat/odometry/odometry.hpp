@@ -2,11 +2,11 @@
 //
 // Stereo / stereo-inertial odometry interface.
 //
-// The implementation is intentionally a stub: it validates the calibration
-// file and reports NOT_INITIALIZED so the ROS node, TF tree and sensor pipeline
-// can be exercised before the algorithm exists. Replace the body of
-// src/odometry/odometry.cpp with the real estimator; the interface below is
-// what the rest of the flight stack consumes.
+// The current backend is SchurVINS (stereo-inertial). A build without
+// FLYRAT_WITH_SCHURVINS keeps a stub that validates the calibration and
+// reports NOT_INITIALIZED so the ROS node, TF tree and sensor pipeline can
+// still be exercised. The interface below is what the rest of the flight
+// stack consumes.
 #pragma once
 
 #include <cstdint>
@@ -100,8 +100,8 @@ public:
     void reset();
     void shutdown();
 
-    // Writes a TUM trajectory. Not implemented until the backend produces
-    // poses; currently throws OdometryError.
+    // Writes a TUM trajectory (one pose per tracked frame). With SchurVINS
+    // disabled this throws OdometryError.
     void saveTrajectory(const std::string& path) const;
 
 private:

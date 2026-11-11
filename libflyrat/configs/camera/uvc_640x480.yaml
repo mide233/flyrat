@@ -1,8 +1,8 @@
 %YAML:1.0
 #
 # Camera + IMU calibration for the DECXIN side-by-side UVC module and the
-# Betaflight IMU. This file is algorithm-neutral: the future odometry backend
-# reads the intrinsics, stereo extrinsic and IMU noise model from here.
+# Betaflight IMU. This file is algorithm-neutral: the odometry backend reads the
+# intrinsics, stereo extrinsic and IMU noise model from here.
 #
 # The values come from a Kalibr stereo-inertial calibration of the development
 # vehicle. Recalibrate if the camera, lens or IMU mounting changes.

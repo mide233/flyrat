@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: MIT
 //
-// Stub stereo / stereo-inertial odometry backend.
+// Stereo / stereo-inertial odometry backend.
 //
-// TODO(odometry): replace the track() body with the real estimator. The node
-// already supplies synchronised grayscale stereo pairs and the IMU samples
-// between consecutive frames, so the backend only has to produce a
-// T_world_camera pose and a State transition.
+// When built with FLYRAT_WITH_SCHURVINS this forwards to the vendored
+// SchurVINS frontend (see schurvins_backend.cpp). Otherwise it keeps the
+// original scaffold behaviour: validate the calibration, report
+// NOT_INITIALIZED and reject trajectory output.
 #include "flyrat/odometry/odometry.hpp"
 
 #include <fstream>
 #include <utility>
+
+#ifdef FLYRAT_ODOMETRY_WITH_SCHURVINS
+#include "schurvins_backend.hpp"
+#endif
 
 namespace flyrat::odometry {
 
@@ -21,6 +25,9 @@ struct Odometry::Impl {
 
     Options options;
     bool shutdown = false;
+#ifdef FLYRAT_ODOMETRY_WITH_SCHURVINS
+    std::unique_ptr<SchurvinsBackend> backend;
+#endif
 };
 
 Odometry::Odometry(Options options)
@@ -34,6 +41,14 @@ Odometry::Odometry(Options options)
         throw OdometryError(
             "cannot open camera configuration: " + impl_->options.camera_config_path);
     }
+
+#ifdef FLYRAT_ODOMETRY_WITH_SCHURVINS
+    if (impl_->options.mode != Mode::kImuStereo) {
+        throw OdometryError("SchurVINS requires IMU-stereo mode");
+    }
+    impl_->backend =
+        std::make_unique<SchurvinsBackend>(impl_->options.camera_config_path);
+#endif
 }
 
 Odometry::~Odometry() = default;
@@ -47,7 +62,6 @@ Result Odometry::track(
 Result Odometry::track(const ImageView& left, const ImageView& right,
     double timestamp, const std::vector<ImuSample>& imu)
 {
-    (void)imu;
     if (impl_->shutdown) {
         throw OdometryError("odometry has been shut down");
     }
@@ -58,17 +72,24 @@ Result Odometry::track(const ImageView& left, const ImageView& right,
         throw OdometryError("left/right image size mismatch");
     }
 
-    // The stub never initialises, so the ROS node publishes NOT_INITIALIZED
-    // diagnostics instead of a bogus pose.
+#ifdef FLYRAT_ODOMETRY_WITH_SCHURVINS
+    return impl_->backend->track(left, right, timestamp, imu);
+#else
+    (void)imu;
+    // Without a backend there is nothing to initialise, so the ROS node
+    // publishes NOT_INITIALIZED diagnostics instead of a bogus pose.
     Result result;
     result.state = State::kNotInitialized;
     result.timestamp = timestamp;
     return result;
+#endif
 }
 
 void Odometry::reset()
 {
-    // TODO(odometry): clear the map, IMU state and trajectory here.
+#ifdef FLYRAT_ODOMETRY_WITH_SCHURVINS
+    impl_->backend->reset();
+#endif
 }
 
 void Odometry::shutdown()
@@ -78,8 +99,12 @@ void Odometry::shutdown()
 
 void Odometry::saveTrajectory(const std::string& path) const
 {
+#ifdef FLYRAT_ODOMETRY_WITH_SCHURVINS
+    impl_->backend->saveTrajectory(path);
+#else
     (void)path;
-    throw OdometryError("trajectory output is not implemented");
+    throw OdometryError("trajectory output requires a built odometry backend");
+#endif
 }
 
 } // namespace flyrat::odometry
