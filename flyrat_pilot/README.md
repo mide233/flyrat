@@ -41,6 +41,7 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 --camera-device DEV    V4L2 MJPEG 设备，默认 /dev/video10
 --width/--height N     左右拼接图尺寸，默认 1280x480
 --fps N                相机帧率，默认 25
+--decode MODE          MJPEG 解码器：cpu（默认）或 mpp
 --opencv-threads N    OpenCV 工作线程数，默认 2
 --slam-cpu N          把 SLAM 主线程绑定到 CPU N（默认不绑定）
 --warmup SEC          启动后丢弃相机帧的预热时间，默认 1.0
@@ -149,9 +150,18 @@ uint8  reserved[6]
 100 ms 的间隔，硬件解码平均 11.3 ms、p99 12.1 ms，进程 CPU 约 27%，
 而 CPU `cv::imdecode` 约 56%；输出与 OpenCV 平均差 0.01 LSB。
 
-当前机载 `flyrat_pilot` 默认仍使用 CPU `cv::imdecode`：硬件解码尚未接入
-pilot 主循环，也未验证与 SchurVINS 并发时的相机稳定性。数据、`decode_bench`
-用法和后续步骤见
+机载 `flyrat_pilot` 默认仍使用 CPU `cv::imdecode`；硬件解码需显式启用：
+
+```text
+flyrat_pilot --decode mpp ...
+```
+
+`--decode mpp` 已在完整 SchurVINS 进程中连续验证 6 次 600 帧（25/30 fps 各
+3 次）：无 UVC 停流、`camera_drops=0`、`decode_fallbacks=0`。25 fps 进程 CPU
+约 126–130%（CPU 解码约 135%），30 fps 约 136–140%（CPU 解码约 142%）；
+由于解码（约 11 ms）位于帧预算内、不在关键路径上，帧年龄基本不变。若 MPP
+初始化失败或连续 10 帧解码失败，pilot 会自动回退到 `cv::imdecode`，并在
+统计行累加 `decode_fallbacks`。数据、`decode_bench` 用法和后续步骤见
 [`docs/agent/odometry/mjpeg_decode_research.md`](../docs/agent/odometry/mjpeg_decode_research.md)。
 
 解码线程只消费 `StereoJpegSource::takeLatest()` 的最新 JPEG，不再在 V4L2 采集
@@ -164,6 +174,8 @@ RK3566（4 核 A55，2 GB），640x480/眼，静态近距桌面场景：
 | 30 fps，60 s | 1.5–2.0 核（135–200%） | 27–30 MB | 18–21 ms | 约 41 ms | 29.9 fps |
 | 30 fps，600 帧 | 约 1.85 核 | 28 MB | 约 33 ms | 约 52 ms | 28.5 fps |
 | 25 fps，582 帧（P0 优化后） | 约 1.3 核（133%） | 18–19 MB | 25–30 ms | 约 51 ms | 25.0 fps |
+| 25 fps，600 帧，`--decode mpp` | 约 1.28 核（126–130%） | 20–22 MB | 25–26 ms | 约 50 ms | 25.0 fps |
+| 30 fps，600 帧，`--decode mpp` | 约 1.38 核（136–140%） | 20–22 MB | 21–23 ms | 42–43 ms | 30.0 fps |
 | 25 fps，150 帧（优化前） | 约 1.3 核（133%） | 27 MB | 约 28 ms | 约 47 ms | 25.1 fps |
 | 20 fps，400 帧 | 约 1.6 核 | 22 MB | 约 35 ms | 约 57 ms | 19.7 fps |
 

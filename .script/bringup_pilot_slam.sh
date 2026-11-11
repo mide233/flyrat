@@ -9,7 +9,7 @@
 # cross the USB link, so the camera and IMU streams stay on the device.
 #
 # Usage:
-#   .script/bringup_pilot_slam.sh [start_foxglove:=true] [fps:=25] ...
+#   .script/bringup_pilot_slam.sh [start_foxglove:=true] [fps:=25] [decode:=mpp] ...
 #
 # Environment:
 #   ROS_DISTRO          ROS 2 distribution (default: jazzy)
@@ -36,6 +36,7 @@ IMU_CONFIG="${REPO_ROOT}/flyrat_play/ros2_ws/src/flyrat_sensors/config/imu_intri
 FPS=25
 MAX_FRAMES=0
 SLAM_CPU=-1
+DECODE=cpu
 STAMP_SOURCE=device
 TIME_OFFSET=0.0
 TRAJECTORY="/tmp/flyrat_pilot.tum"
@@ -54,6 +55,7 @@ for arg in "$@"; do
         fps:=*) FPS="${arg#fps:=}" ;;
         max_frames:=*) MAX_FRAMES="${arg#max_frames:=}" ;;
         slam_cpu:=*) SLAM_CPU="${arg#slam_cpu:=}" ;;
+        decode:=*) DECODE="${arg#decode:=}" ;;
         stamp_source:=*) STAMP_SOURCE="${arg#stamp_source:=}" ;;
         time_offset:=*) TIME_OFFSET="${arg#time_offset:=}" ;;
         trajectory:=*) TRAJECTORY="${arg#trajectory:=}" ;;
@@ -146,7 +148,7 @@ fi
 
 # Restart a stale device process. The binary path is longer than the 15-char
 # comm limit, so match the anchored command line instead of using pkill -x.
-echo "[bringup] starting onboard SchurVINS (${FPS} fps)"
+echo "[bringup] starting onboard SchurVINS (${FPS} fps, decode ${DECODE})"
 "${ADB[@]}" shell "pkill -f '^${DEVICE_BINARY}' 2>/dev/null; \
     exec ${DEVICE_BINARY} \
     --camera-config ${DEVICE_DIR}/camera.yaml \
@@ -156,6 +158,7 @@ echo "[bringup] starting onboard SchurVINS (${FPS} fps)"
     --fps ${FPS} \
     --max-frames ${MAX_FRAMES} \
     --slam-cpu ${SLAM_CPU} \
+    --decode ${DECODE} \
     --trajectory ${TRAJECTORY}" &
 
 echo "[bringup] host bridge on tcp:${LOCAL_PORT}"

@@ -151,8 +151,13 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   `MppJpegDecoder`（dlopen MPP、异步 put/get、NV12 Y 平面）和
   `flyrat_pilot/tools/decode_bench.cpp`。实机 25 fps 连续 60 s：1496 帧、
   0 错误、无超过 100 ms 的间隔；硬件解码平均 11.3 ms、p99 12.1 ms，进程
-  CPU 约 27%（CPU 解码约 56%），与 OpenCV 输出平均差 0.01 LSB。尚未接入
-  pilot 默认路径。
+  CPU 约 27%（CPU 解码约 56%），与 OpenCV 输出平均差 0.01 LSB。
+- P3 pilot 集成（2026-11-11）：`flyrat_pilot` 新增 `--decode cpu|mpp`，默认
+  `cpu`；MPP 路径用 `shared_ptr` 持有 Y 平面并按 `stride` 构造左右目视图，
+  连续 10 帧失败自动回退到 `cv::imdecode` 并累计 `decode_fallbacks`。
+  25/30 fps 各 3 次 600 帧验证：无 UVC 停流、`camera_drops=0`、
+  `decode_fallbacks=0`；25 fps CPU 约 126–130%（CPU 解码 135%），30 fps 约
+  136–140%（CPU 解码 142%），帧年龄基本不变。
 - SchurVINS 的初始化器原先固定使用 1–50 m 深度范围，已改为读取适配层的
   0.25–20 m 近场参数，解决实机近距桌面场景无法初始化的问题。
 - `SchurVINS::Prediction()` 原会对 `dt >= 15 ms` 直接 `CHECK` 退出；200 Hz

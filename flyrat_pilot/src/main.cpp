@@ -36,6 +36,7 @@
 
 #include <Eigen/Geometry>
 
+#include "flyrat/hardware/mpp_jpeg_decoder.hpp"
 #include "flyrat/hardware/serial_transport.hpp"
 #include "flyrat/hardware/stereo_jpeg_source.hpp"
 #include "flyrat/msp_interact.hpp"
@@ -72,6 +73,7 @@ struct Options {
     int width = 1280;
     int height = 480;
     int fps = 25;
+    std::string decode = "cpu";
     std::string pose_address = "127.0.0.1";
     int pose_port = 5001;
     std::string trajectory = "/tmp/flyrat_pilot.tum";
@@ -96,6 +98,7 @@ void printUsage(const char* program)
         << "  --width N              side-by-side width (default 1280)\n"
         << "  --height N             image height (default 480)\n"
         << "  --fps N                camera frame rate (default 25)\n"
+        << "  --decode MODE          MJPEG decoder: cpu (default) or mpp\n"
         << "  --pose-address ADDR    pose stream listen address\n"
         << "  --pose-port PORT       pose stream port (default 5001)\n"
         << "  --trajectory PATH      TUM output, empty disables\n"
@@ -135,6 +138,8 @@ Options parseOptions(int argc, char** argv)
             options.height = std::stoi(value("--height"));
         } else if (arg == "--fps") {
             options.fps = std::stoi(value("--fps"));
+        } else if (arg == "--decode") {
+            options.decode = value("--decode");
         } else if (arg == "--pose-address") {
             options.pose_address = value("--pose-address");
         } else if (arg == "--pose-port") {
@@ -167,6 +172,9 @@ Options parseOptions(int argc, char** argv)
     }
     if (options.fps <= 0 || options.pose_port <= 0 || options.pose_port > 65535) {
         throw std::runtime_error("invalid fps or pose port");
+    }
+    if (options.decode != "cpu" && options.decode != "mpp") {
+        throw std::runtime_error("decode must be 'cpu' or 'mpp'");
     }
     if (options.imu_lookahead < 0.0 || options.imu_lookahead > 0.1
         || options.imu_history <= 0.0) {
@@ -273,8 +281,10 @@ private:
 };
 
 struct FramePacket {
-    // The CPU decoder owns one full side-by-side image; left/right are views
-    // into it. Keeping the owner alive keeps those views valid in the queue.
+    // The MPP decoder owns the NV12/NV16 luma plane, the CPU fallback owns a
+    // cv::Mat. left/right are strided views into one of them; keeping the
+    // owner alive keeps those views valid in the queue.
+    std::shared_ptr<std::vector<std::uint8_t>> storage;
     cv::Mat owner;
     cv::Mat left;
     cv::Mat right;
@@ -446,6 +456,19 @@ int main(int argc, char** argv)
 
         FrameBuffer frame_buffer;
         std::atomic<std::uint64_t> decode_errors { 0 };
+        std::atomic<std::uint64_t> decode_fallbacks { 0 };
+        flyrat::hardware::MppJpegDecoder mpp_decoder;
+        std::atomic<bool> hardware_decode { false };
+        if (options.decode == "mpp") {
+            hardware_decode = mpp_decoder.start();
+            if (hardware_decode) {
+                std::cerr << "flyrat_pilot: MPP JPEG decode enabled\n";
+            } else {
+                std::cerr << "flyrat_pilot: MPP JPEG decode unavailable ("
+                          << mpp_decoder.lastError()
+                          << "), falling back to cv::imdecode\n";
+            }
+        }
         flyrat::hardware::StereoJpegConfig camera_config;
         camera_config.device = options.camera_device;
         camera_config.width = options.width;
@@ -459,6 +482,7 @@ int main(int argc, char** argv)
                 + std::chrono::duration_cast<Clock::duration>(
                       std::chrono::duration<double>(options.warmup_s));
             double last_stamp = -1.0;
+            int consecutive_failures = 0;
             while (!g_stop) {
                 auto frame = camera.takeLatest();
                 if (!frame) {
@@ -473,6 +497,41 @@ int main(int argc, char** argv)
                     continue;
                 }
                 last_stamp = stamp_s;
+
+                if (hardware_decode) {
+                    flyrat::hardware::DecodedJpeg decoded;
+                    if (mpp_decoder.decode(frame->jpeg.data(),
+                            frame->jpeg.size(), decoded)
+                        && decoded.width == options.width
+                        && decoded.height == options.height
+                        && decoded.stride >= decoded.width
+                        && decoded.luma.size()
+                            >= static_cast<std::size_t>(decoded.stride)
+                                * static_cast<std::size_t>(decoded.height)) {
+                        FramePacket packet;
+                        const int half = decoded.width / 2;
+                        packet.storage = std::make_shared<std::vector<std::uint8_t>>(
+                            std::move(decoded.luma));
+                        packet.left = cv::Mat(decoded.height, half, CV_8UC1,
+                            packet.storage->data(), decoded.stride);
+                        packet.right = cv::Mat(decoded.height, half, CV_8UC1,
+                            packet.storage->data() + half, decoded.stride);
+                        packet.stamp_s = stamp_s;
+                        packet.sequence = frame->sequence;
+                        frame_buffer.push(std::move(packet));
+                        consecutive_failures = 0;
+                        continue;
+                    }
+
+                    ++decode_fallbacks;
+                    ++consecutive_failures;
+                    if (consecutive_failures >= 10) {
+                        hardware_decode = false;
+                        std::cerr << "flyrat_pilot: MPP decode failed "
+                                  << consecutive_failures
+                                  << " frames in a row, using cv::imdecode\n";
+                    }
+                }
 
                 cv::Mat encoded(1, static_cast<int>(frame->jpeg.size()), CV_8UC1,
                     const_cast<std::uint8_t*>(frame->jpeg.data()));
@@ -503,7 +562,8 @@ int main(int argc, char** argv)
         std::cerr << "flyrat_pilot: SLAM started; pose stream on "
                   << options.pose_address << ":" << options.pose_port
                   << ", camera " << options.width << "x" << options.height
-                  << "@" << options.fps << " fps\n";
+                  << "@" << options.fps << " fps"
+                  << ", decode " << (hardware_decode ? "mpp" : "cpu") << "\n";
 
         double last_frame_s = -1.0;
         double last_pose_s = -1.0;
@@ -647,6 +707,7 @@ int main(int argc, char** argv)
                           << " skipped=" << skipped
                           << " imu=" << imu_buffer.size()
                           << " camera_drops=" << decode_errors.load()
+                          << " decode_fallbacks=" << decode_fallbacks.load()
                           << " cam_frames=" << camera_stats.frames
                           << " cam_running=" << camera_stats.running
                           << " cam_errors=" << camera_stats.errors
@@ -678,6 +739,7 @@ int main(int argc, char** argv)
         if (camera_thread.joinable()) {
             camera_thread.join();
         }
+        mpp_decoder.stop();
         msp.stop();
         pose_stream.stop();
         if (!options.trajectory.empty()) {

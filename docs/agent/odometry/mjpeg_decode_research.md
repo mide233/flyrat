@@ -75,17 +75,35 @@ RK3566（4 核 A55，2 GB），`/dev/video10`，1280x480@25 MJPEG：
 - 硬件解码把解码 CPU 从约 0.5 核降到约 0.2 核（进程 CPU 含采集线程）。
 
 需要注意：同步调用下每帧硬件解码延迟约 11–12 ms，与软件解码同量级，
-因此收益主要是 CPU 和功耗，而不是单帧延迟。GStreamer 管线可以重叠
-put/get，但完整 pilot 中会出现 UVC 停流；直接 MPP 路径暂未在 pilot 中
-复测。
+因此收益主要是 CPU 和功耗，而不是单帧延迟。
+
+## pilot 集成（P3）
+
+`flyrat_pilot` 新增 `--decode cpu|mpp`，默认仍为 `cpu`。`mpp` 模式下 Y 平面
+由 `shared_ptr` 持有，左右目按解码 `stride` 构造 `cv::Mat`；MPP 初始化失败
+或连续 10 帧解码失败时自动回退到 `cv::imdecode`，统计行会累加
+`decode_fallbacks`。
+
+完整 SchurVINS 进程，每组 600 帧：
+
+| 配置 | CPU | RSS | `track()` | 帧年龄 | 帧率 |
+|---|---:|---:|---:|---:|---:|
+| 25 fps，`--decode mpp` ×3 | 126–130% | 20–22 MB | 25–26 ms | 约 50 ms | 25.0 fps |
+| 25 fps，`--decode cpu` | 135% | 18–19 MB | 25.5 ms | 51.5 ms | 25.0 fps |
+| 30 fps，`--decode mpp` ×3 | 136–140% | 20–22 MB | 21–23 ms | 42–43 ms | 30.0 fps |
+| 30 fps，`--decode cpu` | 142% | 18–19 MB | 22.4 ms | 42.4 ms | 30.0 fps |
+
+6 次 `mpp` 运行均为 `camera_drops=0`、`decode_fallbacks=0`、
+`cam_errors=0`，未再出现 GStreamer 路径的 UVC 停流。按线程统计，解码线程
+从约 27–32% 降到 12–13%（另加 `mpp_dec_parser` 约 1.2%），即解码阶段节省
+约 0.15–0.20 核；整机 CPU 只下降约 4–7 个百分点，帧年龄基本不变，因为解码
+位于帧预算内、不在关键路径上。
 
 ## 后续
 
-1. 在 pilot 中增加 `--decode cpu|mpp`（默认 cpu），用 `shared_ptr` 持有
-   Y 平面并按 `stride` 构造左右目 `cv::Mat`，保留 CPU 回退。
-2. 验证与 SchurVINS 并发时相机是否稳定：至少 3 次 600 帧 25/30 fps，
-   记录 `cam_frames`、`camera_drops`、`track_ms`、`age_ms`。
-3. 若仍出现 UVC 停流，用 `usbmon`、`dmesg`、`perf` 抓停流瞬间，并评估
-   解码独立进程/共享内存或 MIPI CSI。
-4. 接入前保持 25 fps CPU 默认；需要降低延迟时优先使用
-   `stamp_source:=host`、bridge 立即发布和 10 ms lookahead。
+1. 保持 `--decode cpu` 为默认；`mpp` 作为已验证的可选路径，继续收集长时间
+   和高温下的稳定性数据，再决定是否切换默认。
+2. 若后续版本再次出现 UVC 停流，用 `usbmon`、`dmesg`、`perf` 抓停流瞬间，
+   并评估解码独立进程/共享内存或 MIPI CSI。
+3. 需要降低端到端延迟时，优先使用 `stamp_source:=host`、bridge 立即发布和
+   10 ms lookahead；硬件解码的收益主要在 CPU 和功耗。

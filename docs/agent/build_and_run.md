@@ -175,6 +175,10 @@ flyrat_pilot/build/flyrat_sensor_forwarder
   --imu-config flyrat_play/ros2_ws/src/flyrat_sensors/config/imu_intrinsics.yaml
 ```
 
+默认使用 CPU `cv::imdecode`。机载 RK3566 可加 `--decode mpp` 启用硬件
+解码（`MppJpegDecoder`，需 `librockchip_mpp.so`）；MPP 初始化失败或连续
+10 帧解码失败会自动回退到 CPU，并在统计行累加 `decode_fallbacks`。
+
 只校验标定、不打开硬件：
 
 ```sh
