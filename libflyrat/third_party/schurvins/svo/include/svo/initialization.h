@@ -78,6 +78,13 @@ struct InitializationOptions
   /// Reprojection threshold in pixels. The same as we also use in pose optimizer.
   double reproj_error_thresh = 2.0;
 
+  /// Depth range used by the stereo initializer. The upstream StereoInit
+  /// ignored the StereoTriangulationOptions supplied to the frame handler and
+  /// always used 1 m .. 50 m, which rejects close-range tabletop scenes.
+  double stereo_mean_depth_inv = 1.0 / 1.5;
+  double stereo_min_depth_inv = 1.0 / 20.0;
+  double stereo_max_depth_inv = 1.0 / 0.25;
+
 
   // TODO: what are these for? (introduced by Art)
   double expected_avg_depth = 1.0;

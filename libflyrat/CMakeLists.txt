@@ -26,35 +26,40 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Threads REQUIRED)
 
 # Eigen for the manifold maths, OSQP for the QP the MPC solves every cycle.
+# The pilot/SLAM runtime does not use the MPC, so it can disable this core and
+# avoid pulling OSQP into the cross build.
 find_package(Eigen3 REQUIRED NO_MODULE)
-find_package(osqp CONFIG QUIET)
-if(NOT osqp_FOUND)
-  # Fall back to a plain system install (libosqp-dev, Homebrew, or a build
-  # pointed at by OSQP_ROOT). Keeps libflyrat usable outside a ROS workspace.
-  find_path(FLYRAT_OSQP_INCLUDE_DIR osqp/osqp.h)
-  find_library(FLYRAT_OSQP_LIBRARY NAMES osqp)
-  if(NOT FLYRAT_OSQP_INCLUDE_DIR OR NOT FLYRAT_OSQP_LIBRARY)
-    message(FATAL_ERROR "OSQP not found: install libosqp-dev or set OSQP_ROOT")
+option(FLYRAT_BUILD_CORE "Build the attitude/MPC core (requires OSQP)" ON)
+if(FLYRAT_BUILD_CORE)
+  find_package(osqp CONFIG QUIET)
+  if(NOT osqp_FOUND)
+    # Fall back to a plain system install (libosqp-dev, Homebrew, or a build
+    # pointed at by OSQP_ROOT). Keeps libflyrat usable outside a ROS workspace.
+    find_path(FLYRAT_OSQP_INCLUDE_DIR osqp/osqp.h)
+    find_library(FLYRAT_OSQP_LIBRARY NAMES osqp)
+    if(NOT FLYRAT_OSQP_INCLUDE_DIR OR NOT FLYRAT_OSQP_LIBRARY)
+      message(FATAL_ERROR "OSQP not found: install libosqp-dev or set OSQP_ROOT")
+    endif()
   endif()
-endif()
 
-add_library(flyrat
-  src/attitude_hold.cpp
-  src/local_estimator.cpp
-  src/ommpc.cpp
-  src/rc_receiver.cpp)
-add_library(flyrat::flyrat ALIAS flyrat)
+  add_library(flyrat
+    src/attitude_hold.cpp
+    src/local_estimator.cpp
+    src/ommpc.cpp
+    src/rc_receiver.cpp)
+  add_library(flyrat::flyrat ALIAS flyrat)
 
-target_include_directories(flyrat PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
-if(osqp_FOUND)
-  target_link_libraries(flyrat PUBLIC Threads::Threads Eigen3::Eigen osqp::osqp)
-else()
-  target_include_directories(flyrat PUBLIC ${FLYRAT_OSQP_INCLUDE_DIR})
-  target_link_libraries(flyrat PUBLIC Threads::Threads Eigen3::Eigen ${FLYRAT_OSQP_LIBRARY})
+  target_include_directories(flyrat PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>)
+  if(osqp_FOUND)
+    target_link_libraries(flyrat PUBLIC Threads::Threads Eigen3::Eigen osqp::osqp)
+  else()
+    target_include_directories(flyrat PUBLIC ${FLYRAT_OSQP_INCLUDE_DIR})
+    target_link_libraries(flyrat PUBLIC Threads::Threads Eigen3::Eigen ${FLYRAT_OSQP_LIBRARY})
+  endif()
+  target_compile_options(flyrat PRIVATE -Wall -Wextra)
 endif()
-target_compile_options(flyrat PRIVATE -Wall -Wextra)
 
 # Odometry interface. With SchurVINS enabled this is a stereo-inertial VIO
 # backend; without it the stub validates the calibration and reports
@@ -66,14 +71,50 @@ option(FLYRAT_WITH_SCHURVINS "Build the SchurVINS stereo-inertial odometry backe
 option(FLYRAT_SCHURVINS_VERBOSE "Enable the very chatty SVO debug traces" OFF)
 
 if(FLYRAT_WITH_SCHURVINS)
-  find_package(OpenCV QUIET COMPONENTS core imgproc highgui optflow video)
-  find_package(yaml-cpp QUIET)
-  find_package(glog QUIET)
-  find_package(gflags QUIET)
-  if(NOT OpenCV_FOUND OR NOT yaml-cpp_FOUND OR NOT glog_FOUND OR NOT gflags_FOUND)
+  option(FLYRAT_STATIC_DEPS
+    "Use static OpenCV/glog/yaml-cpp from CMAKE_SYSROOT (cross builds)" OFF)
+  if(FLYRAT_STATIC_DEPS)
+    set(FLYRAT_STATIC_PREFIX "${CMAKE_SYSROOT}/usr/local" CACHE PATH
+      "Prefix of the minimal static OpenCV build")
+    set(_flyrat_libdir "${CMAKE_SYSROOT}/usr/lib/aarch64-linux-gnu")
+    set(OpenCV_DIR "${FLYRAT_STATIC_PREFIX}/lib/cmake/opencv4" CACHE PATH "" FORCE)
+    set(OpenCV_STATIC ON)
+    find_package(OpenCV CONFIG QUIET COMPONENTS
+      core imgproc imgcodecs highgui calib3d video)
+    if(NOT OpenCV_FOUND)
+      message(FATAL_ERROR
+        "Static OpenCV not found under ${FLYRAT_STATIC_PREFIX}. Build OpenCV "
+        "with BUILD_SHARED_LIBS=OFF and install it there.")
+    endif()
+
+    add_library(gflags STATIC IMPORTED GLOBAL)
+    set_target_properties(gflags PROPERTIES
+      IMPORTED_LOCATION "${_flyrat_libdir}/libgflags.a"
+      INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SYSROOT}/usr/include")
+    add_library(glog::glog STATIC IMPORTED GLOBAL)
+    set_target_properties(glog::glog PROPERTIES
+      IMPORTED_LOCATION "${_flyrat_libdir}/libglog.a"
+      INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SYSROOT}/usr/include"
+      INTERFACE_LINK_LIBRARIES gflags)
+    add_library(yaml-cpp STATIC IMPORTED GLOBAL)
+    set_target_properties(yaml-cpp PROPERTIES
+      IMPORTED_LOCATION "${_flyrat_libdir}/libyaml-cpp.a"
+      INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SYSROOT}/usr/include")
+    set(yaml-cpp_FOUND TRUE)
+    set(glog_FOUND TRUE)
+    # Visible to the parent project (flyrat_pilot) as well.
+    set(FLYRAT_OPENCV_INCLUDE_DIRS "${OpenCV_INCLUDE_DIRS}" CACHE INTERNAL "")
+    set(FLYRAT_OPENCV_LIBS "${OpenCV_LIBS}" CACHE INTERNAL "")
+  else()
+    find_package(OpenCV QUIET COMPONENTS
+      core imgproc imgcodecs highgui calib3d video)
+    find_package(yaml-cpp QUIET)
+    find_package(glog QUIET)
+  endif()
+  if(NOT OpenCV_FOUND OR NOT yaml-cpp_FOUND OR NOT glog_FOUND)
     message(FATAL_ERROR
-      "FLYRAT_WITH_SCHURVINS=ON needs OpenCV (core/imgproc/highgui/optflow/video), "
-      "yaml-cpp, glog and gflags. Install them or configure with "
+      "FLYRAT_WITH_SCHURVINS=ON needs OpenCV (core/imgproc/imgcodecs/highgui/video), "
+      "yaml-cpp and glog. Install them or configure with "
       "-DFLYRAT_WITH_SCHURVINS=OFF.")
   endif()
 
@@ -91,8 +132,11 @@ if(FLYRAT_WITH_SCHURVINS)
     ${SCHURVINS_DIR}/vikit/vikit_solver/src/*.cpp
     ${SCHURVINS_DIR}/fast/src/fast_10.cpp
     ${SCHURVINS_DIR}/fast/src/fast_10_score.cpp
-    ${SCHURVINS_DIR}/fast/src/nonmax_3x3.cpp
-    ${SCHURVINS_DIR}/fast/src/faster_corner_10_sse.cpp)
+    ${SCHURVINS_DIR}/fast/src/nonmax_3x3.cpp)
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i.86")
+    list(APPEND SCHURVINS_SOURCES
+      ${SCHURVINS_DIR}/fast/src/faster_corner_10_sse.cpp)
+  endif()
 
   add_library(flyrat_schurvins STATIC ${SCHURVINS_SOURCES})
   target_include_directories(flyrat_schurvins PUBLIC
@@ -119,7 +163,7 @@ if(FLYRAT_WITH_SCHURVINS)
     target_compile_definitions(flyrat_schurvins PRIVATE SVO_ENABLE_DEBUG_LOGGING)
   endif()
   target_link_libraries(flyrat_schurvins PUBLIC
-    ${OpenCV_LIBS} yaml-cpp glog::glog gflags Threads::Threads Eigen3::Eigen)
+    ${OpenCV_LIBS} yaml-cpp glog::glog Threads::Threads Eigen3::Eigen)
 endif()
 
 add_library(flyrat_odometry src/odometry/odometry.cpp)
@@ -188,7 +232,12 @@ target_compile_options(flyrat_msp_interact PRIVATE -Wall -Wextra)
 # protocol layer (not the other way around).
 target_link_libraries(flyrat_hardware PUBLIC flyrat_msp_interact)
 
-install(TARGETS flyrat flyrat_odometry flyrat_hardware flyrat_msp_interact flyrat_vl53l5cx
+set(FLYRAT_INSTALL_TARGETS
+  flyrat_odometry flyrat_hardware flyrat_msp_interact flyrat_vl53l5cx)
+if(FLYRAT_BUILD_CORE)
+  list(APPEND FLYRAT_INSTALL_TARGETS flyrat)
+endif()
+install(TARGETS ${FLYRAT_INSTALL_TARGETS}
   EXPORT flyrat_targets
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib)

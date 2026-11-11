@@ -1,53 +1,158 @@
 # flyrat_pilot
 
-实机端程序的骨架与传感器转发程序。
+实机端程序。包含两个可执行文件：
 
-- 不依赖 ROS，链接与仿真共用的 `libflyrat`。
-- 主飞行逻辑仍是占位 `main()`（MSP 指令下发、遥测、失效保护、算法接入尚未实现）。
-- `flyrat_sensor_forwarder` 已实现实机传感器转发，接入方法见
-  [`docs/agent/hardware/sensor_forwarding.md`](../docs/agent/hardware/sensor_forwarding.md)。
-- 项目整体进度与实测指标见
-  [`docs/agent/status/project_status.md`](../docs/agent/status/project_status.md)。
-- 所有组件的编译与运行方式见
-  [`docs/agent/build_and_run.md`](../docs/agent/build_and_run.md)。
+- `flyrat_pilot`：在设备本地解码双目 MJPEG、读取 MSP IMU，运行 SchurVINS
+  双目惯性里程计，并通过 TCP 把 `T_world_body` 位姿发给主机。
+- `flyrat_sensor_forwarder`：把原始 IMU、ToF 和双目 MJPEG 转发给主机 ROS 2，
+  用于录包和开发机算法验证。
 
-## 构建
+两者都不依赖 ROS。主机侧 `flyrat_pilot_bridge` 把位姿流转换成
+`nav_msgs/Odometry`、`nav_msgs/Path` 和 TF，供 Foxglove 查看。
+
+## 1. 本机构建与运行
 
 ```bash
-cmake -S flyrat_pilot -B flyrat_pilot/build -DCMAKE_BUILD_TYPE=Release
-cmake --build flyrat_pilot/build -j
-./flyrat_pilot/build/flyrat_pilot
+.script/build_flyrat_pilot.sh
 ```
 
-## 预留的接入点
+产物：
 
-- `flyrat::MspInteract`：异步 MSP v1 客户端，支持 TCP（SITL）与串口（实机）；
-  内部 I/O 线程按配置轮询姿态 / IMU / 状态 / 高度 / GPS，专用分发线程执行回调，
-  同时提供每类数据的最新快照。断线自动重连，运行期错误通过 `LinkStats` 与
-  link 回调返回；`send_rc()` 只写单槽邮箱，不等待 ACK。
-- `flyrat::hardware::TofArray`：4 颗 VL53L5CX 共用 i2c2 的用户态驱动。
-  默认 4x4@60 Hz、只保留 distance/target_status/nb_target（128 B/帧），
-  地址硬编码为 `0x60/0x62/0x64/0x66`，不再单独配置；LPn 默认
-  `108/114/101/98`，INT 默认 `107/104/100/97`（下/后/左/右）。
-  每次启动逐颗释放 LPn，自动探测传感器残留的旧地址并改回固定地址；
-  四颗从启动到监听约 7.2 秒。
-- `flyrat::hardware::Imu`：读取 `MspInteract` 的 IMU 最新快照，可带最大年龄检查。
-- `flyrat::hardware::StereoCamera`：UVC 双目相机 V4L2 采集，按左右拼接帧拆成两个
-  同时间戳的视图。`StereoFormat::kYuyv` 为原始 YUYV（默认 `1280x480@15`，左右各
-  640x480）；`StereoFormat::kMjpeg` 使用 Rockchip MPP 硬解，推荐 `1280x480@60`
-  （左右各 640x480）或 `640x240@60`。MJPEG 的 `grayscale=true` 输出左右 GRAY8，
-  `grayscale=false` 输出左右 NV12 彩色（Y 平面后接 UV 平面）。MJPEG 解码通过运行时
-  `dlopen` 加载 GStreamer，需要目标端有 `mppjpegdec`，因此使用该模式的程序需动态链接。
-- `flyrat::hardware::Transport` / `make_serial_transport()` / `make_tcp_transport()`：
-  MSP 使用的字节流后端，单测可注入假传输。
-- `flyrat::RcReceiver`：UDP 9004 虚拟接收机（仅仿真用）。
-- `flyrat::Autopilot` / `flyrat::AttitudeHold`：姿态保持实现。
-- `flyrat::Ommpc`：on-manifold MPC（9 维误差状态 + 4 维输入，LTV + OSQP，默认
-  20 × 10 ms 前瞻），另有 `flyrat::ThrustModel` / `flyrat::RcMapping` 做执行器建模。
-- 位置环在实机上接 VSLAM：按 ENU、`frame_id=map` 提供位置与速度即可，仿真里
-  这一路是 Gazebo 真值，语义完全一致。
-- 建议的线程模型：固定频率的指令发送线程 + 独立的遥测/算法线程，二者不共享 MSP socket 的阻塞路径
-  （仿真侧 `msp_node` 就是这么做的，可直接参考）。
+```text
+flyrat_pilot/build/flyrat_pilot
+flyrat_pilot/build/flyrat_sensor_forwarder
+```
 
-`flyrat_pilot/CMakeLists.txt` 已经链接 `flyrat::flyrat`、`flyrat::flyrat_msp_interact`
-和 `flyrat::flyrat_hardware`，添加源文件即可开始实现。
+在开发机上做配置自检（不打开相机和串口）：
+
+```bash
+./flyrat_pilot/build/flyrat_pilot --check-config \
+  --camera-config libflyrat/configs/camera/uvc_640x480.yaml \
+  --imu-config flyrat_play/ros2_ws/src/flyrat_sensors/config/imu_intrinsics.yaml
+```
+
+主要参数：
+
+```text
+--camera-config PATH   双目/IMU 标定 YAML
+--imu-config PATH      IMU scale/misalignment YAML
+--msp-device DEV       飞控串口，默认 /dev/ttyS3
+--msp-baud N           默认 921600
+--camera-device DEV    V4L2 MJPEG 设备，默认 /dev/video10
+--width/--height N     左右拼接图尺寸，默认 1280x480
+--fps N                相机帧率，默认 30
+--pose-address ADDR    位姿流监听地址，默认 127.0.0.1
+--pose-port PORT       位姿流端口，默认 5001
+--trajectory PATH      TUM 轨迹，空字符串关闭
+--imu-lookahead SEC    每帧之后的 IMU 样本，默认 0.015
+--imu-history SEC      首帧 IMU 历史，默认 0.1
+--max-frames N         处理 N 帧后退出，0 表示一直运行
+--check-config         只校验配置并退出
+```
+
+运行中发送 `SIGUSR1` 会重建 SchurVINS 前端（等价于一次 reset），`SIGINT`
+或 `SIGTERM` 会停止采集、关闭位姿服务并保存轨迹。
+
+## 2. 交叉编译到泰山派
+
+设备是 RK3566 + Buildroot，没有 OpenCV/glog/yaml-cpp。先准备带最小静态
+OpenCV 的 aarch64 sysroot，再执行：
+
+```bash
+.script/build_pilot_arm.sh
+```
+
+产物是 `build-arm/flyrat_pilot`，只依赖 `libc`、`libm` 和动态加载器。
+脚本默认使用 `/opt/sysroots/arm64`，可用 `FLYRAT_SYSROOT` 覆盖；默认
+`JOBS=4`，避免在内存较小的构建机上触发 OOM。
+
+最小静态 OpenCV 的构建方法见
+[`docs/agent/build_and_run.md`](../docs/agent/build_and_run.md) 的
+“机载 SLAM”。
+
+传感器转发仍然用：
+
+```bash
+.script/build_sensor_forwarder_arm.sh
+```
+
+## 3. 机载 SLAM 与位姿回传
+
+一条命令完成推送、adb forward、设备端 SLAM、主机 bridge 和可选 Foxglove：
+
+```bash
+.script/bringup_pilot_slam.sh start_foxglove:=true
+```
+
+只启动指定帧率，不启动 Foxglove：
+
+```bash
+.script/bringup_pilot_slam.sh fps:=30 max_frames:=0
+```
+
+脚本会：
+
+1. 把 `build-arm/flyrat_pilot`、相机标定和 IMU 标定推到设备 `/tmp/flyrat`；
+2. 建立 `adb forward tcp:5001 tcp:5001`；
+3. 在设备上启动 `/tmp/flyrat_pilot`；
+4. 在主机启动 `ros2 launch flyrat_pilot_bridge pilot_bridge.launch.py`；
+5. 退出时停止设备进程并移除 adb forward。
+
+主机话题：
+
+```text
+/flyrat/odometry/odometry   nav_msgs/Odometry，odometry_map -> imu_link
+/flyrat/odometry/path       nav_msgs/Path
+/flyrat/odometry/status     diagnostic_msgs/DiagnosticStatus，1 Hz
+```
+
+静态 TF 为 `imu_link -> camera_left_optical_frame` 和
+`camera_left_optical_frame -> camera_right_optical_frame`，动态 TF 为
+`odometry_map -> imu_link`。
+
+手动运行主机 bridge：
+
+```bash
+adb forward tcp:5001 tcp:5001
+ros2 launch flyrat_pilot_bridge pilot_bridge.launch.py \
+  camera_config_path:=$PWD/libflyrat/configs/camera/uvc_640x480.yaml
+```
+
+## 4. 位姿协议
+
+设备只回传 64 字节 `PosePayload`，外层复用
+`libflyrat/include/flyrat/sensors/protocol.hpp` 的 28 字节帧头：
+
+```text
+uint8  type = 6 (kPose)
+double position[3]       T_world_body 平移，米
+double orientation[4]    x, y, z, w
+uint8  valid
+uint8  state             0..3，对应 odometry::State
+uint8  reserved[6]
+```
+
+`device_time_ns` 是 Unix epoch 纳秒。位姿语义是左目相机外参换算后的
+`T_world_body`，body 为 `imu_link`（FLU）；world 原点在首次初始化位置。
+服务只保留最新位姿，主机断线重连不会补发历史帧。
+
+## 5. 设备实测与限制
+
+- RK3566、2 GB 内存：30 fps、640x480/眼时进程 RSS 约 90 MB，可持续运行。
+- 静态近距桌面场景能完成初始化并输出位姿；长时间完全静止时跟踪质量会下降，
+  状态可能进入 `RECENTLY_LOST`，轻微移动后恢复。
+- 只在桌面短时场景验证，尚未做飞行、长距离和长期漂移验证。
+- 左目约 55.7 Hz、右目 60 Hz，左目有约 8% 丢帧且画面更模糊、更亮。
+- SchurVINS 为 **GPL-3.0**，`flyrat_pilot` 链接后组合二进制受 GPL 约束；
+  libflyrat 自身源文件仍为 MIT。
+
+## 6. 预留的飞控接入点
+
+- `flyrat::MspInteract`：MSP v1 异步客户端，串口/TCP、轮询、重连和最新快照。
+- `flyrat::hardware::TofArray`：4 颗 VL53L5CX，4x4@60 Hz。
+- `flyrat::hardware::Imu`：MSP IMU 快照。
+- `flyrat::hardware::StereoCamera` / `StereoJpegSource`：UVC 双目采集。
+- `flyrat::RcReceiver`：UDP 9004 虚拟接收机（仿真）。
+- `flyrat::Autopilot` / `AttitudeHold` / `Ommpc`：姿态与位置控制。
+- 建议的线程模型：固定频率指令发送线程 + 独立的遥测/算法线程，二者不共享
+  MSP socket 的阻塞路径。

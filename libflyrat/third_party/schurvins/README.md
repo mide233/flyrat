@@ -34,6 +34,17 @@ Only the libraries needed by `svo::FrameHandlerStereo` are kept: `svo`,
 4. `svo/src/frame_handler_base.cpp`: the "updated seeds are unconverged"
    warning is throttled to once per 100 reports. It is expected on close-range
    or low-parallax sequences and was otherwise printed for every keyframe.
+5. `svo/include/svo/initialization.h` and `svo/src/initialization.cpp`:
+   `StereoInit` now honours near-field depth limits through new
+   `InitializationOptions::stereo_{mean,min,max}_depth_inv` fields. Upstream
+   always used `StereoTriangulationOptions` defaults (1-50 m), which made
+   close-range desk scenes fail with "Not enough triangulated points".
+6. `svo/src/schur_vins.cpp`: removed the unused `opencv2/optflow.hpp` include;
+   it belongs to opencv_contrib and is not needed by the filter.
+7. `svo_direct/src/feature_detection_utils.cpp`: fixed the non-SSE FAST
+   fallback to index `img_pyr[level]` instead of the undefined `img_pyr[L]`.
+8. `fast/src/faster_corner_10_sse.cpp` is only compiled on x86; the file is
+   x86 SSE code and cannot be built for the aarch64 target.
 
 The adapter that parses the flyrat calibration and drives the frontend lives in
 `libflyrat/src/odometry/schurvins_backend.cpp`.

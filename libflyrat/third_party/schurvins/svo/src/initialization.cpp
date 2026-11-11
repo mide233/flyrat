@@ -426,6 +426,9 @@ StereoInit::StereoInit(
   : AbstractInitialization(init_options, tracker_options, detector_options, cams)
 {
   StereoTriangulationOptions stereo_options;
+  stereo_options.mean_depth_inv = init_options.stereo_mean_depth_inv;
+  stereo_options.min_depth_inv = init_options.stereo_min_depth_inv;
+  stereo_options.max_depth_inv = init_options.stereo_max_depth_inv;
   detector_ = feature_detection_utils::makeDetector(detector_options, cams->getCameraShared(0));
   stereo_.reset(new StereoTriangulation(stereo_options, detector_));
 }
