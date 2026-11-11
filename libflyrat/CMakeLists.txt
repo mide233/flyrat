@@ -200,7 +200,7 @@ target_include_directories(flyrat_vl53l5cx PUBLIC
 # Hardware access lives in its own target so the protocol layer can depend on
 # the header-only Transport interface without pulling in a particular backend.
 add_library(flyrat_hardware
-  src/hardware/mjpeg_decoder.cpp
+  src/hardware/mpp_jpeg_decoder.cpp
   src/hardware/serial_transport.cpp
   src/hardware/stereo_camera.cpp
   src/hardware/stereo_jpeg_source.cpp

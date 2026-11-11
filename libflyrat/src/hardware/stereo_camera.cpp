@@ -9,8 +9,6 @@
 #include <thread>
 #include <utility>
 
-#include "mjpeg_decoder.hpp"
-
 #include <fcntl.h>
 #include <linux/videodev2.h>
 #include <poll.h>
@@ -57,7 +55,6 @@ struct StereoCamera::Impl {
     StereoConfig config;
     int fd = -1;
     std::vector<Buffer> buffers;
-    std::unique_ptr<detail::MjpegDecoder> mjpeg;
     std::uint32_t source_stride = 0;
     std::atomic<int> actual_width { 0 };
     std::atomic<int> actual_height { 0 };
@@ -71,15 +68,12 @@ struct StereoCamera::Impl {
     std::atomic<std::uint64_t> frames { 0 };
     std::atomic<std::uint64_t> dropped { 0 };
     std::atomic<std::uint64_t> errors { 0 };
-    std::atomic<std::uint64_t> decoder_errors { 0 };
-    std::atomic<std::uint64_t> decoder_restarts { 0 };
     std::atomic<std::int64_t> first_stamp_us { -1 };
     std::atomic<std::int64_t> last_stamp_us { 0 };
     bool have_sequence = false;
     std::uint32_t last_sequence = 0;
     std::string last_error;
     std::chrono::steady_clock::time_point started_at;
-    std::optional<std::chrono::steady_clock::time_point> pts_origin;
 
     void open_device()
     {
@@ -169,27 +163,8 @@ struct StereoCamera::Impl {
         }
     }
 
-    void open_mjpeg()
-    {
-        detail::MjpegConfig decoder_config;
-        decoder_config.device = config.device;
-        decoder_config.width = config.width;
-        decoder_config.height = config.height;
-        decoder_config.fps = config.fps;
-        decoder_config.color = !config.grayscale;
-        mjpeg = std::make_unique<detail::MjpegDecoder>(std::move(decoder_config));
-        mjpeg->start();
-        actual_width = config.width;
-        actual_height = config.height;
-        source_stride = static_cast<std::uint32_t>(config.width);
-    }
-
     void close_device()
     {
-        if (mjpeg) {
-            mjpeg->stop();
-            mjpeg.reset();
-        }
         if (fd >= 0) {
             v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
             (void)xioctl(fd, VIDIOC_STREAMOFF, &type);
@@ -207,7 +182,6 @@ struct StereoCamera::Impl {
         actual_width = 0;
         actual_height = 0;
         source_stride = 0;
-        pts_origin.reset();
     }
 
     void fail(const std::string& message)
@@ -264,71 +238,6 @@ struct StereoCamera::Impl {
                 std::memcpy(left, row, eye_yuyv_bytes);
                 std::memcpy(right, row + eye_yuyv_bytes, eye_yuyv_bytes);
             }
-        }
-        return frame;
-    }
-
-    StereoFrame make_mjpeg_frame(const detail::MjpegFrame& source) const
-    {
-        const int eye_width = source.width / 2;
-        if (source.width <= 0 || source.height <= 0 || source.aligned_height < source.height ||
-            (source.aligned_height % 2) != 0) {
-            throw StereoError("invalid MJPEG frame dimensions");
-        }
-        const std::size_t y_plane = static_cast<std::size_t>(source.width) *
-            static_cast<std::size_t>(source.aligned_height);
-        const std::size_t expected = source.color
-            ? y_plane + y_plane / 2U
-            : static_cast<std::size_t>(source.width) * static_cast<std::size_t>(source.height);
-        if (source.data.size() != expected) {
-            throw StereoError("invalid MJPEG frame buffer size");
-        }
-
-        StereoFrame frame;
-        frame.width = eye_width;
-        frame.height = source.height;
-        frame.format = source.color ? StereoPixelFormat::kNv12
-                                    : StereoPixelFormat::kGray8;
-        frame.stride = eye_width;
-
-        if (!source.color) {
-            frame.left.resize(static_cast<std::size_t>(eye_width) * source.height);
-            frame.right.resize(static_cast<std::size_t>(eye_width) * source.height);
-            for (int y = 0; y < source.height; ++y) {
-                const std::uint8_t* row = source.data.data() +
-                    static_cast<std::size_t>(y) * source.width;
-                std::memcpy(frame.left.data() + static_cast<std::size_t>(y) * eye_width,
-                    row, static_cast<std::size_t>(eye_width));
-                std::memcpy(frame.right.data() + static_cast<std::size_t>(y) * eye_width,
-                    row + eye_width, static_cast<std::size_t>(eye_width));
-            }
-            return frame;
-        }
-
-        const std::size_t eye_y_plane = static_cast<std::size_t>(eye_width) * source.height;
-        const std::size_t eye_size = eye_y_plane + eye_y_plane / 2U;
-        frame.left.resize(eye_size);
-        frame.right.resize(eye_size);
-        for (int y = 0; y < source.height; ++y) {
-            const std::uint8_t* row = source.data.data() +
-                static_cast<std::size_t>(y) * source.width;
-            std::memcpy(frame.left.data() + static_cast<std::size_t>(y) * eye_width,
-                row, static_cast<std::size_t>(eye_width));
-            std::memcpy(frame.right.data() + static_cast<std::size_t>(y) * eye_width,
-                row + eye_width, static_cast<std::size_t>(eye_width));
-        }
-
-        // NV12 UV rows are interleaved and cover two source luma rows. A
-        // full-width UV row splits into one UV row for each eye.
-        const std::uint8_t* uv = source.data.data() + y_plane;
-        for (int y = 0; y < source.height / 2; ++y) {
-            const std::uint8_t* row = uv + static_cast<std::size_t>(y) * source.width;
-            std::memcpy(frame.left.data() + eye_y_plane +
-                    static_cast<std::size_t>(y) * eye_width,
-                row, static_cast<std::size_t>(eye_width));
-            std::memcpy(frame.right.data() + eye_y_plane +
-                    static_cast<std::size_t>(y) * eye_width,
-                row + eye_width, static_cast<std::size_t>(eye_width));
         }
         return frame;
     }
@@ -423,45 +332,6 @@ struct StereoCamera::Impl {
         }
     }
 
-    void capture_mjpeg_loop()
-    {
-        while (running) {
-            if (!mjpeg) {
-                fail("MJPEG decoder is not initialised");
-                break;
-            }
-
-            detail::MjpegFrame source;
-            const detail::MjpegReadStatus status = mjpeg->read(source);
-            if (status == detail::MjpegReadStatus::kTimeout) {
-                continue;
-            }
-            if (status == detail::MjpegReadStatus::kEos) {
-                ++decoder_errors;
-                fail("MJPEG decoder reached end of stream");
-                break;
-            }
-            if (status != detail::MjpegReadStatus::kFrame) {
-                ++decoder_errors;
-                fail("MJPEG decoder returned an invalid frame");
-                break;
-            }
-
-            try {
-                auto stamp = source.stamp;
-                if (source.pts_ns != 0 && source.pts_ns != UINT64_MAX) {
-                    if (!pts_origin) {
-                        pts_origin = std::chrono::steady_clock::now()
-                            - std::chrono::nanoseconds(source.pts_ns);
-                    }
-                    stamp = *pts_origin + std::chrono::nanoseconds(source.pts_ns);
-                }
-                publish(make_mjpeg_frame(source), source.sequence, stamp);
-            } catch (const std::exception&) {
-                ++errors;
-            }
-        }
-    }
 };
 
 StereoCamera::StereoCamera(StereoConfig config)
@@ -490,8 +360,6 @@ void StereoCamera::start()
     impl_->frames = 0;
     impl_->dropped = 0;
     impl_->errors = 0;
-    impl_->decoder_errors = 0;
-    impl_->decoder_restarts = 0;
     impl_->first_stamp_us = -1;
     impl_->last_stamp_us = 0;
     impl_->have_sequence = false;
@@ -503,11 +371,7 @@ void StereoCamera::start()
     }
 
     try {
-        if (impl_->config.format == StereoFormat::kMjpeg) {
-            impl_->open_mjpeg();
-        } else {
-            impl_->open_device();
-        }
+        impl_->open_device();
     } catch (...) {
         impl_->close_device();
         throw;
@@ -516,13 +380,7 @@ void StereoCamera::start()
     impl_->started_at = std::chrono::steady_clock::now();
     impl_->running = true;
     try {
-        impl_->thread = std::thread([this] {
-            if (impl_->config.format == StereoFormat::kMjpeg) {
-                impl_->capture_mjpeg_loop();
-            } else {
-                impl_->capture_v4l2_loop();
-            }
-        });
+        impl_->thread = std::thread([this] { impl_->capture_v4l2_loop(); });
     } catch (...) {
         impl_->running = false;
         impl_->close_device();
@@ -567,8 +425,6 @@ StereoStats StereoCamera::stats() const
     result.frames = impl_->frames;
     result.dropped = impl_->dropped;
     result.errors = impl_->errors;
-    result.decoder_errors = impl_->decoder_errors;
-    result.decoder_restarts = impl_->decoder_restarts;
     result.width = impl_->actual_width / 2;
     result.height = impl_->actual_height;
     result.running = impl_->running;

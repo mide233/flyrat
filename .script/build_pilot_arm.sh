@@ -70,4 +70,7 @@ cmake --build "${CMAKE_DIR}" -j "${JOBS}"
 
 cp "${CMAKE_DIR}/flyrat_pilot" "${BUILD_DIR}/flyrat_pilot"
 aarch64-linux-gnu-strip "${BUILD_DIR}/flyrat_pilot" 2>/dev/null || true
+cp "${CMAKE_DIR}/decode_bench" "${BUILD_DIR}/decode_bench"
+aarch64-linux-gnu-strip "${BUILD_DIR}/decode_bench" 2>/dev/null || true
 echo "[cross] binary: ${BUILD_DIR}/flyrat_pilot"
+echo "[cross] helper: ${BUILD_DIR}/decode_bench"

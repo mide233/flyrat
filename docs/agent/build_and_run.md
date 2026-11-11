@@ -129,15 +129,28 @@ ctest --test-dir libflyrat/build --output-on-failure
 可选 `--interrupts`、`--lpn`、`--int`、`--poll-ms`。ToF 地址固定为
 `0x60/0x62/0x64/0x66`，不支持通过参数修改。
 
-`stereo_bench`：双目相机采集。
+`stereo_bench`：YUYV 双目相机采集。
 
 ```sh
 ./libflyrat/build/stereo_bench --device /dev/video10 \
-  --width 1280 --height 480 --fps 60 --seconds 5 --mjpeg
+  --width 1280 --height 480 --fps 30 --seconds 5
 ```
 
-`--gray` 输出 GRAY8，`--mjpeg` 使用 MPP 硬解，`--save-nv12` 保存原始 NV12，
-`--save DIR` 保存左右图。
+`--gray` 输出 GRAY8，`--save DIR` 保存左右图。MJPEG 采集和解码分别由
+`StereoJpegSource` 与 `MppJpegDecoder` 负责。
+
+`decode_bench`：MJPEG 硬件解码连续运行验收，只使用实时相机，交叉编译时由
+`.script/build_pilot_arm.sh` 一并生成到 `build-arm/decode_bench`。
+
+```sh
+adb push build-arm/decode_bench /tmp/
+adb shell '/tmp/decode_bench --camera /dev/video10 --mode both --seconds 60'
+```
+
+`--mode mpp|cpu|both` 选择硬件、软件或两者同时解码；`--verify-every N`
+每 N 帧用 OpenCV 对比一次 Y 平面。输出包含帧率、超过 100 ms 的间隔、
+平均/p99/最大解码耗时、进程 CPU、MPP 格式与 info-change 次数，最后给出
+`PASS`/`FAIL`。
 
 ## 4. flyrat_pilot 与传感器转发
 

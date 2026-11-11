@@ -28,15 +28,13 @@ struct Options {
     int fps = 15;
     int seconds = 5;
     bool grayscale = false;
-    bool mjpeg = false;
-    bool save_nv12 = false;
 };
 
 void usage()
 {
     std::printf("usage: stereo_bench [--device /dev/video10] [--width 1280] "
-                "[--height 480] [--fps 15] [--seconds 5] [--gray] [--mjpeg] "
-                "[--save-nv12] [--save /tmp/stereo]\n");
+                "[--height 480] [--fps 15] [--seconds 5] [--gray] "
+                "[--save /tmp/stereo]\n");
 }
 
 const char* format_name(flyrat::hardware::StereoPixelFormat format)
@@ -46,8 +44,6 @@ const char* format_name(flyrat::hardware::StereoPixelFormat format)
         return "yuyv";
     case flyrat::hardware::StereoPixelFormat::kGray8:
         return "gray8";
-    case flyrat::hardware::StereoPixelFormat::kNv12:
-        return "nv12";
     }
     return "unknown";
 }
@@ -78,9 +74,6 @@ bool write_pgm(const std::string& path, const flyrat::hardware::StereoFrame& fra
         one_eye.left.assign(data, data + frame.stride * frame.height);
         gray = yuyv_to_gray(one_eye);
         data = gray.data();
-    } else if (frame.format == flyrat::hardware::StereoPixelFormat::kNv12) {
-        // The Y plane is the first width * height bytes.
-        data = left ? frame.left.data() : frame.right.data();
     }
 
     std::ofstream out(path, std::ios::binary);
@@ -90,17 +83,6 @@ bool write_pgm(const std::string& path, const flyrat::hardware::StereoFrame& fra
     out << "P5\n" << frame.width << ' ' << frame.height << "\n255\n";
     out.write(reinterpret_cast<const char*>(data),
         static_cast<std::streamsize>(frame.width) * frame.height);
-    return out.good();
-}
-
-bool write_raw(const std::string& path, const std::vector<std::uint8_t>& data)
-{
-    std::ofstream out(path, std::ios::binary);
-    if (!out) {
-        return false;
-    }
-    out.write(reinterpret_cast<const char*>(data.data()),
-        static_cast<std::streamsize>(data.size()));
     return out.good();
 }
 
@@ -132,10 +114,6 @@ int main(int argc, char** argv)
             options.save_prefix = next("--save");
         } else if (arg == "--gray") {
             options.grayscale = true;
-        } else if (arg == "--mjpeg") {
-            options.mjpeg = true;
-        } else if (arg == "--save-nv12") {
-            options.save_nv12 = true;
         } else if (arg == "--help" || arg == "-h") {
             usage();
             return 0;
@@ -153,8 +131,6 @@ int main(int argc, char** argv)
 
     flyrat::hardware::StereoConfig config;
     config.device = options.device;
-    config.format = options.mjpeg ? flyrat::hardware::StereoFormat::kMjpeg
-                                  : flyrat::hardware::StereoFormat::kYuyv;
     config.width = options.width;
     config.height = options.height;
     config.fps = options.fps;
@@ -168,17 +144,13 @@ int main(int argc, char** argv)
         const auto frame = camera.latest();
         camera.stop();
 
-        std::printf("device=%s source=%s mode=%dx%d@%d eye=%dx%d\n",
-            options.device.c_str(), options.mjpeg ? "mjpeg" : "yuyv",
-            options.width, options.height, options.fps,
+        std::printf("device=%s source=yuyv mode=%dx%d@%d eye=%dx%d\n",
+            options.device.c_str(), options.width, options.height, options.fps,
             stats.width, stats.height);
-        std::printf("frames=%llu dropped=%llu errors=%llu decoder_errors=%llu "
-                    "decoder_restarts=%llu fps=%.2f\n",
+        std::printf("frames=%llu dropped=%llu errors=%llu fps=%.2f\n",
             static_cast<unsigned long long>(stats.frames),
             static_cast<unsigned long long>(stats.dropped),
-            static_cast<unsigned long long>(stats.errors),
-            static_cast<unsigned long long>(stats.decoder_errors),
-            static_cast<unsigned long long>(stats.decoder_restarts), stats.fps);
+            static_cast<unsigned long long>(stats.errors), stats.fps);
 
         if (!frame) {
             std::fprintf(stderr, "no stereo frame captured\n");
@@ -198,21 +170,6 @@ int main(int argc, char** argv)
             return 1;
         }
         std::printf("saved=%s,%s\n", left_path.c_str(), right_path.c_str());
-        if (options.save_nv12) {
-            if (frame->format != flyrat::hardware::StereoPixelFormat::kNv12) {
-                std::fprintf(stderr, "--save-nv12 requires MJPEG NV12 output\n");
-            } else {
-                const std::string left_nv12 = options.save_prefix + "_left.nv12";
-                const std::string right_nv12 = options.save_prefix + "_right.nv12";
-                if (!write_raw(left_nv12, frame->left) ||
-                    !write_raw(right_nv12, frame->right)) {
-                    std::fprintf(stderr, "failed to write %s / %s\n",
-                        left_nv12.c_str(), right_nv12.c_str());
-                    return 1;
-                }
-                std::printf("saved_nv12=%s,%s\n", left_nv12.c_str(), right_nv12.c_str());
-            }
-        }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "stereo capture failed: %s\n", e.what());
         return 1;

@@ -147,6 +147,12 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   OpenCV 线程默认 2，新增 `--slam-cpu` 绑定选项。25 fps 实测 582 帧：
   CPU 约 133%，RSS 18–19 MB，`track_ms` 25–30 ms，`age_ms` 约 51 ms。
   `stamp_source:=host` 时 bridge 发布延迟实测 0–1 ms。
+- P1/P2 硬件解码（2026-11-11）：删除 GStreamer `mppjpegdec` 管线，新增
+  `MppJpegDecoder`（dlopen MPP、异步 put/get、NV12 Y 平面）和
+  `flyrat_pilot/tools/decode_bench.cpp`。实机 25 fps 连续 60 s：1496 帧、
+  0 错误、无超过 100 ms 的间隔；硬件解码平均 11.3 ms、p99 12.1 ms，进程
+  CPU 约 27%（CPU 解码约 56%），与 OpenCV 输出平均差 0.01 LSB。尚未接入
+  pilot 默认路径。
 - SchurVINS 的初始化器原先固定使用 1–50 m 深度范围，已改为读取适配层的
   0.25–20 m 近场参数，解决实机近距桌面场景无法初始化的问题。
 - `SchurVINS::Prediction()` 原会对 `dt >= 15 ms` 直接 `CHECK` 退出；200 Hz

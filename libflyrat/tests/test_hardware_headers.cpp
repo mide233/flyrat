@@ -49,17 +49,16 @@ int main()
 
     flyrat::hardware::StereoConfig stereo;
     check(stereo.width == 1280 && stereo.height == 480, "stereo defaults");
-    check(stereo.format == flyrat::hardware::StereoFormat::kYuyv, "stereo YUYV default");
     check(stereo.width / 2 == 640, "stereo eye width");
     flyrat::hardware::StereoFrame stereo_frame;
     stereo_frame.width = 640;
     stereo_frame.height = 480;
-    stereo_frame.format = flyrat::hardware::StereoPixelFormat::kNv12;
-    stereo_frame.left.resize(640 * 480 * 3 / 2);
-    stereo_frame.right.resize(640 * 480 * 3 / 2);
+    stereo_frame.format = flyrat::hardware::StereoPixelFormat::kGray8;
+    stereo_frame.left.resize(640 * 480);
+    stereo_frame.right.resize(640 * 480);
     check(stereo_frame.left.size() == stereo_frame.right.size(), "stereo eye buffers");
-    check(stereo_frame.format == flyrat::hardware::StereoPixelFormat::kNv12,
-        "stereo NV12 frame format");
+    check(stereo_frame.format == flyrat::hardware::StereoPixelFormat::kGray8,
+        "stereo GRAY8 frame format");
 
     if (g_failures != 0) {
         std::printf("%d hardware header check(s) failed\n", g_failures);

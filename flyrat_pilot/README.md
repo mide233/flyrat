@@ -143,10 +143,15 @@ uint8  reserved[6]
 
 ### 5.1 性能基线
 
-`libflyrat` 的 `StereoCamera` 已支持 `mppjpegdec` 硬件 MJPEG 解码并保留 V4L2 PTS，
-但当前机载 `flyrat_pilot` 默认仍使用 CPU `cv::imdecode`：在这块 RK3566 上，
-GStreamer `v4l2src + mppjpegdec` 在 25/30 fps 时会在数帧后停流，20 fps 可稳定，
-但 CPU/延迟并不优于 CPU 解码。硬件路径保留给后续驱动/管线修复；详细实验数据见
+`libflyrat` 提供 `MppJpegDecoder`：通过 `dlopen` 调用 `librockchip_mpp` 的
+异步 `decode_put_packet` / `decode_get_frame` 接口，输出 NV12/NV16 的 Y 平面。
+`decode_bench` 在实机 25 fps 下连续 60 s：1496 帧、0 解码错误、无超过
+100 ms 的间隔，硬件解码平均 11.3 ms、p99 12.1 ms，进程 CPU 约 27%，
+而 CPU `cv::imdecode` 约 56%；输出与 OpenCV 平均差 0.01 LSB。
+
+当前机载 `flyrat_pilot` 默认仍使用 CPU `cv::imdecode`：硬件解码尚未接入
+pilot 主循环，也未验证与 SchurVINS 并发时的相机稳定性。数据、`decode_bench`
+用法和后续步骤见
 [`docs/agent/odometry/mjpeg_decode_research.md`](../docs/agent/odometry/mjpeg_decode_research.md)。
 
 解码线程只消费 `StereoJpegSource::takeLatest()` 的最新 JPEG，不再在 V4L2 采集

@@ -62,3 +62,16 @@ target_link_libraries(flyrat_sensor_forwarder PRIVATE
   flyrat::flyrat_msp_interact
   flyrat::flyrat_hardware)
 target_compile_options(flyrat_sensor_forwarder PRIVATE -Wall -Wextra)
+
+# Smallest continuous hardware-decode check: capture real MJPEG from the
+# camera, decode every frame on the VPU and compare against OpenCV.
+add_executable(decode_bench tools/decode_bench.cpp)
+target_include_directories(decode_bench PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(decode_bench PRIVATE
+  flyrat::flyrat_hardware
+  ${OpenCV_LIBS}
+  Threads::Threads)
+target_compile_options(decode_bench PRIVATE -Wall -Wextra)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+  target_compile_options(decode_bench PRIVATE -mcpu=cortex-a55 -mtune=cortex-a55)
+endif()
