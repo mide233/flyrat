@@ -229,6 +229,20 @@ private:
         case 104:
             payload = { 1, 0, 2, 0, 3, 0, 4, 0 };
             break;
+        case 243: {
+            payload = { 1, 16, 0x03, 0, 0x0F, 0, 42, 0 };
+            for (std::size_t i = 0; i < 16; ++i) {
+                const std::uint16_t raw = static_cast<std::uint16_t>(1000 + i);
+                payload.push_back(static_cast<std::uint8_t>(raw & 0xFF));
+                payload.push_back(static_cast<std::uint8_t>(raw >> 8));
+            }
+            for (std::size_t i = 0; i < 16; ++i) {
+                const std::uint16_t actual = static_cast<std::uint16_t>(2000 + i);
+                payload.push_back(static_cast<std::uint8_t>(actual & 0xFF));
+                payload.push_back(static_cast<std::uint8_t>(actual >> 8));
+            }
+            break;
+        }
         case 110:
             payload = { 120, 55, 0, 80, 0, 100, 0, 124, 3 };
             break;
@@ -302,6 +316,7 @@ flyrat::MspConfig basic_config()
     config.poll.motor_hz = 0;
     config.poll.gps_hz = 0;
     config.poll.debug_hz = 0;
+    config.poll.raw_rc_hz = 0;
     config.poll_timeout_ms = 50;
     config.request_timeout_ms = 200;
     config.reconnect_backoff_ms = 50;
@@ -405,9 +420,51 @@ void test_timeout_and_reconnect()
 
 } // namespace
 
+void test_raw_rc_polling()
+{
+    int fds[2] = { -1, -1 };
+    check(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0, "raw rc socketpair");
+    FakeFlightController fc(fds[1]);
+    auto transport = std::make_unique<FakeTransport>(fds[0]);
+
+    auto config = basic_config();
+    config.poll.attitude_hz = 0;
+    config.poll.imu_hz = 0;
+    config.poll.status_hz = 0;
+    config.poll.altitude_hz = 0;
+    config.poll.raw_rc_hz = 50;
+
+    flyrat::MspInteract msp(config, std::move(transport));
+    std::atomic<int> frames { 0 };
+    std::atomic<bool> active { false };
+
+    msp.set_raw_rc_callback([&](const flyrat::Sample<flyrat::RawRcFrame>& sample) {
+        active = sample.value.active;
+        ++frames;
+    });
+
+    msp.start();
+    check(wait_for([&]() { return frames > 0; }), "raw rc callback");
+
+    const auto snapshot = msp.rawRc();
+    check(snapshot.has_value(), "raw rc snapshot");
+    if (snapshot) {
+        check(snapshot->value.active && snapshot->value.valid, "raw rc snapshot flags");
+        check(snapshot->value.mask == 0x000F && snapshot->value.age_ms == 42,
+            "raw rc snapshot meta");
+        check(snapshot->value.raw[0] == 1000 && snapshot->value.raw[15] == 1015,
+            "raw rc snapshot raw");
+        check(snapshot->value.actual[0] == 2000 && snapshot->value.actual[15] == 2015,
+            "raw rc snapshot actual");
+    }
+    check(active.load(), "raw rc active flag");
+    msp.stop();
+}
+
 int main()
 {
     test_basic_polling_and_rc();
+    test_raw_rc_polling();
     test_timeout_and_reconnect();
 
     if (g_failures != 0) {

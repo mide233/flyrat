@@ -76,6 +76,7 @@ struct Options {
           "imu_intrinsics.yaml";
     std::string msp_device = "/dev/ttyS3";
     int msp_baud = 921600;
+    int msp_raw_rc_hz = 50;
     std::string camera_device = "/dev/video10";
     int width = 1280;
     int height = 480;
@@ -104,6 +105,7 @@ void printUsage(const char* program)
         << "  --imu-config PATH      IMU scale/misalignment YAML\n"
         << "  --msp-device DEV       flight controller serial device\n"
         << "  --msp-baud BAUD        MSP baud rate (default 921600)\n"
+        << "  --msp-raw-rc-hz HZ     pre-override RC poll rate (default 50, 0 off)\n"
         << "  --camera-device DEV    V4L2 MJPEG device (default /dev/video10)\n"
         << "  --width N              side-by-side width (default 1280)\n"
         << "  --height N             image height (default 480)\n"
@@ -144,6 +146,8 @@ Options parseOptions(int argc, char** argv)
             options.msp_device = value("--msp-device");
         } else if (arg == "--msp-baud") {
             options.msp_baud = std::stoi(value("--msp-baud"));
+        } else if (arg == "--msp-raw-rc-hz") {
+            options.msp_raw_rc_hz = std::stoi(value("--msp-raw-rc-hz"));
         } else if (arg == "--camera-device") {
             options.camera_device = value("--camera-device");
         } else if (arg == "--width") {
@@ -195,6 +199,9 @@ Options parseOptions(int argc, char** argv)
     }
     if (options.decode != "cpu" && options.decode != "mpp") {
         throw std::runtime_error("decode must be 'cpu' or 'mpp'");
+    }
+    if (options.msp_raw_rc_hz < 0 || options.msp_raw_rc_hz > 100) {
+        throw std::runtime_error("msp raw RC rate must be between 0 and 100 Hz");
     }
     if (!options.record_dir.empty() && !options.replay_dir.empty()) {
         throw std::runtime_error("--record and --replay are mutually exclusive");
@@ -604,6 +611,7 @@ int main(int argc, char** argv)
             msp_config.poll.motor_hz = 0;
             msp_config.poll.gps_hz = 0;
             msp_config.poll.debug_hz = 0;
+            msp_config.poll.raw_rc_hz = options.msp_raw_rc_hz;
 
             msp = std::make_unique<flyrat::MspInteract>(msp_config,
                 std::make_unique<flyrat::hardware::SerialTransport>(
@@ -623,6 +631,23 @@ int main(int argc, char** argv)
                     if (bag) {
                         bag->writeImu(converted);
                     }
+                });
+            auto last_raw_rc_log = Clock::now();
+            msp->set_raw_rc_callback(
+                [&](const flyrat::Sample<flyrat::RawRcFrame>& sample) {
+                    const auto now = Clock::now();
+                    if (now - last_raw_rc_log < std::chrono::seconds(1)) {
+                        return;
+                    }
+                    last_raw_rc_log = now;
+                    const auto& value = sample.value;
+                    std::cerr << "msp raw rc: active=" << (value.active ? 1 : 0)
+                              << " valid=" << (value.valid ? 1 : 0)
+                              << " age=" << value.age_ms << "ms mask=0x" << std::hex
+                              << value.mask << std::dec << " raw=" << value.raw[0] << "/"
+                              << value.raw[1] << "/" << value.raw[2] << "/" << value.raw[3]
+                              << " actual=" << value.actual[0] << "/" << value.actual[1]
+                              << "/" << value.actual[2] << "/" << value.actual[3] << "\n";
                 });
             msp->set_link_callback([](bool connected, const std::string& why) {
                 std::cerr << "msp: " << (connected ? "connected" : "disconnected")

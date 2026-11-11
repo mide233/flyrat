@@ -117,6 +117,49 @@ void test_parsers()
     gps_payload[1] = 12;
     check(flyrat::detail::parse_raw_gps(gps_payload, gps), "gps parse");
     check(gps.fix == 3 && gps.satellites == 12, "gps values");
+
+    auto raw_rc_payload = [](std::uint8_t version, std::uint8_t count,
+                              std::uint8_t flags, std::uint16_t mask,
+                              std::uint16_t age) {
+        std::vector<std::uint8_t> payload {
+            version, count, flags, 0,
+            static_cast<std::uint8_t>(mask & 0xFF),
+            static_cast<std::uint8_t>((mask >> 8) & 0xFF),
+            static_cast<std::uint8_t>(age & 0xFF),
+            static_cast<std::uint8_t>((age >> 8) & 0xFF),
+        };
+        for (std::uint8_t i = 0; i < count; ++i) {
+            const std::uint16_t raw = static_cast<std::uint16_t>(1000 + i);
+            payload.push_back(static_cast<std::uint8_t>(raw & 0xFF));
+            payload.push_back(static_cast<std::uint8_t>((raw >> 8) & 0xFF));
+        }
+        for (std::uint8_t i = 0; i < count; ++i) {
+            const std::uint16_t actual = static_cast<std::uint16_t>(2000 + i);
+            payload.push_back(static_cast<std::uint8_t>(actual & 0xFF));
+            payload.push_back(static_cast<std::uint8_t>((actual >> 8) & 0xFF));
+        }
+        return payload;
+    };
+
+    const auto raw_payload = raw_rc_payload(1, 16, 0x03, 0x000F, 42);
+    check(raw_payload.size() == 72, "raw rc payload size");
+    flyrat::RawRcFrame raw_rc;
+    check(flyrat::detail::parse_raw_rc(raw_payload, raw_rc), "raw rc parse");
+    check(raw_rc.active && raw_rc.valid, "raw rc flags");
+    check(raw_rc.mask == 0x000F && raw_rc.age_ms == 42, "raw rc meta");
+    check(raw_rc.raw[0] == 1000 && raw_rc.raw[15] == 1015, "raw rc raw channels");
+    check(raw_rc.actual[0] == 2000 && raw_rc.actual[15] == 2015, "raw rc actual channels");
+
+    auto truncated = raw_payload;
+    truncated.pop_back();
+    check(!flyrat::detail::parse_raw_rc(truncated, raw_rc), "raw rc truncated");
+
+    check(!flyrat::detail::parse_raw_rc(raw_rc_payload(2, 16, 0, 0, 0), raw_rc),
+        "raw rc bad version");
+    check(!flyrat::detail::parse_raw_rc(raw_rc_payload(1, 0, 0, 0, 0), raw_rc),
+        "raw rc zero count");
+    check(!flyrat::detail::parse_raw_rc(raw_rc_payload(1, 17, 0, 0, 0), raw_rc),
+        "raw rc count too large");
 }
 
 } // namespace

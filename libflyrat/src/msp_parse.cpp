@@ -114,6 +114,44 @@ bool parse_rc(const std::vector<std::uint8_t>& payload, RcFrame& out)
     return true;
 }
 
+bool parse_raw_rc(const std::vector<std::uint8_t>& payload, RawRcFrame& out)
+{
+    // Layout: version, count, flags, reserved, mask, age, raw[count],
+    // actual[count]. The firmware currently sends 16 channels, but accepting
+    // 1..16 keeps the parser compatible with smaller frames.
+    if (payload.size() < 8U) {
+        return false;
+    }
+    const std::uint8_t version = payload[0];
+    const std::uint8_t count = payload[1];
+    if (version != 1U || count == 0U || count > 16U) {
+        return false;
+    }
+    if (payload.size() != 8U + 4U * static_cast<std::size_t>(count)) {
+        return false;
+    }
+
+    const std::uint8_t flags = payload[2];
+    out.raw.fill(0);
+    out.actual.fill(0);
+    out.active = (flags & 0x01U) != 0U;
+    out.valid = (flags & 0x02U) != 0U;
+    out.mask = static_cast<std::uint16_t>(payload[4])
+        | static_cast<std::uint16_t>(payload[5] << 8);
+    out.age_ms = static_cast<std::uint16_t>(payload[6])
+        | static_cast<std::uint16_t>(payload[7] << 8);
+
+    const std::size_t raw_offset = 8U;
+    const std::size_t actual_offset = raw_offset + 2U * count;
+    for (std::size_t i = 0; i < count; ++i) {
+        out.raw[i] = static_cast<std::uint16_t>(payload[raw_offset + 2U * i])
+            | static_cast<std::uint16_t>(payload[raw_offset + 2U * i + 1U] << 8);
+        out.actual[i] = static_cast<std::uint16_t>(payload[actual_offset + 2U * i])
+            | static_cast<std::uint16_t>(payload[actual_offset + 2U * i + 1U] << 8);
+    }
+    return true;
+}
+
 bool parse_motor(const std::vector<std::uint8_t>& payload, MotorFrame& out)
 {
     if ((payload.size() % 2U) != 0U) {

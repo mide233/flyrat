@@ -41,6 +41,7 @@ enum EventKey {
     kAnalogKey = 7,
     kGpsKey = 8,
     kDebugKey = 9,
+    kRawRcKey = 10,
 };
 
 int elapsed_ms(Clock::time_point from, Clock::time_point to)
@@ -101,6 +102,7 @@ struct MspInteract::Impl {
     std::optional<Sample<StatusFrame>> status_sample;
     std::optional<Sample<AltitudeFrame>> altitude_sample;
     std::optional<Sample<RcFrame>> rc_sample;
+    std::optional<Sample<RawRcFrame>> raw_rc_sample;
     std::optional<Sample<MotorFrame>> motor_sample;
     std::optional<Sample<AnalogFrame>> analog_sample;
     std::optional<Sample<GpsFrame>> gps_sample;
@@ -113,6 +115,7 @@ struct MspInteract::Impl {
     std::function<void(const Sample<StatusFrame>&)> status_cb;
     std::function<void(const Sample<AltitudeFrame>&)> altitude_cb;
     std::function<void(const Sample<RcFrame>&)> rc_cb;
+    std::function<void(const Sample<RawRcFrame>&)> raw_rc_cb;
     std::function<void(const Sample<MotorFrame>&)> motor_cb;
     std::function<void(const Sample<AnalogFrame>&)> analog_cb;
     std::function<void(const Sample<GpsFrame>&)> gps_cb;
@@ -169,6 +172,7 @@ struct MspInteract::Impl {
         add(MspCommand::kStatus, config.poll.status_hz);
         add(MspCommand::kAltitude, config.poll.altitude_hz);
         add(MspCommand::kRc, config.poll.rc_hz);
+        add(MspCommand::kRawRcOriginal, config.poll.raw_rc_hz);
         add(MspCommand::kAnalog, config.poll.analog_hz);
         add(MspCommand::kMotor, config.poll.motor_hz);
         add(MspCommand::kRawGps, config.poll.gps_hz);
@@ -685,6 +689,15 @@ struct MspInteract::Impl {
             }
             break;
         }
+        case MspCommand::kRawRcOriginal: {
+            RawRcFrame value;
+            if (detail::parse_raw_rc(frame.payload, value)) {
+                store(raw_rc_sample, value, now, raw_rc_cb, kRawRcKey);
+            } else {
+                mark_malformed();
+            }
+            break;
+        }
         case MspCommand::kMotor: {
             MotorFrame value;
             if (detail::parse_motor(frame.payload, value)) {
@@ -1008,6 +1021,12 @@ void MspInteract::set_rc_callback(std::function<void(const Sample<RcFrame>&)> cb
     impl_->rc_cb = std::move(cb);
 }
 
+void MspInteract::set_raw_rc_callback(std::function<void(const Sample<RawRcFrame>&)> cb)
+{
+    std::lock_guard<std::mutex> lock(impl_->callback_mu);
+    impl_->raw_rc_cb = std::move(cb);
+}
+
 void MspInteract::set_motor_callback(std::function<void(const Sample<MotorFrame>&)> cb)
 {
     std::lock_guard<std::mutex> lock(impl_->callback_mu);
@@ -1061,6 +1080,11 @@ std::optional<Sample<AltitudeFrame>> MspInteract::altitude() const
 std::optional<Sample<RcFrame>> MspInteract::rc() const
 {
     return impl_->snapshot(impl_->rc_sample);
+}
+
+std::optional<Sample<RawRcFrame>> MspInteract::rawRc() const
+{
+    return impl_->snapshot(impl_->raw_rc_sample);
 }
 
 std::optional<Sample<MotorFrame>> MspInteract::motor() const

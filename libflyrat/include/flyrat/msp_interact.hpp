@@ -37,6 +37,7 @@ struct MspPollConfig {
     int motor_hz = 0; // 0 disables polling; use request() for on-demand data.
     int gps_hz = 0;
     int debug_hz = 0;
+    int raw_rc_hz = 0;
 };
 
 struct MspConfig {
@@ -87,6 +88,7 @@ public:
     void set_status_callback(std::function<void(const Sample<StatusFrame>&)>);
     void set_altitude_callback(std::function<void(const Sample<AltitudeFrame>&)>);
     void set_rc_callback(std::function<void(const Sample<RcFrame>&)>);
+    void set_raw_rc_callback(std::function<void(const Sample<RawRcFrame>&)>);
     void set_motor_callback(std::function<void(const Sample<MotorFrame>&)>);
     void set_analog_callback(std::function<void(const Sample<AnalogFrame>&)>);
     void set_gps_callback(std::function<void(const Sample<GpsFrame>&)>);
@@ -98,6 +100,7 @@ public:
     std::optional<Sample<StatusFrame>> status() const;
     std::optional<Sample<AltitudeFrame>> altitude() const;
     std::optional<Sample<RcFrame>> rc() const;
+    std::optional<Sample<RawRcFrame>> rawRc() const;
     std::optional<Sample<MotorFrame>> motor() const;
     std::optional<Sample<AnalogFrame>> analog() const;
     std::optional<Sample<GpsFrame>> gps() const;

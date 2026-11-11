@@ -38,6 +38,7 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 --imu-config PATH      IMU scale/misalignment YAML
 --msp-device DEV       飞控串口，默认 /dev/ttyS3
 --msp-baud N           默认 921600
+--msp-raw-rc-hz N      MSP 覆盖前 RC 查询频率，默认 50，0 关闭
 --camera-device DEV    V4L2 MJPEG 设备，默认 /dev/video10
 --width/--height N     左右拼接图尺寸，默认 1280x480
 --fps N                相机帧率，默认 25

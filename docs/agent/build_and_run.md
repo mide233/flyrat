@@ -221,6 +221,7 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 --listen ADDR:PORT      默认 127.0.0.1:5000
 --msp-device PATH       默认 /dev/ttyS3
 --msp-baud N            默认 921600
+--msp-raw-rc-hz N       MSP 覆盖前 RC 查询频率，默认 50，0 关闭
 --camera-device PATH    默认 /dev/video10
 --camera-width N        默认 1280（左右拼接总宽）
 --camera-height N       默认 480

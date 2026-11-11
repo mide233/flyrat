@@ -25,6 +25,7 @@ enum class MspCommand : std::uint8_t {
     kStatusEx = 150,
     kAttitudeQuaternion = 167,
     kSetRawRc = 200,
+    kRawRcOriginal = 243,
     kDebug = 254,
 };
 
@@ -47,6 +48,20 @@ struct Attitude {
 
 struct RcFrame {
     std::vector<std::uint16_t> channels;
+};
+
+// Pre-override RC channels reported by newer Betaflight firmware. `raw` holds
+// what the receiver delivered, `actual` what the controller used after the MSP
+// override. Both arrays are indexed like the MSP channel order (AETR1234 by
+// default). The firmware only refreshes the snapshot while BOXMSPOVERRIDE is
+// active, so `valid` can be false while the override is disarmed.
+struct RawRcFrame {
+    std::array<std::uint16_t, 16> raw {};
+    std::array<std::uint16_t, 16> actual {};
+    std::uint16_t mask = 0;
+    std::uint16_t age_ms = 0;
+    bool active = false;
+    bool valid = false;
 };
 
 struct MotorFrame {
