@@ -217,16 +217,25 @@ struct StereoJpegSource::Impl {
         std::function<void(const StereoJpegFrame&)> cb;
         {
             std::lock_guard<std::mutex> lock(mutex);
-            latest = frame;
             cb = callback;
         }
         ++frames;
         if (cb) {
+            // The forwarder needs a stable frame for the callback; keep the
+            // copy there. The pilot consumes frames through takeLatest() and
+            // avoids this copy entirely.
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                latest = frame;
+            }
             try {
                 cb(frame);
             } catch (...) {
                 ++errors;
             }
+        } else {
+            std::lock_guard<std::mutex> lock(mutex);
+            latest = std::move(frame);
         }
     }
 
@@ -352,6 +361,17 @@ std::optional<StereoJpegFrame> StereoJpegSource::latest() const
 {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     return impl_->latest;
+}
+
+std::optional<StereoJpegFrame> StereoJpegSource::takeLatest()
+{
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    if (!impl_->latest) {
+        return std::nullopt;
+    }
+    auto frame = std::move(*impl_->latest);
+    impl_->latest.reset();
+    return frame;
 }
 
 StereoJpegStats StereoJpegSource::stats() const

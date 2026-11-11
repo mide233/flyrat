@@ -16,6 +16,8 @@ def generate_launch_description():
     world_frame = LaunchConfiguration('world_frame')
     body_frame = LaunchConfiguration('body_frame')
     publish_tf = LaunchConfiguration('publish_tf')
+    stamp_source = LaunchConfiguration('stamp_source')
+    time_offset = LaunchConfiguration('time_offset')
 
     params_file = PathJoinSubstitution(
         [FindPackageShare('flyrat_pilot_bridge'), 'config', 'pilot_bridge.yaml'])
@@ -31,6 +33,12 @@ def generate_launch_description():
         DeclareLaunchArgument('world_frame', default_value='odometry_map'),
         DeclareLaunchArgument('body_frame', default_value='imu_link'),
         DeclareLaunchArgument('publish_tf', default_value='true'),
+        DeclareLaunchArgument(
+            'stamp_source', default_value='device',
+            description="Use 'device' pose timestamps or the host receive time."),
+        DeclareLaunchArgument(
+            'time_offset', default_value='0.0',
+            description='Seconds added to device timestamps (for clock skew).'),
         Node(
             package='flyrat_pilot_bridge',
             executable='pilot_bridge_node',
@@ -45,6 +53,8 @@ def generate_launch_description():
                     'world_frame': world_frame,
                     'body_frame': body_frame,
                     'publish_tf': publish_tf,
+                    'stamp_source': stamp_source,
+                    'time_offset': time_offset,
                 },
             ],
         ),

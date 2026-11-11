@@ -35,6 +35,9 @@ CAMERA_CONFIG="${REPO_ROOT}/libflyrat/configs/camera/uvc_640x480.yaml"
 IMU_CONFIG="${REPO_ROOT}/flyrat_play/ros2_ws/src/flyrat_sensors/config/imu_intrinsics.yaml"
 FPS=25
 MAX_FRAMES=0
+SLAM_CPU=-1
+STAMP_SOURCE=device
+TIME_OFFSET=0.0
 TRAJECTORY="/tmp/flyrat_pilot.tum"
 START_FOXGLOVE=0
 LAUNCH_ARGS=()
@@ -50,6 +53,9 @@ for arg in "$@"; do
         start_foxglove:=*) START_FOXGLOVE=0 ;;
         fps:=*) FPS="${arg#fps:=}" ;;
         max_frames:=*) MAX_FRAMES="${arg#max_frames:=}" ;;
+        slam_cpu:=*) SLAM_CPU="${arg#slam_cpu:=}" ;;
+        stamp_source:=*) STAMP_SOURCE="${arg#stamp_source:=}" ;;
+        time_offset:=*) TIME_OFFSET="${arg#time_offset:=}" ;;
         trajectory:=*) TRAJECTORY="${arg#trajectory:=}" ;;
         local_port:=*) LOCAL_PORT="${arg#local_port:=}" ;;
         camera_config:=*) CAMERA_CONFIG="${arg#camera_config:=}" ;;
@@ -149,10 +155,13 @@ echo "[bringup] starting onboard SchurVINS (${FPS} fps)"
     --camera-device /dev/video10 \
     --fps ${FPS} \
     --max-frames ${MAX_FRAMES} \
+    --slam-cpu ${SLAM_CPU} \
     --trajectory ${TRAJECTORY}" &
 
 echo "[bringup] host bridge on tcp:${LOCAL_PORT}"
 ros2 launch flyrat_pilot_bridge pilot_bridge.launch.py \
     port:="${LOCAL_PORT}" \
     camera_config_path:="${CAMERA_CONFIG}" \
+    stamp_source:="${STAMP_SOURCE}" \
+    time_offset:="${TIME_OFFSET}" \
     "${LAUNCH_ARGS[@]+"${LAUNCH_ARGS[@]}"}"

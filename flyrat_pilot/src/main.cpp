@@ -12,14 +12,18 @@
 
 #include <sys/resource.h>
 
+#include <sched.h>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cerrno>
 #include <cmath>
 #include <condition_variable>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <iostream>
 #include <memory>
@@ -71,8 +75,11 @@ struct Options {
     std::string pose_address = "127.0.0.1";
     int pose_port = 5001;
     std::string trajectory = "/tmp/flyrat_pilot.tum";
-    double imu_lookahead = 0.015;
+    double imu_lookahead = 0.010;
     double imu_history = 0.1;
+    int opencv_threads = 2;
+    int slam_cpu = -1;
+    double warmup_s = 1.0;
     int max_frames = 0;
     bool check_config = false;
 };
@@ -92,8 +99,11 @@ void printUsage(const char* program)
         << "  --pose-address ADDR    pose stream listen address\n"
         << "  --pose-port PORT       pose stream port (default 5001)\n"
         << "  --trajectory PATH      TUM output, empty disables\n"
-        << "  --imu-lookahead SEC    IMU samples after each frame (default 0.015)\n"
+        << "  --imu-lookahead SEC    IMU samples after each frame (default 0.010)\n"
         << "  --imu-history SEC      IMU history for the first frame (default 0.1)\n"
+        << "  --opencv-threads N     OpenCV worker threads (default 2)\n"
+        << "  --slam-cpu N           pin the SLAM thread to CPU N (default off)\n"
+        << "  --warmup SEC           drop camera frames before SLAM starts (default 1.0)\n"
         << "  --max-frames N         stop after N processed frames (testing)\n"
         << "  --check-config         validate calibration files and exit\n";
 }
@@ -135,6 +145,12 @@ Options parseOptions(int argc, char** argv)
             options.imu_lookahead = std::stod(value("--imu-lookahead"));
         } else if (arg == "--imu-history") {
             options.imu_history = std::stod(value("--imu-history"));
+        } else if (arg == "--opencv-threads") {
+            options.opencv_threads = std::stoi(value("--opencv-threads"));
+        } else if (arg == "--slam-cpu") {
+            options.slam_cpu = std::stoi(value("--slam-cpu"));
+        } else if (arg == "--warmup") {
+            options.warmup_s = std::stod(value("--warmup"));
         } else if (arg == "--max-frames") {
             options.max_frames = std::stoi(value("--max-frames"));
         } else if (arg == "--check-config") {
@@ -156,7 +172,30 @@ Options parseOptions(int argc, char** argv)
         || options.imu_history <= 0.0) {
         throw std::runtime_error("invalid IMU lookahead/history");
     }
+    if (options.opencv_threads < 1 || options.opencv_threads > 8) {
+        throw std::runtime_error("opencv threads must be between 1 and 8");
+    }
+    if (options.slam_cpu < -1 || options.slam_cpu > 64) {
+        throw std::runtime_error("invalid CPU index");
+    }
+    if (options.warmup_s < 0.0 || options.warmup_s > 5.0) {
+        throw std::runtime_error("warmup must be between 0 and 5 seconds");
+    }
     return options;
+}
+
+void pinThread(int cpu)
+{
+    if (cpu < 0) {
+        return;
+    }
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(cpu, &set);
+    if (::sched_setaffinity(0, sizeof(set), &set) != 0) {
+        std::cerr << "flyrat_pilot: could not pin to CPU " << cpu << ": "
+                  << std::strerror(errno) << "\n";
+    }
 }
 
 // Maps CLOCK_MONOTONIC timestamps (MSP and V4L2) to Unix-epoch seconds. The
@@ -234,6 +273,9 @@ private:
 };
 
 struct FramePacket {
+    // The CPU decoder owns one full side-by-side image; left/right are views
+    // into it. Keeping the owner alive keeps those views valid in the queue.
+    cv::Mat owner;
     cv::Mat left;
     cv::Mat right;
     double stamp_s = 0.0;
@@ -349,6 +391,8 @@ int main(int argc, char** argv)
         const auto intrinsics = flyrat::pilot::loadImuIntrinsics(options.imu_config);
         const Eigen::Matrix4d T_body_camera = toEigen(loadBodyCamera(options.camera_config));
 
+        cv::setNumThreads(options.opencv_threads);
+
         flyrat::odometry::Options odometry_options;
         odometry_options.mode = flyrat::odometry::Mode::kImuStereo;
         odometry_options.camera_config_path = options.camera_config;
@@ -408,27 +452,53 @@ int main(int argc, char** argv)
         camera_config.height = options.height;
         camera_config.fps = options.fps;
         flyrat::hardware::StereoJpegSource camera(camera_config);
-        camera.set_callback([&](const flyrat::hardware::StereoJpegFrame& frame) {
-            cv::Mat encoded(1, static_cast<int>(frame.jpeg.size()), CV_8UC1,
-                const_cast<std::uint8_t*>(frame.jpeg.data()));
-            cv::Mat decoded = cv::imdecode(encoded, cv::IMREAD_GRAYSCALE);
-            if (decoded.empty() || decoded.cols != options.width
-                || decoded.rows != options.height) {
-                ++decode_errors;
-                return;
+
+        std::thread camera_thread;
+        auto camera_loop = [&] {
+            const auto warmup_end = Clock::now()
+                + std::chrono::duration_cast<Clock::duration>(
+                      std::chrono::duration<double>(options.warmup_s));
+            double last_stamp = -1.0;
+            while (!g_stop) {
+                auto frame = camera.takeLatest();
+                if (!frame) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    continue;
+                }
+                if (Clock::now() < warmup_end) {
+                    continue;
+                }
+                const double stamp_s = clock.toEpoch(frame->stamp);
+                if (stamp_s <= last_stamp + 1e-6) {
+                    continue;
+                }
+                last_stamp = stamp_s;
+
+                cv::Mat encoded(1, static_cast<int>(frame->jpeg.size()), CV_8UC1,
+                    const_cast<std::uint8_t*>(frame->jpeg.data()));
+                cv::Mat image = cv::imdecode(encoded, cv::IMREAD_GRAYSCALE);
+                if (image.empty() || image.cols != options.width
+                    || image.rows != options.height) {
+                    ++decode_errors;
+                    continue;
+                }
+
+                FramePacket packet;
+                const int half = image.cols / 2;
+                packet.owner = image;
+                packet.left = image.colRange(0, half);
+                packet.right = image.colRange(half, image.cols);
+                packet.stamp_s = stamp_s;
+                packet.sequence = frame->sequence;
+                frame_buffer.push(std::move(packet));
             }
-            const int half = decoded.cols / 2;
-            FramePacket packet;
-            packet.left = decoded.colRange(0, half);
-            packet.right = decoded.colRange(half, decoded.cols);
-            packet.stamp_s = clock.toEpoch(frame.stamp);
-            packet.sequence = frame.sequence;
-            frame_buffer.push(std::move(packet));
-        });
+        };
 
         msp.start();
         pose_stream.start();
         camera.start();
+        pinThread(options.slam_cpu);
+        camera_thread = std::thread(camera_loop);
 
         std::cerr << "flyrat_pilot: SLAM started; pose stream on "
                   << options.pose_address << ":" << options.pose_port
@@ -561,6 +631,7 @@ int main(int argc, char** argv)
                                    * 1e-6))
                     / wall_s * 100.0;
                 const auto received = frame_buffer.received();
+                const auto camera_stats = camera.stats();
                 const double camera_fps
                     = (received - last_report_received) / wall_s;
                 const double slam_fps
@@ -576,6 +647,9 @@ int main(int argc, char** argv)
                           << " skipped=" << skipped
                           << " imu=" << imu_buffer.size()
                           << " camera_drops=" << decode_errors.load()
+                          << " cam_frames=" << camera_stats.frames
+                          << " cam_running=" << camera_stats.running
+                          << " cam_errors=" << camera_stats.errors
                           << " camera_fps=" << camera_fps
                           << " slam_fps=" << slam_fps
                           << " track_ms=" << track_avg << "/" << track_ms_max
@@ -601,6 +675,9 @@ int main(int argc, char** argv)
         }
 
         camera.stop();
+        if (camera_thread.joinable()) {
+            camera_thread.join();
+        }
         msp.stop();
         pose_stream.stop();
         if (!options.trajectory.empty()) {
@@ -609,7 +686,10 @@ int main(int argc, char** argv)
                       << "\n";
         }
         std::cerr << "flyrat_pilot: stopped after " << processed << " frames\n";
-        return 0;
+        // The vendored SVO and the Rockchip MPP decoder both own worker threads
+        // whose teardown can block on this kernel. All application state has
+        // been saved above, so leave without running those global destructors.
+        std::_Exit(0);
     } catch (const std::exception& error) {
         std::cerr << "flyrat_pilot: " << error.what() << "\n";
         return 1;

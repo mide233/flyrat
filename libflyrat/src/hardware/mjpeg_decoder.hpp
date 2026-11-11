@@ -40,6 +40,7 @@ struct MjpegFrame {
     bool color = false;
     std::vector<std::uint8_t> data;
     std::uint64_t sequence = 0;
+    std::uint64_t pts_ns = 0;
     std::chrono::steady_clock::time_point stamp;
 };
 

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <sstream>
@@ -38,6 +39,28 @@ using GstStructureGetIntFn = int (*)(const GstStructure*, const char*, int*);
 using GstBufferGetSizeFn = std::size_t (*)(GstBuffer*);
 using GstBufferExtractFn = std::size_t (*)(GstBuffer*, std::size_t, void*, std::size_t);
 using GstSampleUnrefFn = void (*)(GstSample*);
+
+// GStreamer keeps GstBuffer opaque in the runtime API. The timestamp is a
+// public field in the stable 1.x struct layout; copy only the prefix we need so
+// v4l2src can provide the original V4L2 presentation timestamp.
+struct GstBufferPrefix
+{
+    std::uintptr_t type;
+    std::int32_t refcount;
+    std::int32_t lockstate;
+    std::uint32_t flags;
+    std::uint32_t pad0;
+    void* copy;
+    void* dispose;
+    void* free;
+    std::uint32_t priv_uint;
+    std::uint32_t pad1;
+    void* priv_pointer;
+    void* pool;
+    std::uint64_t pts;
+};
+static_assert(offsetof(GstBufferPrefix, pts) == 72,
+    "unexpected GStreamer GstBuffer layout");
 
 constexpr int kGstStateNull = 1;
 constexpr int kGstStatePlaying = 4;
@@ -150,7 +173,7 @@ struct MjpegDecoder::Impl {
         }
 
         std::ostringstream pipeline_text;
-        pipeline_text << "v4l2src device=" << config.device << " io-mode=4"
+        pipeline_text << "v4l2src device=" << config.device << " io-mode=2"
                       << " ! image/jpeg,width=" << config.width
                       << ",height=" << config.height
                       << ",framerate=" << config.fps << "/1"
@@ -264,6 +287,7 @@ struct MjpegDecoder::Impl {
         }
 
         frame.sequence = ++sequence;
+        frame.pts_ns = reinterpret_cast<const GstBufferPrefix*>(buffer)->pts;
         frame.stamp = std::chrono::steady_clock::now();
         return MjpegReadStatus::kFrame;
     }

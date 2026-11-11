@@ -10,3 +10,5 @@ pilot_bridge_node:
     path_max_poses: 2000
     publish_tf: true
     status_period: 1.0
+    stamp_source: device
+    time_offset: 0.0

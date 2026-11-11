@@ -131,7 +131,7 @@ imu:
 
 - 订阅左右目图像，使用 `message_filters::ApproximateTime` 同步。
 - 订阅 IMU，保留约 1 秒历史；每帧取 `(上一帧时间, 帧时间 + imu_lookahead]`
-  的样本，首帧额外带上约 100 ms 历史。`imu_lookahead` 默认 15 ms。
+  的样本，首帧额外带上约 100 ms 历史。`imu_lookahead` 默认 10 ms。
 - 只有最新一帧待处理，后端忙时丢旧帧。
 - 读取 `camera.T_left_right` 和 `imu.T_body_camera`，发布静态 TF。
 - 把 `T_world_camera` 转成 `T_world_body`；纯双目模式下把世界重定基到第一帧
@@ -170,7 +170,7 @@ SchurVINS 需要 IMU，因此 `mode:=stereo` 只对桩后端有意义；启用 S
 | `camera_config_path` | 由 launch 注入 | 标定 YAML |
 | `sync_slop` | `0.010` | 双目同步容差，秒 |
 | `imu_buffer_seconds` | `1.0` | IMU 缓存长度 |
-| `imu_lookahead` | `0.015` | 帧后 IMU 前视窗口，秒；必须为正 |
+| `imu_lookahead` | `0.010` | 帧后 IMU 前视窗口，秒；必须为正 |
 | `imu_initial_history` | `0.1` | 首帧携带的帧前 IMU 历史，秒 |
 | `path_max_poses` | `1000` | 轨迹最大长度 |
 | `path_publish_period` | `0.2` | 轨迹发布周期，秒 |
@@ -234,7 +234,9 @@ ros2 launch flyrat_odometry odometry.launch.py
 设备端 `flyrat_pilot` 直接读取 V4L2 MJPEG 和 MSP IMU，在本地完成标定修正与
 跟踪，通过 TCP 5001 发送 64 字节 `T_world_body` 位姿。主机
 `flyrat_pilot_bridge` 发布与开发机模式同名的话题和 TF，因此 Foxglove 配置可以
-复用。IMU 的前视窗口和首帧历史与 ROS 节点一致（默认 15 ms / 100 ms）。
+复用。IMU 的前视窗口和首帧历史与 ROS 节点一致（默认 10 ms / 100 ms）。
+`pilot_bridge` 每收到一帧位姿立即发布；`stamp_source:=host` 用主机接收时间，
+`stamp_source:=device` 使用设备 epoch 时间，可用 `time_offset` 补偿时钟偏差。
 
 机载构建使用最小静态 OpenCV，目标端不需要安装 OpenCV；交叉编译和部署细节见
 [`build_and_run.md`](../build_and_run.md) 的“机载 SLAM”。

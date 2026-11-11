@@ -94,6 +94,8 @@ public:
 
     bool running() const;
     std::optional<StereoFrame> latest() const;
+    // Moves the newest decoded frame out without copying the two eye planes.
+    std::optional<StereoFrame> takeLatest();
     StereoStats stats() const;
 
     // Runs on the capture thread. It must not block or call stop().

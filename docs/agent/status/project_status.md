@@ -141,6 +141,12 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   `track()` 稳态约 18–21 ms，最新帧年龄约 41 ms，端到端约 70–100 ms；
   30 fps 下实时裕量较小，20 fps 时 CPU 降至约 1.6 个核、裕量约 15 ms。
   因此运行默认限制为 **25 fps**（预算 40 ms）。
+- P0 优化（2026-11-11）：MJPEG 解码从 V4L2 采集回调移到独立解码线程，只解码
+  最新帧；无回调时 `StereoJpegSource` 移动帧而非复制；主机 bridge 去掉 20 ms
+  定时器，收到位姿立即发布；默认 IMU lookahead 从 15 ms 降到 10 ms；
+  OpenCV 线程默认 2，新增 `--slam-cpu` 绑定选项。25 fps 实测 582 帧：
+  CPU 约 133%，RSS 18–19 MB，`track_ms` 25–30 ms，`age_ms` 约 51 ms。
+  `stamp_source:=host` 时 bridge 发布延迟实测 0–1 ms。
 - SchurVINS 的初始化器原先固定使用 1–50 m 深度范围，已改为读取适配层的
   0.25–20 m 近场参数，解决实机近距桌面场景无法初始化的问题。
 - `SchurVINS::Prediction()` 原会对 `dt >= 15 ms` 直接 `CHECK` 退出；200 Hz
@@ -161,7 +167,8 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 | ROS 2 IMU 输入 | 200.3–200.8 Hz | 开发机接收节点 |
 | ROS 2 双目输入 | 60.0 Hz | 左右各 640x480 mono8 |
 | ROS 2 里程计状态发布 | 1 Hz | `diagnostic_msgs` |
-| 机载 SLAM（25 fps，默认） | CPU 约 1.3 核，RSS 约 27 MB | 单帧 track 约 28 ms，age 约 47 ms |
+| 机载 SLAM（25 fps，P0 优化后） | CPU 约 1.3 核，RSS 18–19 MB | 单帧 track 25–30 ms，age 约 51 ms |
+| 机载 SLAM（25 fps，优化前） | CPU 约 1.3 核，RSS 约 27 MB | 单帧 track 约 28 ms，age 约 47 ms |
 | 机载 SLAM（30 fps） | CPU 1.5–2.0 核，RSS 27–30 MB | 640x480/眼，单帧 track 18–21 ms，age 约 41 ms |
 | 机载 SLAM（20 fps） | CPU 约 1.6 核，RSS 22 MB | 单帧 track 约 35 ms，实时裕量约 15 ms |
 | 机载 SLAM 吞吐 | 29.9 fps / 28.5 fps | 30 fps 长跑 / 600 帧样本 |

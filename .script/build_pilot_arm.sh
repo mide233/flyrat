@@ -22,6 +22,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-${REPO_ROOT}/build-arm}"
 FLYRAT_SYSROOT="${FLYRAT_SYSROOT:-/opt/sysroots/arm64}"
 JOBS="${JOBS:-4}"
+CPU_FLAGS="${CPU_FLAGS:--mcpu=cortex-a55 -mtune=cortex-a55}"
 CMAKE_DIR="${BUILD_DIR}/pilot-cmake"
 CXX="${CROSS_COMPILE:-aarch64-linux-gnu-}g++"
 
@@ -61,6 +62,8 @@ cmake -S flyrat_pilot -B "${CMAKE_DIR}" \
     -DCMAKE_TOOLCHAIN_FILE="${SCRIPT_DIR}/toolchains/aarch64-linux-gnu.cmake" \
     -DFLYRAT_SYSROOT="${FLYRAT_SYSROOT}" \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_FLAGS="${CPU_FLAGS}" \
+    -DCMAKE_CXX_FLAGS="${CPU_FLAGS}" \
     -DFLYRAT_STATIC_DEPS=ON \
     -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
 cmake --build "${CMAKE_DIR}" -j "${JOBS}"

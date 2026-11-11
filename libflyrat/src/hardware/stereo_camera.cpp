@@ -79,6 +79,7 @@ struct StereoCamera::Impl {
     std::uint32_t last_sequence = 0;
     std::string last_error;
     std::chrono::steady_clock::time_point started_at;
+    std::optional<std::chrono::steady_clock::time_point> pts_origin;
 
     void open_device()
     {
@@ -206,6 +207,7 @@ struct StereoCamera::Impl {
         actual_width = 0;
         actual_height = 0;
         source_stride = 0;
+        pts_origin.reset();
     }
 
     void fail(const std::string& message)
@@ -351,16 +353,22 @@ struct StereoCamera::Impl {
         std::function<void(const StereoFrame&)> cb;
         {
             std::lock_guard<std::mutex> lock(mutex);
-            latest = frame;
             cb = callback;
         }
         ++frames;
         if (cb) {
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                latest = frame;
+            }
             try {
                 cb(frame);
             } catch (...) {
                 ++errors;
             }
+        } else {
+            std::lock_guard<std::mutex> lock(mutex);
+            latest = std::move(frame);
         }
     }
 
@@ -440,7 +448,15 @@ struct StereoCamera::Impl {
             }
 
             try {
-                publish(make_mjpeg_frame(source), source.sequence, source.stamp);
+                auto stamp = source.stamp;
+                if (source.pts_ns != 0 && source.pts_ns != UINT64_MAX) {
+                    if (!pts_origin) {
+                        pts_origin = std::chrono::steady_clock::now()
+                            - std::chrono::nanoseconds(source.pts_ns);
+                    }
+                    stamp = *pts_origin + std::chrono::nanoseconds(source.pts_ns);
+                }
+                publish(make_mjpeg_frame(source), source.sequence, stamp);
             } catch (const std::exception&) {
                 ++errors;
             }
@@ -532,6 +548,17 @@ std::optional<StereoFrame> StereoCamera::latest() const
 {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     return impl_->latest;
+}
+
+std::optional<StereoFrame> StereoCamera::takeLatest()
+{
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    if (!impl_->latest) {
+        return std::nullopt;
+    }
+    auto frame = std::move(*impl_->latest);
+    impl_->latest.reset();
+    return frame;
 }
 
 StereoStats StereoCamera::stats() const

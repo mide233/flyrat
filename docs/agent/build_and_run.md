@@ -337,15 +337,17 @@ FLYRAT_PUSH_PILOT=0 跳过二进制推送
 
 | 模式 | CPU | RSS | `track()` | 帧年龄 | 处理帧率 |
 |---|---:|---:|---:|---:|---:|
-| 25 fps（默认） | 约 1.3 核 | 27 MB | 约 28 ms | 约 47 ms | 25.1 fps |
+| 25 fps（P0 优化后） | 约 1.3 核 | 18–19 MB | 25–30 ms | 约 51 ms | 25.0 fps |
+| 25 fps（优化前） | 约 1.3 核 | 27 MB | 约 28 ms | 约 47 ms | 25.1 fps |
 | 30 fps | 1.5–2.0 核 | 27–30 MB | 18–21 ms | 约 41 ms | 29.9 fps |
 | 20 fps | 约 1.6 核 | 22 MB | 约 35 ms | 约 57 ms | 19.7 fps |
 
-30 fps 的帧预算只有 33 ms，CPU 峰值接近 2 核；默认已限制为 **25 fps**
+P0 优化后解码在独立线程、只处理最新帧，bridge 收到即发布，25 fps 下
+`track_ms` 约 25–30 ms；30 fps 的帧预算只有 33 ms，CPU 峰值接近 2 核；默认保持 **25 fps**
 （预算 40 ms），飞行需要更大余量时可用 `fps:=20`。端到端（采集到主机收到）约
 70–100 ms，其中设备时钟比主机快 55–64 ms，`ros2 topic delay` 需要先校正。
 pilot 每 2 s 输出的 `camera_fps/slam_fps/track_ms/age_ms/cpu/rss_mb` 可用于
-复测；`track_ms` 是单帧后端耗时，`age_ms` 含 15 ms IMU lookahead 等待。
+复测；`track_ms` 是单帧后端耗时，`age_ms` 含 10 ms IMU lookahead 等待。
 
 设备位于 `RECENTLY_LOST` 时不发布无效位姿，因此 Foxglove 上的轨迹会暂停；
 状态话题中的 `state` 会显示当前状态。跟踪失败后发送 `adb shell kill -USR1
@@ -537,7 +539,7 @@ auto result = odometry.track(left, right, timestamp, imu_samples);
 
 IMU 必须覆盖帧时间戳两侧：适配层只在 `first_imu <= frame.timestamp <
 last_imu` 时调用前端，否则返回 `kRecentlyLost`。ROS 节点会自动等待
-`imu_lookahead`（默认 15 ms）内的帧后样本。
+`imu_lookahead`（默认 10 ms）内的帧后样本。
 
 SchurVINS 的有效深度范围已按近场设为 0.25–20 m，初始化阈值为 40 个特征、
 40 个跟踪点、30 个内点、视差 10 px。更远的室外场景需要重新调整

@@ -51,6 +51,9 @@ target_link_libraries(flyrat_pilot PRIVATE
   yaml-cpp
   Threads::Threads)
 target_compile_options(flyrat_pilot PRIVATE -Wall -Wextra)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+  target_compile_options(flyrat_pilot PRIVATE -mcpu=cortex-a55 -mtune=cortex-a55)
+endif()
 
 add_executable(flyrat_sensor_forwarder
   src/sensors/sensor_forwarder.cpp

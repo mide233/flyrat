@@ -64,6 +64,9 @@ public:
 
     bool running() const;
     std::optional<StereoJpegFrame> latest() const;
+    // Moves the newest frame out without copying the JPEG payload. Returns
+    // nullopt when no new frame is available.
+    std::optional<StereoJpegFrame> takeLatest();
     StereoJpegStats stats() const;
 
     // Runs on the capture thread. It must not block or call stop().

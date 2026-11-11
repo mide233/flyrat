@@ -176,9 +176,14 @@ public:
         path_max_poses_ = declare_parameter<int>("path_max_poses", 2000);
         publish_tf_ = declare_parameter<bool>("publish_tf", true);
         status_period_s_ = declare_parameter<double>("status_period", 1.0);
+        stamp_source_ = declare_parameter<std::string>("stamp_source", "device");
+        time_offset_s_ = declare_parameter<double>("time_offset", 0.0);
         if (port_ <= 0 || port_ > 65535 || reconnect_ms_ <= 0
             || path_max_poses_ <= 0) {
             throw std::runtime_error("invalid bridge parameters");
+        }
+        if (stamp_source_ != "device" && stamp_source_ != "host") {
+            throw std::runtime_error("stamp_source must be 'device' or 'host'");
         }
 
         odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(
@@ -202,7 +207,6 @@ public:
         }
 
         reader_thread_ = std::thread([this] { readerLoop(); });
-        timer_ = create_wall_timer(20ms, [this] { onTimer(); });
         status_timer_ = create_wall_timer(
             std::chrono::duration<double>(status_period_s_), [this] { publishStatus(); });
     }
@@ -303,6 +307,7 @@ private:
                     latest_ = packet;
                     ++received_;
                 }
+                publishPose(packet);
             }
 
             connected_ = false;
@@ -314,27 +319,32 @@ private:
         }
     }
 
-    void onTimer()
+    void publishPose(const PosePacket& packet)
     {
-        PosePacket packet;
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (!latest_ || latest_->sequence == last_sequence_) {
-                return;
-            }
-            packet = *latest_;
-            last_sequence_ = packet.sequence;
+        if (packet.sequence == last_sequence_) {
+            return;
         }
-        last_pose_time_ = std::chrono::steady_clock::now();
-        last_state_ = packet.pose.state;
+        last_sequence_ = packet.sequence;
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            last_pose_time_ = std::chrono::steady_clock::now();
+            last_state_ = packet.pose.state;
+        }
 
         if (!packet.pose.valid) {
             return;
         }
 
-        const rclcpp::Time stamp = packet.stamp_ns > 0
-            ? rclcpp::Time(packet.stamp_ns)
-            : now();
+        rclcpp::Time stamp;
+        if (stamp_source_ == "host") {
+            stamp = now();
+        } else if (packet.stamp_ns > 0) {
+            const std::int64_t offset_ns
+                = static_cast<std::int64_t>(std::llround(time_offset_s_ * 1e9));
+            stamp = rclcpp::Time(packet.stamp_ns + offset_ns);
+        } else {
+            stamp = now();
+        }
 
         nav_msgs::msg::Odometry odometry;
         odometry.header.stamp = stamp;
@@ -375,15 +385,23 @@ private:
 
     void publishStatus()
     {
+        std::uint8_t last_state = 0;
+        std::chrono::steady_clock::time_point last_pose_time;
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            last_state = last_state_;
+            last_pose_time = last_pose_time_;
+        }
+
         diagnostic_msgs::msg::DiagnosticStatus status;
         status.name = "flyrat_pilot/slam";
         status.hardware_id = "taishanpi";
         if (!connected_) {
             status.level = diagnostic_msgs::msg::DiagnosticStatus::ERROR;
             status.message = "pose stream disconnected";
-        } else if (last_state_ != 1) {
+        } else if (last_state != 1) {
             status.level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
-            status.message = "tracking state: " + stateName(last_state_);
+            status.message = "tracking state: " + stateName(last_state);
         } else {
             status.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
             status.message = "tracking";
@@ -391,7 +409,7 @@ private:
 
         diagnostic_msgs::msg::KeyValue state;
         state.key = "state";
-        state.value = stateName(last_state_);
+        state.value = stateName(last_state);
         status.values.push_back(state);
 
         diagnostic_msgs::msg::KeyValue connected;
@@ -411,11 +429,11 @@ private:
 
         diagnostic_msgs::msg::KeyValue age;
         age.key = "last_pose_age_s";
-        if (last_pose_time_.time_since_epoch().count() == 0) {
+        if (last_pose_time.time_since_epoch().count() == 0) {
             age.value = "never";
         } else {
             const double seconds = std::chrono::duration<double>(
-                std::chrono::steady_clock::now() - last_pose_time_)
+                std::chrono::steady_clock::now() - last_pose_time)
                                        .count();
             age.value = std::to_string(seconds);
         }
@@ -434,13 +452,14 @@ private:
     int path_max_poses_ = 2000;
     bool publish_tf_ = true;
     double status_period_s_ = 1.0;
+    std::string stamp_source_ = "device";
+    double time_offset_s_ = 0.0;
 
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
     rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticStatus>::SharedPtr status_pub_;
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     std::unique_ptr<tf2_ros::StaticTransformBroadcaster> static_broadcaster_;
-    rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::TimerBase::SharedPtr status_timer_;
 
     std::thread reader_thread_;
@@ -452,6 +471,7 @@ private:
     std::mutex mutex_;
     std::optional<PosePacket> latest_;
     std::uint64_t last_sequence_ = 0;
+    std::mutex state_mutex_;
     std::uint8_t last_state_ = 0;
     std::chrono::steady_clock::time_point last_pose_time_ {};
 
