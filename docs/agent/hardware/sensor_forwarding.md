@@ -57,6 +57,11 @@
 --no-imu / --no-tof / --no-stereo
 ```
 
+`--camera-fps` 是**交付/转发帧率**；设备始终按 V4L2 支持的最高采集率请求
+（1280x480 MJPEG 为 60 fps），多余帧在拷贝 JPEG 前丢弃。这样自动曝光时间上限
+被限制在 1/60 s，暗处拖影比按目标帧率采集更短；代价是 USB 带宽略增，但被丢
+弃的帧不进入编码和 TCP 发送队列。
+
 VL53L5CX 的输出裁剪宏（`VL53L5CX_DISABLE_*`）统一写在
 `libflyrat/third_party/vl53l5cx/platform/platform.h`。这些宏会改变
 `VL53L5CX_ResultsData` 的内存布局，C 和 C++ 必须使用同一套；不要再按翻译单元
@@ -110,6 +115,8 @@ acc_lsb_per_g=2048.0
 gyro_lsb_per_dps=16.4
 imu_accel_axis=none
 imu_gyro_axis=none
+stereo_compressed_topic=/flyrat/sensors/stereo/compressed
+stereo_frame_id=camera_stereo
 ```
 
 节点还支持 `reconnect_ms`、`tof_count`、`imu_frame_id`、`tof_frame_id`、
@@ -169,6 +176,7 @@ w_body = C_gyro_i^T * inv(M_gyr) * (w_raw - A * a_gyro)
 /flyrat/sensors/tof_3
 /flyrat/sensors/stereo/left/image_raw
 /flyrat/sensors/stereo/right/image_raw
+/flyrat/sensors/stereo/compressed
 ```
 
 - IMU：`sensor_msgs/msg/Imu`，线加速度为 m/s²、角速度为 rad/s，orientation 暂无，
@@ -176,6 +184,21 @@ w_body = C_gyro_i^T * inv(M_gyr) * (w_raw - A * a_gyro)
 - ToF：每颗一个 `flyrat_sensors_interfaces/msg/TofFrame`，`zones[64]`，
   `valid = target_status in {5, 9}`。
 - 双目：默认 `mono8`，`stereo_color:=true` 时 `bgr8`；宽高为单眼尺寸。
+- 压缩双目：`sensor_msgs/msg/CompressedImage`，`format=jpeg`，内容是设备端
+  原始左右拼接 MJPEG（1280x480）；左右目共用同一个 header stamp，适合直接
+  录制。QoS 为 best-effort、depth 5。
+
+录制时默认只录 `/flyrat/sensors/imu` 与 `/flyrat/sensors/stereo/compressed`，
+bag 中不保存两路独立 raw 图像，因此不会出现左右数量不一致。回放时用
+`stereo_splitter_node` 把压缩话题重新拆成上面两个 raw 话题：
+
+```sh
+ros2 run flyrat_sensors stereo_splitter_node --ros-args -p max_rate:=20.0
+```
+
+它用输入消息的 header stamp 同时发布左右图，输出 QoS 为 reliable（深度由
+`qos_depth` 控制），离线录制时两路更容易成对落盘。该节点只用于 bag 回放/
+离线处理，不要与实时 `sensor_receiver_node` 同时运行，否则会重复发布同名话题。
 
 ## 5. 验收
 
@@ -183,6 +206,7 @@ w_body = C_gyro_i^T * inv(M_gyr) * (w_raw - A * a_gyro)
 ros2 topic hz /flyrat/sensors/imu
 ros2 topic hz /flyrat/sensors/tof_0
 ros2 topic hz /flyrat/sensors/stereo/left/image_raw
+ros2 topic hz /flyrat/sensors/stereo/compressed
 ros2 topic echo --once /flyrat/sensors/tof_0
 ```
 

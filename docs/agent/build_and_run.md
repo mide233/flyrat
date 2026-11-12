@@ -694,11 +694,11 @@ start_adb_forward=true
 start_sensors=true
 start_odometry=true
 mode=imu_stereo        # 纯双目用 mode:=stereo
-camera_fps=60          # 标定录制用 20
+camera_fps=60          # 交付帧率；设备始终以最大 fps 采集（1280x480 为 60），录制默认 30
 camera_config_path=    # 空则自动查找源码树/包内标定
 record=false           # true 时用 ros2 bag record 录传感器
 record_path=           # 空则 /tmp/flyrat_bags/<时间戳>
-record_topics=/flyrat/sensors/imu /flyrat/sensors/stereo/left/image_raw /flyrat/sensors/stereo/right/image_raw
+record_topics=/flyrat/sensors/imu /flyrat/sensors/stereo/compressed
 record_imu_only=false  # true 时只录 IMU（Allan 方差）
 record_storage=mcap
 record_duration=0      # 秒数或 30m/3h；>0 时倒计时并自动停止录制
@@ -723,11 +723,25 @@ trajectory_path=
   record_duration:=3h
 ```
 
-录双目 + IMU 做 Kalibr，相机降到 20 Hz：
+录双目 + IMU：
 
 ```sh
-.script/bringup_real.sh start_odometry:=false camera_fps:=20 record:=true
+.script/bringup_real.sh start_odometry:=false record:=true
 ```
+
+默认录 `/flyrat/sensors/stereo/compressed`（左右拼接的原始 MJPEG）而不是两路
+独立 raw 图像，并把 `camera_fps` 自动降到 30。bag 回放时用 splitter 生成左右
+话题；做 Kalibr 时再限速到 20 Hz：
+
+```sh
+ros2 bag play /tmp/flyrat_bags/<时间戳>
+ros2 run flyrat_sensors stereo_splitter_node --ros-args -p max_rate:=20.0
+ros2 bag record -o /tmp/flyrat_bags/kalibr /flyrat/sensors/stereo/left/image_raw \
+  /flyrat/sensors/stereo/right/image_raw /flyrat/sensors/imu
+```
+
+`stereo_splitter_node` 用同一条压缩消息的 header stamp 同时发布左右图，输出为
+reliable QoS；它只用于回放，不要与实时 `sensor_receiver_node` 同时运行。
 
 默认写到 `/tmp/flyrat_bags/<时间戳>`，用 `record_path:=/path/to/bag` 指定；
 `record_duration` 结束后自动给录制进程发 SIGTERM 并写完 MCAP；录制停止后

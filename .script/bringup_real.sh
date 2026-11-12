@@ -13,7 +13,12 @@
 #   .script/bringup_real.sh start_foxglove:=true
 #   .script/bringup_real.sh start_odometry:=false
 #   .script/bringup_real.sh record:=true record_imu_only:=true record_duration:=3h
+#   .script/bringup_real.sh record:=true record_duration:=10m camera_fps:=30
 #   .script/bringup_real.sh camera_config_path:=/path/to/calibration.yaml
+#
+# Recording defaults to the combined stereo JPEG topic plus IMU and drops the
+# camera to 30 fps unless camera_fps:= is given explicitly. Replay the bag and
+# run stereo_splitter_node to recover the left/right raw image topics.
 #
 # Environment:
 #   ROS_DISTRO                ROS 2 distribution (default: jazzy)
@@ -74,7 +79,7 @@ START_ADB_FORWARD=1
 START_DEVICE=1
 RECORD=0
 RECORD_PATH=""
-RECORD_TOPICS="/flyrat/sensors/imu /flyrat/sensors/stereo/left/image_raw /flyrat/sensors/stereo/right/image_raw"
+RECORD_TOPICS="/flyrat/sensors/imu /flyrat/sensors/stereo/compressed"
 RECORD_IMU_ONLY=0
 RECORD_STORAGE=mcap
 RECORD_DURATION=0
@@ -152,6 +157,7 @@ if [ "${RECORD}" -eq 1 ]; then
     # with SIGTERM from cleanup() and flushes the bag.
     ros2 bag record -s "${RECORD_STORAGE}" -o "${RECORD_PATH}" \
         --topics "${RECORD_TOPIC_ARRAY[@]}" \
+        --max-cache-size 268435456 \
         >"${RECORD_PATH}.log" 2>&1 &
     RECORD_PID=$!
     if [ "${RECORD_DURATION}" -gt 0 ]; then
@@ -186,6 +192,14 @@ has_arg() {
     done
     return 1
 }
+
+# Recording the compressed stereo topic at 60 fps produces roughly 74 MB/s of
+# raw images downstream and makes rosbag2 drop samples. Default the camera to
+# 30 fps while recording so both eyes come from the same, sustainable stream.
+if [ "${RECORD}" -eq 1 ] && [ "${RECORD_IMU_ONLY}" -eq 0 ] &&
+    ! has_arg 'camera_fps:='; then
+    LAUNCH_ARGS+=("camera_fps:=30")
+fi
 
 has_arg 'device_binary:=' || LAUNCH_ARGS+=("device_binary:=${DEVICE_BINARY}")
 if [ -n "${ADB_SERIAL:-}" ]; then

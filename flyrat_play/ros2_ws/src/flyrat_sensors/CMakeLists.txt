@@ -32,7 +32,16 @@ target_link_libraries(sensor_receiver_node PRIVATE
   ${OpenCV_LIBS})
 target_compile_options(sensor_receiver_node PRIVATE -Wall -Wextra)
 
-install(TARGETS sensor_receiver_node
+add_executable(stereo_splitter_node src/stereo_splitter_node.cpp)
+target_include_directories(stereo_splitter_node PRIVATE
+  ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(stereo_splitter_node PRIVATE
+  rclcpp::rclcpp
+  ${sensor_msgs_TARGETS}
+  ${OpenCV_LIBS})
+target_compile_options(stereo_splitter_node PRIVATE -Wall -Wextra)
+
+install(TARGETS sensor_receiver_node stereo_splitter_node
   RUNTIME DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch config
   DESTINATION share/${PROJECT_NAME})

@@ -26,6 +26,7 @@
 #include <opencv2/imgcodecs.hpp>
 
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 
@@ -102,6 +103,10 @@ public:
             "left_frame_id", "camera_left_optical_frame");
         right_frame_id_ = declare_parameter<std::string>(
             "right_frame_id", "camera_right_optical_frame");
+        stereo_compressed_topic_ = declare_parameter<std::string>(
+            "stereo_compressed_topic", "/flyrat/sensors/stereo/compressed");
+        stereo_frame_id_ = declare_parameter<std::string>(
+            "stereo_frame_id", "camera_stereo");
         acc_lsb_per_g_ = declare_parameter<double>("acc_lsb_per_g", 2048.0);
         gyro_lsb_per_dps_ = declare_parameter<double>("gyro_lsb_per_dps", 16.4);
         imu_accel_axis_ = declare_parameter<std::string>("imu_accel_axis", "none");
@@ -192,6 +197,8 @@ public:
             "/flyrat/sensors/stereo/left/image_raw", qos);
         right_pub_ = create_publisher<sensor_msgs::msg::Image>(
             "/flyrat/sensors/stereo/right/image_raw", qos);
+        stereo_compressed_pub_ = create_publisher<sensor_msgs::msg::CompressedImage>(
+            stereo_compressed_topic_, rclcpp::SensorDataQoS().keep_last(5));
         for (int i = 0; i < std::max(tof_count, 0); ++i) {
             tof_pubs_.push_back(create_publisher<flyrat_sensors_interfaces::msg::TofFrame>(
                 "/flyrat/sensors/tof_" + std::to_string(i), qos));
@@ -352,6 +359,8 @@ private:
             break;
         case flyrat::sensors::MessageType::kStats:
             break;
+        case flyrat::sensors::MessageType::kPose:
+            break;
         }
     }
 
@@ -470,6 +479,15 @@ private:
         fill_image(right_msg, right, encoding, stamp, right_frame_id_);
         left_pub_->publish(left_msg);
         right_pub_->publish(right_msg);
+
+        // Keep the original side-by-side JPEG so a recording does not depend
+        // on two independent, best-effort raw image topics staying in step.
+        sensor_msgs::msg::CompressedImage compressed;
+        compressed.header.stamp = stamp;
+        compressed.header.frame_id = stereo_frame_id_;
+        compressed.format = "jpeg";
+        compressed.data.assign(view.jpeg, view.jpeg + view.size);
+        stereo_compressed_pub_->publish(compressed);
         ++stereo_count_;
     }
 
@@ -480,6 +498,8 @@ private:
     std::string tof_frame_prefix_;
     std::string left_frame_id_;
     std::string right_frame_id_;
+    std::string stereo_compressed_topic_;
+    std::string stereo_frame_id_;
     double acc_lsb_per_g_ = 2048.0;
     double gyro_lsb_per_dps_ = 16.4;
     std::string imu_accel_axis_ = "none";
@@ -503,6 +523,7 @@ private:
         tof_pubs_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr left_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr right_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr stereo_compressed_pub_;
 
     std::thread thread_;
     std::atomic<bool> stop_ { false };
