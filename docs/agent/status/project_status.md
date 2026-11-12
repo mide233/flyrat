@@ -36,7 +36,9 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - `hardware::StereoCamera`：UVC 双目相机 V4L2 采集，仅 YUYV。
   - `kYuyv`：原始 YUYV，可输出 YUYV 或 GRAY8。
   - `kGray8`：直接输出灰度（可选）。
-- `hardware::StereoJpegSource`：不解码的原始 MJPEG 采集，供 adb 转发使用。
+- `hardware::StereoJpegSource`：不解码的原始 MJPEG 采集，供 adb 转发使用；
+  始终向 V4L2 请求传感器支持的最大采集率（1280x480 为 60 fps），按 `fps`
+  丢帧交付，以限制自动曝光时长。
 - `hardware::MppJpegDecoder`：`dlopen` 加载 `librockchip_mpp`，异步解码
   MJPEG 为 NV12/NV16 的 Y 平面；由 `flyrat_pilot --decode mpp` 使用。
 

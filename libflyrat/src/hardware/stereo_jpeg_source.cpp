@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <cmath>
 #include <cstring>
 #include <mutex>
 #include <thread>
@@ -39,6 +40,38 @@ std::chrono::steady_clock::time_point to_time_point(const timeval& ts)
         std::chrono::seconds(ts.tv_sec) + std::chrono::microseconds(ts.tv_usec));
 }
 
+// Highest frame rate the driver reports for the given compressed mode. UVC
+// devices normally enumerate discrete intervals; continuous/stepwise ranges
+// are represented by their shortest interval. Returns 0 when the driver does
+// not implement VIDIOC_ENUM_FRAMEINTERVALS.
+double max_supported_fps(int fd, int width, int height)
+{
+    v4l2_frmivalenum interval {};
+    interval.pixel_format = V4L2_PIX_FMT_MJPEG;
+    interval.width = static_cast<std::uint32_t>(width);
+    interval.height = static_cast<std::uint32_t>(height);
+
+    double best = 0.0;
+    for (std::uint32_t index = 0; index < 64; ++index) {
+        interval.index = index;
+        if (xioctl(fd, VIDIOC_ENUM_FRAMEINTERVALS, &interval) < 0) {
+            break;
+        }
+        double fps = 0.0;
+        if (interval.type == V4L2_FRMIVAL_TYPE_DISCRETE) {
+            if (interval.discrete.numerator != 0) {
+                fps = static_cast<double>(interval.discrete.denominator)
+                    / static_cast<double>(interval.discrete.numerator);
+            }
+        } else if (interval.stepwise.min.numerator != 0) {
+            fps = static_cast<double>(interval.stepwise.min.denominator)
+                / static_cast<double>(interval.stepwise.min.numerator);
+        }
+        best = std::max(best, fps);
+    }
+    return best;
+}
+
 constexpr std::size_t kMaxJpegBytes = 8U * 1024U * 1024U;
 
 } // namespace
@@ -68,11 +101,17 @@ struct StereoJpegSource::Impl {
 
     std::atomic<std::uint64_t> frames { 0 };
     std::atomic<std::uint64_t> dropped { 0 };
+    std::atomic<std::uint64_t> throttled { 0 };
     std::atomic<std::uint64_t> errors { 0 };
     std::atomic<std::int64_t> first_stamp_us { -1 };
     std::atomic<std::int64_t> last_stamp_us { 0 };
     bool have_sequence = false;
     std::uint32_t last_sequence = 0;
+    // Delivery throttle state. Timestamps come from the V4L2 buffer so the
+    // rate follows the sensor clock rather than scheduling jitter.
+    bool have_next_due = false;
+    std::int64_t next_due_us = 0;
+    double stream_fps = 0.0;
     std::string last_error;
 
     void open_device()
@@ -111,11 +150,32 @@ struct StereoJpegSource::Impl {
         actual_width = config.width;
         actual_height = config.height;
 
+        // Always ask for the fastest mode the sensor can produce. The maximum
+        // capture rate bounds the automatic exposure time, so dark scenes do
+        // not fall back to long exposures and heavy motion blur. The requested
+        // delivery rate is enforced by dropping frames in capture_loop().
+        const double max_fps = max_supported_fps(fd, config.width, config.height);
+        const double wanted_fps = config.capture_fps > 0
+            ? std::min(static_cast<double>(config.capture_fps), max_fps)
+            : max_fps;
+        stream_fps = wanted_fps >= 1.0 ? wanted_fps : 60.0;
+
         v4l2_streamparm parm {};
         parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         parm.parm.capture.timeperframe.numerator = 1;
-        parm.parm.capture.timeperframe.denominator = static_cast<std::uint32_t>(config.fps);
-        (void)xioctl(fd, VIDIOC_S_PARM, &parm);
+        parm.parm.capture.timeperframe.denominator
+            = static_cast<std::uint32_t>(std::lround(stream_fps));
+        if (xioctl(fd, VIDIOC_S_PARM, &parm) == 0) {
+            v4l2_streamparm actual {};
+            actual.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+            if (xioctl(fd, VIDIOC_G_PARM, &actual) == 0
+                && actual.parm.capture.timeperframe.numerator != 0) {
+                stream_fps = static_cast<double>(
+                    actual.parm.capture.timeperframe.denominator)
+                    / static_cast<double>(
+                        actual.parm.capture.timeperframe.numerator);
+            }
+        }
 
         v4l2_requestbuffers request {};
         request.count = static_cast<std::uint32_t>(std::max(config.buffer_count, 2));
@@ -198,16 +258,55 @@ struct StereoJpegSource::Impl {
         return frame;
     }
 
-    void publish(StereoJpegFrame frame, const v4l2_buffer& meta)
+    void note_sequence(const v4l2_buffer& meta)
     {
         if (have_sequence && meta.sequence > last_sequence + 1) {
             dropped += meta.sequence - last_sequence - 1;
         }
         last_sequence = meta.sequence;
         have_sequence = true;
-        frame.sequence = meta.sequence;
-        frame.stamp = to_time_point(meta.timestamp);
+    }
 
+    std::int64_t buffer_stamp_us(const v4l2_buffer& meta) const
+    {
+        const auto stamp = to_time_point(meta.timestamp);
+        std::int64_t us = std::chrono::duration_cast<std::chrono::microseconds>(
+            stamp.time_since_epoch()).count();
+        if (us <= 0) {
+            us = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+        }
+        return us;
+    }
+
+    // Returns true when this captured frame is due for delivery. Frames that
+    // arrive early are discarded without copying the JPEG.
+    bool delivery_due(std::int64_t stamp_us)
+    {
+        if (config.fps <= 0) {
+            return true;
+        }
+        const std::int64_t period_us = 1000000 / config.fps;
+        if (!have_next_due) {
+            have_next_due = true;
+            next_due_us = stamp_us + period_us;
+            return true;
+        }
+        // Half a millisecond of slack absorbs timestamp rounding without
+        // letting an extra frame through.
+        if (stamp_us + 500 < next_due_us) {
+            ++throttled;
+            return false;
+        }
+        next_due_us += period_us;
+        if (next_due_us <= stamp_us) {
+            next_due_us = stamp_us + period_us;
+        }
+        return true;
+    }
+
+    void publish(StereoJpegFrame frame)
+    {
         const auto stamp_us = std::chrono::duration_cast<std::chrono::microseconds>(
             frame.stamp.time_since_epoch()).count();
         std::int64_t expected = -1;
@@ -276,10 +375,16 @@ struct StereoJpegSource::Impl {
                 break;
             }
 
-            try {
-                publish(make_frame(buffers[meta.index], meta), meta);
-            } catch (const std::exception&) {
-                ++errors;
+            note_sequence(meta);
+            if (delivery_due(buffer_stamp_us(meta))) {
+                try {
+                    StereoJpegFrame frame = make_frame(buffers[meta.index], meta);
+                    frame.sequence = meta.sequence;
+                    frame.stamp = to_time_point(meta.timestamp);
+                    publish(std::move(frame));
+                } catch (const std::exception&) {
+                    ++errors;
+                }
             }
 
             if (xioctl(fd, VIDIOC_QBUF, &meta) < 0) {
@@ -315,11 +420,15 @@ void StereoJpegSource::start()
 
     impl_->frames = 0;
     impl_->dropped = 0;
+    impl_->throttled = 0;
     impl_->errors = 0;
     impl_->first_stamp_us = -1;
     impl_->last_stamp_us = 0;
     impl_->have_sequence = false;
     impl_->last_sequence = 0;
+    impl_->have_next_due = false;
+    impl_->next_due_us = 0;
+    impl_->stream_fps = 0.0;
     {
         std::lock_guard<std::mutex> lock(impl_->mutex);
         impl_->last_error.clear();
@@ -379,7 +488,9 @@ StereoJpegStats StereoJpegSource::stats() const
     StereoJpegStats result;
     result.frames = impl_->frames;
     result.dropped = impl_->dropped;
+    result.throttled = impl_->throttled;
     result.errors = impl_->errors;
+    result.capture_fps = impl_->stream_fps;
     result.width = impl_->actual_width;
     result.height = impl_->actual_height;
     result.running = impl_->running;

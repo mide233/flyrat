@@ -38,7 +38,7 @@ void usage()
         << "  --camera-device PATH default /dev/video10\n"
         << "  --camera-width N     default 1280 (full side-by-side width)\n"
         << "  --camera-height N    default 480\n"
-        << "  --camera-fps N       default 60\n"
+        << "  --camera-fps N       delivered FPS, default 60 (capture always max)\n"
         << "  --no-imu --no-tof --no-stereo\n"
         << "  --help\n";
 }

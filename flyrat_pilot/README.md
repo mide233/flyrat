@@ -41,7 +41,7 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 --msp-raw-rc-hz N      MSP 覆盖前 RC 查询频率，默认 50，0 关闭
 --camera-device DEV    V4L2 MJPEG 设备，默认 /dev/video10
 --width/--height N     左右拼接图尺寸，默认 1280x480
---fps N                相机帧率，默认 25
+--fps N                交付相机帧率，默认 25（采集始终请求传感器最大 fps）
 --decode MODE          MJPEG 解码器：cpu（默认）或 mpp
 --opencv-threads N    OpenCV 工作线程数，默认 2
 --slam-cpu N          把 SLAM 主线程绑定到 CPU N（默认不绑定；与并行重投影冲突，不建议使用）
@@ -218,6 +218,10 @@ RK3566（4 核 A55，2 GB），640x480/眼，静态近距桌面场景：
   **+55～64 ms** 偏差，`ros2 topic delay` 的原始值需要先扣除该偏差。
 - `camera_drops=0`、`skipped=0`，RSS 稳定在 22–30 MB，无内存压力；SoC 热区
   约 60–61°C。
+- 采集始终向相机请求最大 fps（当前 1280x480 MJPEG 为 60 fps），再按 `--fps`
+  丢帧交付。这样自动曝光上限被限制在 1/60 s，暗处拖影明显短于按 25 fps 采集；
+  被丢掉的帧只做 V4L2 DQBUF/QBUF，不拷贝 JPEG，可在 `cam_throttled=` 中看到
+  累计数量。
 - NEON 路径与双目并行重投影把 `track()` 从 25–27 ms 降到 16–17 ms；注意
   启用并行重投影时不要用 `--slam-cpu` 固定 SLAM 线程（工作线程会继承单核
   亲和性）。细节见

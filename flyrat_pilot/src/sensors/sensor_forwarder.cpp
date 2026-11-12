@@ -188,6 +188,11 @@ struct SensorForwarder::Impl {
                     on_stereo(frame);
                 });
                 camera->start();
+                const auto camera_stats = camera->stats();
+                std::cerr << "sensor forwarder: stereo " << config.camera.width
+                          << "x" << config.camera.height << " target "
+                          << config.camera.fps << " fps, capture "
+                          << camera_stats.capture_fps << " fps\n";
             } catch (const std::exception& error) {
                 std::cerr << "sensor forwarder: stereo disabled: " << error.what() << '\n';
                 camera.reset();

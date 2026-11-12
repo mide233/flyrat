@@ -109,7 +109,8 @@ void printUsage(const char* program)
         << "  --camera-device DEV    V4L2 MJPEG device (default /dev/video10)\n"
         << "  --width N              side-by-side width (default 1280)\n"
         << "  --height N             image height (default 480)\n"
-        << "  --fps N                camera frame rate (default 25)\n"
+        << "  --fps N                delivered camera frame rate (default 25);\n"
+        << "                         capture always runs at the sensor maximum\n"
         << "  --decode MODE          MJPEG decoder: cpu (default) or mpp\n"
         << "  --pose-address ADDR    pose stream listen address\n"
         << "  --pose-port PORT       pose stream port (default 5001)\n"
@@ -865,8 +866,11 @@ int main(int argc, char** argv)
                   << ", " << (replaying ? "replay " + options.replay_dir
                                         : "camera " + options.camera_device)
                   << " " << options.width << "x" << options.height
-                  << "@" << options.fps << " fps"
-                  << ", decode " << (hardware_decode ? "mpp" : "cpu")
+                  << "@" << options.fps << " fps";
+        if (!replaying) {
+            std::cerr << " (capture " << camera.stats().capture_fps << " fps)";
+        }
+        std::cerr << ", decode " << (hardware_decode ? "mpp" : "cpu")
                   << (bag ? ", record " + bag->path() : "")
                   << (trace.enabled() ? ", trace " + options.trace_dir : "")
                   << "\n";
@@ -1026,6 +1030,8 @@ int main(int argc, char** argv)
                     = replaying ? replay_frames.load() : camera_stats.frames;
                 const int source_running = replaying ? 1 : camera_stats.running;
                 const int source_errors = replaying ? 0 : camera_stats.errors;
+                const std::uint64_t source_throttled
+                    = replaying ? 0 : camera_stats.throttled;
                 const double camera_fps
                     = (received - last_report_received) / wall_s;
                 const double slam_fps
@@ -1045,6 +1051,7 @@ int main(int argc, char** argv)
                           << " cam_frames=" << source_frames
                           << " cam_running=" << source_running
                           << " cam_errors=" << source_errors
+                          << " cam_throttled=" << source_throttled
                           << " camera_fps=" << camera_fps
                           << " slam_fps=" << slam_fps
                           << " track_ms=" << track_avg << "/" << track_ms_max

@@ -235,7 +235,8 @@ def generate_launch_description():
             description='Path to flyrat_sensor_forwarder on the device.'),
         DeclareLaunchArgument(
             'camera_fps', default_value='60',
-            description='Device stereo FPS; use 20 for Kalibr recording.'),
+            description='Delivered stereo FPS; capture always uses the sensor maximum '
+                        '(60 for 1280x480). Recording scripts default to 30, use 20 for Kalibr.'),
         DeclareLaunchArgument(
             'start_adb_forward', default_value='true',
             description='Create and remove adb forward tcp:LOCAL->tcp:DEVICE.'),
