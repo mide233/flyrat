@@ -136,9 +136,9 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - 已用实机 28 s 桌面 bag 验证短时轨迹：0.35 m 升降、水平漂移约 1 cm；
   尚未做飞行、长距离和长期稳定性验证。
 - IMU 的 scale/misalignment 仍由 `flyrat_sensors/config/imu_intrinsics.yaml`
-  在发布前修正；IMU 时间戳扣除约 3.8 ms 的相机–IMU 固定时间差。
+  在发布前修正；IMU 时间戳扣除约 5.1 ms 的相机–IMU 固定时间差。
 - `imu.T_body_camera` 使用 `kalibr_ws/` 标定的相机→IMU 外参：相机倒置安装，
-  相机原点在 IMU 前方 0.0403 m、右侧 0.0446 m、上方 0.0089 m，基线 0.06475 m。
+  相机原点在 IMU 前方 0.042386 m、右侧 0.045652 m、上方 0.009188 m，基线 0.064667 m。
 
 ### 2.6 机载 SLAM 与位姿回传
 

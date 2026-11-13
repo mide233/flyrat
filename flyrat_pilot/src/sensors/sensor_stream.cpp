@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "sensors/sensor_stream.hpp"
 
+#include "flyrat/time.hpp"
+
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -24,13 +26,8 @@
 namespace flyrat::pilot {
 namespace {
 
-using Clock = std::chrono::steady_clock;
-
-std::int64_t to_ns(Clock::time_point stamp)
-{
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(
-        stamp.time_since_epoch()).count();
-}
+using Clock = flyrat::SteadyClock;
+using flyrat::to_ns;
 
 bool send_all(int fd, const std::vector<std::uint8_t>& data)
 {

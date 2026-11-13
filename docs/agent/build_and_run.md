@@ -232,19 +232,8 @@ build/host/pilot/flyrat_raw_recorder
 ```
 
 重新标定双目或 IMU 时，不要录 `/flyrat/sensors/imu`（已经应用旧 `M/A/C`
-和 `imu_time_offset`）。使用独立原始录制器：
-
-```sh
-# 先检查设备，再按 60 fps 采集、20 fps 保留录制 10 分钟
-.script/bringup_raw_record.sh check:=true
-.script/bringup_raw_record.sh duration:=10m fps:=20 capture_fps:=60 export:=true
-
-# 边录边用 Foxglove 预览（同一份 raw 数据，不影响 bag）
-.script/bringup_raw_record.sh duration:=10m preview:=true
-```
-
-导出目录包含 `imu.csv`、`imu_counts.csv`、`cam0/`、`cam1/` 和
-`metadata.json`。完整流程见
+和 `imu_time_offset`）。使用独立原始录制器 `flyrat_raw_recorder`；检查、录制、
+边录边预览和导出的完整流程见
 [`calibration/raw_recording.md`](calibration/raw_recording.md)。
 
 ### 4.2 交叉编译到泰山派
@@ -473,7 +462,7 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 启动时还会加载 `flyrat_sensors/config/imu_intrinsics.yaml`：打开
 `imu_intrinsics_enable` 后，节点按 Kalibr 的 scale/misalignment 模型修正
 加速度和陀螺仪，并从 IMU 时间戳中扣除 `imu_time_offset`（相机到 IMU 的
-固定时间差，约 3.8 ms）。`imu_corrections:=false` 是总开关关闭：保留
+固定时间差，约 5.1 ms）。`imu_corrections:=false` 是总开关关闭：保留
 lsb→SI 和轴映射，但跳过矩阵和时间偏移。单独关闭 `imu_intrinsics_enable`
 只会跳过矩阵，时间偏移仍生效。YAML 中 `T_i_b` 为单位阵；零偏不写入配置，
 由 SchurVINS 在线估计。
@@ -675,7 +664,7 @@ Foxglove 预览：
 
 IMU 的 scale/misalignment 在 `sensor_receiver_node` 发布前按
 `flyrat_sensors/config/imu_intrinsics.yaml` 修正，IMU 时间戳扣除
-`imu_time_offset`（约 3.8 ms）。这些预处理与具体里程计算法无关，继续保留。
+`imu_time_offset`（约 5.1 ms）。这些预处理与具体里程计算法无关，继续保留。
 大段 IMU 断流后若跟踪停在 `kPaused`，调用 `/flyrat/odometry/reset` 重新初始化。
 
 ### 7.5 一键 bringup

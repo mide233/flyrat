@@ -13,6 +13,7 @@
 
 #include "flyrat/hardware/serial_transport.hpp"
 #include "flyrat/msp_interact.hpp"
+#include "flyrat/time.hpp"
 #include "raw/raw_bag.hpp"
 #include "sensors/sensor_stream.hpp"
 
@@ -22,17 +23,9 @@ namespace {
 
 constexpr char kDefaultMspDevice[] = "/dev/ttyS3";
 
-std::int64_t to_ns(std::chrono::steady_clock::time_point stamp) {
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(stamp.time_since_epoch()).count();
-}
-
-std::int64_t steady_now_ns() { return to_ns(std::chrono::steady_clock::now()); }
-
-std::int64_t system_now_ns() {
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(
-               std::chrono::system_clock::now().time_since_epoch())
-        .count();
-}
+using flyrat::steady_now_ns;
+using flyrat::system_now_ns;
+using flyrat::to_ns;
 
 std::string camera_stats_json(const hardware::StereoJpegStats& stats) {
     std::ostringstream out;

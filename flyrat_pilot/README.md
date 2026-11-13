@@ -106,8 +106,9 @@ trace:=DIR         写出逐帧耗时 CSV，退出时自动拉回主机
 相机始终按 `capture_fps`（默认 60）请求采集，再按 `fps` 丢帧交付。输出
 `raw_sensors.bin`，用 `python3 tools/raw_export.py` 导出 Kalibr 目录。加
 `preview:=true` 会同时转发到主机，默认 `imu_corrections:=false`，不影响
-bag。完整流程见
-[`docs/agent/calibration/raw_recording.md`](../docs/agent/calibration/raw_recording.md)。
+bag。完整流程、参数和导出格式以
+[`docs/agent/calibration/raw_recording.md`](../docs/agent/calibration/raw_recording.md)
+为准。
 
 ## 5. 位姿协议
 

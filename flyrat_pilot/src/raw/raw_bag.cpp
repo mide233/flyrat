@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 
+#include "flyrat/time.hpp"
 #include "raw/raw_bag.hpp"
 
 #include <cerrno>
@@ -98,9 +99,7 @@ bool write_all(std::FILE* file, const void* data, std::size_t size) {
 }
 
 std::int64_t steady_now_ns() {
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(
-               std::chrono::steady_clock::now().time_since_epoch())
-        .count();
+    return flyrat::steady_now_ns();
 }
 
 std::string stats_json(const RawBagStats& stats) {

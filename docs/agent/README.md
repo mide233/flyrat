@@ -30,6 +30,22 @@
 | 项目状态与实测指标 | [`status/project_status.md`](status/project_status.md) |
 | 坐标与标定 | [`odometry/coordinates.md`](odometry/coordinates.md) |
 | Betaflight SITL / Gazebo | [`simulation/betaflight_sitl_gazebo.md`](simulation/betaflight_sitl_gazebo.md) |
+| 脚本入口与分派 | [`.script/README.md`](../../.script/README.md) |
+
+## 脚本入口
+
+日常操作优先使用统一入口，参数原样传给具体脚本：
+
+```sh
+.script/bringup.sh sensors    # 实机传感器 + 里程计 + 可选 Foxglove
+.script/bringup.sh slam       # 机载 SchurVINS + 主机 bridge
+.script/bringup.sh raw        # 原始 IMU/双目录制与标定导出
+.script/bringup.sh build      # 构建
+.script/bringup.sh clean      # 清理构建产物
+.script/bringup.sh foxglove   # 只启动 Foxglove bridge
+```
+
+完整映射见 [`.script/README.md`](../../.script/README.md)。
 
 ## 目录
 

@@ -9,18 +9,13 @@
 #include "flyrat/hardware/serial_transport.hpp"
 #include "flyrat/msp_interact.hpp"
 #include "flyrat/sensors/protocol.hpp"
+#include "flyrat/time.hpp"
 #include "sensors/sensor_stream.hpp"
 
 namespace flyrat::pilot {
 namespace {
 
-using Clock = std::chrono::steady_clock;
-
-std::int64_t to_ns(Clock::time_point stamp)
-{
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(
-        stamp.time_since_epoch()).count();
-}
+using flyrat::to_ns;
 
 } // namespace
 

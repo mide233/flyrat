@@ -128,7 +128,7 @@ stereo_frame_id=camera_stereo
 
 ```text
 imu_intrinsics_enable: true
-imu_time_offset: 0.0038053510703300744
+imu_time_offset: 0.005105770284791938
 imu_acc_M / imu_gyr_M / imu_gyr_A / imu_gyr_C_gyro_i
 ```
 
@@ -223,33 +223,15 @@ ros2 topic echo --once /flyrat/sensors/tof_0
 
 ## 6. 重新标定时的原始录制
 
-转发链路发布的话题**不是**重新标定可用的原始数据：
+转发链路发布的话题**不是**重新标定可用的原始数据：`/flyrat/sensors/imu`
+已经应用 lsb→SI、轴映射、IMU 内参 `M/A/C` 和 `imu_time_offset`；双目话题
+虽然没有去畸变，但也无法还原 IMU 的原始计数。
 
-- `/flyrat/sensors/imu` 已经做了 lsb→SI、轴映射、IMU 内参
-  `M/A/C` 和 `imu_time_offset` 修正；
-- 双目话题只做 JPEG 解码和左右拆分，不做去畸变、缩放或裁剪，但 IMU
-  已经无法从话题还原成 FC 的原始计数。
-
-重新标定双目或 IMU 时使用独立的 `flyrat_raw_recorder`。它直接打开 MSP
-串口和 `/dev/video10`，只保存原始数据：
-
-```sh
-.script/bringup_raw_record.sh duration:=10m fps:=20 capture_fps:=60 export:=true
-```
-
-- IMU：`MSP_RAW_IMU` 的 `int16` 计数（acc/gyro/mag）和采集时的
-  `steady_clock` 时间戳；
-- 相机：V4L2 原生 MJPEG，不拆分、不去畸变、不重编码；
-- 相机始终按 `--camera-capture-fps 60` 请求采集，再由
-  `StereoJpegSource` 的交付节流按 `--camera-fps` 丢帧；
-- 不应用 `imu_time_offset`，也不加载 `imu_intrinsics.yaml`。
-
-加 `preview:=true` 时，录制器会同时用转发协议把同一份 raw IMU/JPEG
-发到主机，脚本自动启动 `sensor_receiver_node` 和 Foxglove bridge；预览
-默认 `imu_corrections:=false`，不会反向影响 bag。
-
-导出与 Kalibr 流程见
-[`../calibration/raw_recording.md`](../calibration/raw_recording.md)。
+重新标定双目或 IMU 时使用独立的 `flyrat_raw_recorder`。它直接打开 MSP 串口
+和 `/dev/video10`，只保存 `MSP_RAW_IMU` 的 `int16` 计数、monotonic 时间戳和
+原生 MJPEG；相机始终按 60 fps 请求采集，再按交付帧率丢帧。录制、边录边预览、
+导出和 Kalibr 流程以
+[`../calibration/raw_recording.md`](../calibration/raw_recording.md) 为准。
 
 ## 7. 已知限制
 
