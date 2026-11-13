@@ -48,7 +48,8 @@ void usage()
     std::printf(
         "usage: decode_bench [--camera /dev/video10] [--mode mpp|cpu|both]\n"
         "                    [--width 1280] [--height 480] [--fps 25]\n"
-        "                    [--seconds 60] [--verify-every 25]\n");
+        "                    [--seconds 60] [--verify-every 25]\n"
+        "  --fps is the delivered rate; capture always uses the sensor maximum.\n");
 }
 
 std::string format_name(int value)
@@ -311,16 +312,18 @@ int main(int argc, char** argv)
         source_drops = stats.dropped;
         source_errors = stats.errors;
 
-        std::printf("\ndevice=%s mode=%s %dx%d@%d wall=%.1fs\n",
+        std::printf("\ndevice=%s mode=%s %dx%d@%d (capture %.0f) wall=%.1fs\n",
             options.device.c_str(), options.mode.c_str(), options.width,
-            options.height, options.fps, wall);
+            options.height, options.fps, stats.capture_fps, wall);
         std::printf("frames=%llu camera_fps=%.2f gaps_gt_100ms=%llu "
-                    "source_drops=%llu source_errors=%llu cpu=%.1f%%\n",
+                    "source_drops=%llu source_errors=%llu throttled=%llu "
+                    "cpu=%.1f%%\n",
             static_cast<unsigned long long>(frames),
             static_cast<double>(frames) / wall,
             static_cast<unsigned long long>(gaps),
             static_cast<unsigned long long>(source_drops),
             static_cast<unsigned long long>(source_errors),
+            static_cast<unsigned long long>(stats.throttled),
             cpu_used / wall * 100.0);
 
         if (want_mpp) {

@@ -68,7 +68,8 @@ OpenCV 的 aarch64 sysroot，再执行：
 .script/build_pilot_arm.sh
 ```
 
-产物是 `build-arm/flyrat_pilot`，只依赖 `libc`、`libm` 和动态加载器。
+产物是 `build-arm/flyrat_pilot`、`build-arm/decode_bench` 和
+`build-arm/flyrat_sensor_forwarder`，只依赖 `libc`、`libm` 和动态加载器。
 脚本默认使用 `/opt/sysroots/arm64`，可用 `FLYRAT_SYSROOT` 覆盖；默认
 `JOBS=4`，避免在内存较小的构建机上触发 OOM。
 
@@ -76,11 +77,15 @@ OpenCV 的 aarch64 sysroot，再执行：
 [`docs/agent/build_and_run.md`](../docs/agent/build_and_run.md) 的
 “机载 SLAM”。
 
-传感器转发仍然用：
+传感器转发器已经包含在上面的完整交叉构建中（`build-arm/flyrat_sensor_forwarder`）。
+只需要转发器时，可以单独执行：
 
 ```bash
 .script/build_sensor_forwarder_arm.sh
 ```
+
+该脚本用 `-static` 手工链接同一条采集/MSP/ToF 代码，产物与完整构建的
+forwarder 功能一致；两者选其一即可，不要同时推送到设备。
 
 ## 3. 机载 SLAM 与位姿回传
 
@@ -263,7 +268,9 @@ python3 flyrat_pilot/tools/analyze_trace.py trace
 - 30 fps 长跑（1800 帧）时静态轨迹三轴范围约 1–2 mm，累计路径 3.9 cm；
   600 帧样本因跟踪状态变化出现约 5 cm 的 z 波动，不能作为精度指标。
 - 只在桌面短时场景验证，尚未做飞行、长距离和长期漂移验证。
-- 左目约 55.7 Hz、右目 60 Hz，左目有约 8% 丢帧且画面更模糊、更亮。
+- 相机始终按传感器支持的最高帧率采集（1280x480 MJPEG 为 60 fps），再按
+  `--fps` 丢弃多余帧；自动曝光上限因此是 1/60 s，暗处不会退到长曝光。
+  左右目来自同一帧、时间戳相同。
 - SchurVINS 为 **GPL-3.0**，`flyrat_pilot` 链接后组合二进制受 GPL 约束；
   libflyrat 自身源文件仍为 MIT。
 

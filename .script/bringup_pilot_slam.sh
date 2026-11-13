@@ -19,7 +19,8 @@
 #   ADB_SERIAL          Device serial when several devices are connected
 #
 # Options:
-#   fps:=N              Camera/SLAM rate (default: 25)
+#   fps:=N              Delivered camera/SLAM rate (default: 25); capture
+#                       always runs at the sensor maximum (60 for 1280x480)
 #   decode:=mpp|cpu     MJPEG decoder (default: mpp, falls back to cpu if MPP fails)
 #   trace:=DIR          Enable per-stage CSV tracing on the device. On exit the
 #                       directory is pulled to <repo>/trace/<name>.

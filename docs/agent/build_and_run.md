@@ -225,20 +225,23 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 --camera-device PATH    默认 /dev/video10
 --camera-width N        默认 1280（左右拼接总宽）
 --camera-height N       默认 480
---camera-fps N          默认 60
+--camera-fps N          交付帧率，默认 60；采集始终使用传感器最大 fps
 --no-imu --no-tof --no-stereo
 --help
 ```
 
 ### 4.2 交叉编译到泰山派
 
-`flyrat_sensor_forwarder` 不依赖 OpenCV，直接用交叉编译器编译：
+`flyrat_sensor_forwarder` 不依赖 OpenCV。完整交叉构建
+（`.script/build_pilot_arm.sh`）会同时生成 `build-arm/flyrat_sensor_forwarder`；
+也可以只用下面的脚本单独构建。两者功能一致，产物不要同时推送：
 
 ```sh
 .script/build_sensor_forwarder_arm.sh
 ```
 
-产物是 `build-arm/flyrat_sensor_forwarder`（AArch64 静态链接）。
+单独构建的产物是 `build-arm/flyrat_sensor_forwarder`（AArch64 静态链接）；
+`build_pilot_arm.sh` 生成的同名文件是动态链接版本。
 
 `flyrat_pilot` 需要 OpenCV、yaml-cpp 和 glog。目标 rootfs 没有这些库，因此
 使用 `.script/build_pilot_arm.sh` 链接 sysroot 中的静态依赖：
@@ -325,7 +328,12 @@ ros2 run flyrat_sensors sensor_receiver_node
 /flyrat/sensors/tof_0 … /flyrat/sensors/tof_3
 /flyrat/sensors/stereo/left/image_raw
 /flyrat/sensors/stereo/right/image_raw
+/flyrat/sensors/stereo/compressed
 ```
+
+`stereo/compressed` 是左右拼接的原始 MJPEG（`CompressedImage`，`format=jpeg`），
+`header.stamp` 与左右 `Image` 完全相同，录制时只录这一条即可避免双目丢帧
+不一致。回放时用 `stereo_splitter_node` 拆回左右话题。
 
 默认 `stereo_color=false`，发布 mono8；需要彩色时设置
 `stereo_color:=true`，发布 bgr8。
@@ -387,9 +395,11 @@ FLYRAT_PUSH_PILOT=0 跳过二进制推送
 
 当前版本启用 NEON 与双目并行重投影后，25 fps 下 `track_ms` 约 16–17 ms，
 40 ms 帧预算余量约 23 ms；30 fps 约 15–16 ms，预算 33 ms，余量约 17 ms。
-默认保持 **25 fps**，飞行需要更大余量时可用 `fps:=20`。端到端（采集到主机收到）约
+默认保持 **25 fps**，飞行需要更大余量时可用 `fps:=20`。相机始终按传感器最高
+帧率采集（1280x480 为 60 fps），表中的帧率是交付帧率；多余帧在拷贝 JPEG 前丢弃，
+同时把自动曝光上限限制为 1/60 s。端到端（采集到主机收到）约
 70–100 ms，其中设备时钟比主机快 55–64 ms，`ros2 topic delay` 需要先校正。
-pilot 每 2 s 输出的 `camera_fps/slam_fps/track_ms/age_ms/cpu/rss_mb` 可用于
+pilot 每 2 s 输出的 `camera_fps/slam_fps/track_ms/age_ms/cam_throttled/cpu/rss_mb` 可用于
 复测；`track_ms` 是单帧后端耗时，`age_ms` 含 10 ms IMU lookahead 等待。
 
 设备位于 `RECENTLY_LOST` 时不发布无效位姿，因此 Foxglove 上的轨迹会暂停；

@@ -193,9 +193,10 @@ has_arg() {
     return 1
 }
 
-# Recording the compressed stereo topic at 60 fps produces roughly 74 MB/s of
-# raw images downstream and makes rosbag2 drop samples. Default the camera to
-# 30 fps while recording so both eyes come from the same, sustainable stream.
+# Recording at 60 fps makes downstream consumers decode roughly 74 MB/s of
+# raw stereo images and can make rosbag2 fall behind. Default the delivered
+# camera rate to 30 fps while recording; capture still runs at the sensor
+# maximum, so the exposure limit stays short.
 if [ "${RECORD}" -eq 1 ] && [ "${RECORD_IMU_ONLY}" -eq 0 ] &&
     ! has_arg 'camera_fps:='; then
     LAUNCH_ARGS+=("camera_fps:=30")

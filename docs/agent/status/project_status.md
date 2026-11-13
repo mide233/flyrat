@@ -65,6 +65,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   - `/flyrat/sensors/tof_0` … `/flyrat/sensors/tof_3`
   - `/flyrat/sensors/stereo/left/image_raw`
   - `/flyrat/sensors/stereo/right/image_raw`
+  - `/flyrat/sensors/stereo/compressed`（左右拼接 MJPEG，录制用）
 
 ### 2.4 里程计后端
 
@@ -232,8 +233,9 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - adb 链路约 30 MB/s，不能直接转发 640x480/眼@60 的原始 NV12。
 - 里程计已用单个实机桌面 bag 验证短时相对尺度和漂移，尚未验证飞行、长距离
   和长期稳定性。
-- 实机左目约 55.7 Hz、右目 60 Hz，左目有约 8% 丢帧且更模糊、更亮；当前
-  场景仍可跟踪，但高速运动时的鲁棒性需要继续观察。
+- 相机采集统一使用传感器最高帧率（1280x480 为 60 fps），按 `--fps` 或
+  `--camera-fps` 丢帧交付；左右目来自同一帧，时间戳与丢帧行为一致，
+  自动曝光上限因此为 1/60 s。
 - SchurVINS 为 GPL-3.0，链接后的 `odometry_node` 组合二进制受 GPL 约束；
   libflyrat 自身源文件仍为 MIT。
 - 大段 IMU 断流或长时间跟踪失败后，SVO 可能停在 `kPaused`；需要手动调用
