@@ -89,3 +89,6 @@ AGENTS.md
 
 # Python bytecode
 __pycache__/
+
+# Raw calibration recordings
+flyrat_raw/

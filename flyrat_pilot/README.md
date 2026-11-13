@@ -1,18 +1,20 @@
 # flyrat_pilot
 
-实机端程序，不依赖 ROS。包含两个可执行文件：
+实机端程序，不依赖 ROS。包含三个可执行文件：
 
 - `flyrat_pilot`：在设备本地解码双目 MJPEG、读取 MSP IMU，运行 SchurVINS
   双目惯性里程计，通过 TCP 把 `T_world_body` 位姿发给主机。
 - `flyrat_sensor_forwarder`：把原始 IMU、ToF 和双目 MJPEG 转发给主机 ROS 2，
   用于录包和开发机算法验证。
+- `flyrat_raw_recorder`：为重新标定直接录制 MSP IMU 原始计数和原生 MJPEG，
+  不应用旧内参、轴映射、时间偏移或去畸变。
 
 主机侧 `flyrat_pilot_bridge` 把位姿流转换成 `nav_msgs/Odometry`、
 `nav_msgs/Path` 和 TF，供 Foxglove 查看。
 
 ## 1. 快速构建
 
-宿主机构建（libflyrat + pilot + forwarder）：
+宿主机构建（libflyrat + pilot + forwarder + raw recorder）：
 
 ```bash
 ./.script/build_all.sh --lib --pilot
@@ -23,6 +25,7 @@
 ```text
 build/host/pilot/flyrat_pilot
 build/host/pilot/flyrat_sensor_forwarder
+build/host/pilot/flyrat_raw_recorder
 ```
 
 配置自检（不打开相机和串口）：
@@ -48,6 +51,7 @@ OpenCV 的 aarch64 sysroot，再执行：
 build/arm/flyrat_pilot
 build/arm/decode_bench
 build/arm/flyrat_sensor_forwarder
+build/arm/flyrat_raw_recorder
 ```
 
 `build/arm/static/flyrat_sensor_forwarder` 是 `--static-forwarder` 生成的全静态
@@ -89,7 +93,20 @@ trace:=DIR         写出逐帧耗时 CSV，退出时自动拉回主机
 /flyrat/odometry/status     diagnostic_msgs/DiagnosticStatus，1 Hz
 ```
 
-## 4. 位姿协议
+## 4. 原始标定录制
+
+```bash
+./build/host/pilot/flyrat_raw_recorder --self-test
+.script/bringup_raw_record.sh check:=true
+.script/bringup_raw_record.sh duration:=10m fps:=20 capture_fps:=60 export:=true
+```
+
+相机始终按 `capture_fps`（默认 60）请求采集，再按 `fps` 丢帧交付。输出
+`raw_sensors.bin`，用 `python3 tools/raw_export.py` 导出 Kalibr 目录。完整
+流程见
+[`docs/agent/calibration/raw_recording.md`](../docs/agent/calibration/raw_recording.md)。
+
+## 5. 位姿协议
 
 设备回传 64 字节 `PosePayload`，外层复用
 `libflyrat/include/flyrat/sensors/protocol.hpp` 的 28 字节帧头：
@@ -106,7 +123,7 @@ uint8  reserved[6]
 `device_time_ns` 是 Unix epoch 纳秒。body 为 `imu_link`（FLU），world 原点在
 首次初始化位置。服务只保留最新位姿，主机断线重连不会补发历史帧。
 
-## 5. 行为与限制
+## 6. 行为与限制
 
 - 相机始终按传感器支持的最高帧率采集（1280x480 MJPEG 为 60 fps），再按
   `--fps` 丢弃多余帧；自动曝光上限因此是 1/60 s，暗处不会退到长曝光。
@@ -120,7 +137,7 @@ uint8  reserved[6]
 - SchurVINS 为 **GPL-3.0**，`flyrat_pilot` 链接后组合二进制受 GPL 约束；
   libflyrat 自身源文件仍为 MIT。
 
-## 6. 更多文档
+## 7. 更多文档
 
 - 构建、ROS 2、SITL、实机启动：[`docs/agent/build_and_run.md`](../docs/agent/build_and_run.md)
 - 传感器转发、rosbag 录制、splitter、Kalibr：[`docs/agent/hardware/sensor_forwarding.md`](../docs/agent/hardware/sensor_forwarding.md)

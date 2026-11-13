@@ -11,6 +11,7 @@
 2. [`build_and_run.md`](build_and_run.md)：所有组件的编译、测试与运行命令。
 3. 按任务选择主题文档：
    - 实机传感器 → [`hardware/sensor_forwarding.md`](hardware/sensor_forwarding.md)
+   - 双目/IMU 重新标定 → [`calibration/raw_recording.md`](calibration/raw_recording.md)
    - 仿真 → [`simulation/betaflight_sitl_gazebo.md`](simulation/betaflight_sitl_gazebo.md)
    - 里程计 → [`odometry/overview.md`](odometry/overview.md)
    - 坐标系与变换 → [`odometry/coordinates.md`](odometry/coordinates.md)
@@ -23,7 +24,8 @@
 | 主题 | 权威文档 |
 |---|---|
 | 构建、运行、ROS 2、SITL、实机启动 | [`build_and_run.md`](build_and_run.md) |
-| 传感器转发、录制、回放、splitter、Kalibr | [`hardware/sensor_forwarding.md`](hardware/sensor_forwarding.md) |
+| 传感器转发、录制、回放、splitter | [`hardware/sensor_forwarding.md`](hardware/sensor_forwarding.md) |
+| 双目/IMU 重新标定的原始录制与导出 | [`calibration/raw_recording.md`](calibration/raw_recording.md) |
 | 性能、分阶段计时、MJPEG 解码、优化记录 | [`odometry/performance.md`](odometry/performance.md) |
 | 项目状态与实测指标 | [`status/project_status.md`](status/project_status.md) |
 | 坐标与标定 | [`odometry/coordinates.md`](odometry/coordinates.md) |
@@ -47,6 +49,12 @@
 - [`hardware/sensor_forwarding.md`](hardware/sensor_forwarding.md)
   泰山派上的 IMU、4 颗 VL53L5CX ToF、双目相机如何采集、打包并通过 adb
   转发到开发机 ROS 2。
+
+### 标定
+
+- [`calibration/raw_recording.md`](calibration/raw_recording.md)
+  原始 IMU 计数和原生 MJPEG 的录制、导出、Kalibr folder 生成，以及重新
+  标定后旧数据能否复用。
 
 ### 仿真
 

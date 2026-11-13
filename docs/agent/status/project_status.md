@@ -67,6 +67,23 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   - `/flyrat/sensors/stereo/right/image_raw`
   - `/flyrat/sensors/stereo/compressed`（左右拼接 MJPEG，录制用）
 
+#### 原始标定录制
+
+重新标定双目/IMU 不能使用 `/flyrat/sensors/imu`，因为它已经应用旧 IMU
+内参、轴映射和 `imu_time_offset`。新增独立设备端程序
+`flyrat_raw_recorder`：
+
+- 直接读取 `MSP_RAW_IMU` 的 `int16` counts 和 V4L2 原生 MJPEG；
+- 相机始终按 60 fps 请求采集，再按交付帧率丢帧；
+- 不加载标定 YAML，不做单位换算、轴翻转、时间偏移、去畸变或左右拆分；
+- 输出 `raw_sensors.bin`，由 `flyrat_pilot/tools/raw_export.py` 导出
+  `imu.csv`、`imu_counts.csv`、`cam0/`、`cam1/`。
+
+一键脚本 `.script/bringup_raw_record.sh`；完整流程见
+[`calibration/raw_recording.md`](../calibration/raw_recording.md)。已在开发机
+用 Radiolink F722（200 Hz）和 UVC 相机（测试机仅支持 30 fps 采集，交付
+10 fps）验证：3 秒录制得到 601 个 IMU 样本、28 帧图像，无队列丢帧，导出正常。
+
 ### 2.4 里程计后端
 
 完整接口、配置和接入方式见

@@ -165,6 +165,7 @@ adb shell '/tmp/decode_bench --camera /dev/video10 --mode both --seconds 60'
 ```text
 build/host/pilot/flyrat_pilot
 build/host/pilot/flyrat_sensor_forwarder
+build/host/pilot/flyrat_raw_recorder
 ```
 
 运行主程序（机载 SLAM；需要相机、飞控串口和标定文件）：
@@ -230,12 +231,26 @@ build/host/pilot/flyrat_sensor_forwarder
 --help
 ```
 
+重新标定双目或 IMU 时，不要录 `/flyrat/sensors/imu`（已经应用旧 `M/A/C`
+和 `imu_time_offset`）。使用独立原始录制器：
+
+```sh
+# 先检查设备，再按 60 fps 采集、20 fps 保留录制 10 分钟
+.script/bringup_raw_record.sh check:=true
+.script/bringup_raw_record.sh duration:=10m fps:=20 capture_fps:=60 export:=true
+```
+
+导出目录包含 `imu.csv`、`imu_counts.csv`、`cam0/`、`cam1/` 和
+`metadata.json`。完整流程见
+[`calibration/raw_recording.md`](calibration/raw_recording.md)。
+
 ### 4.2 交叉编译到泰山派
 
 `flyrat_sensor_forwarder` 不依赖 OpenCV。完整交叉构建
 （`.script/build_pilot_arm.sh`）会生成动态链接的
-`build/arm/flyrat_sensor_forwarder`；加 `--static-forwarder` 会额外生成一份
-全静态版本，便于在没有目标 sysroot 库的 rootfs 上运行：
+`build/arm/flyrat_sensor_forwarder` 和 `build/arm/flyrat_raw_recorder`；
+加 `--static-forwarder` 会额外生成一份全静态 forwarder，便于在没有目标
+sysroot 库的 rootfs 上运行：
 
 ```sh
 ./.script/build_pilot_arm.sh --static-forwarder
@@ -742,13 +757,19 @@ trajectory_path=
 
 默认录 `/flyrat/sensors/stereo/compressed`（左右拼接的原始 MJPEG）而不是两路
 独立 raw 图像，并把 `camera_fps` 自动降到 30。bag 回放时用 splitter 生成左右
-话题；做 Kalibr 时再限速到 20 Hz：
+话题。**这条 IMU 路径已经应用旧标定，不能用于重新标定 IMU**；重新标定请用
+`bringup_raw_record.sh`，见
+[`calibration/raw_recording.md`](calibration/raw_recording.md)。以下仅供回放
+和旧 bag 的离线使用：
+
+旧 bag 的 IMU 已经应用旧标定，只能用于回放；如果只是从旧 bag 重新导出
+双目图像做相机标定，可以只录左右图：
 
 ```sh
 ros2 bag play /tmp/flyrat_bags/<时间戳>
 ros2 run flyrat_sensors stereo_splitter_node --ros-args -p max_rate:=20.0
 ros2 bag record -o /tmp/flyrat_bags/kalibr /flyrat/sensors/stereo/left/image_raw \
-  /flyrat/sensors/stereo/right/image_raw /flyrat/sensors/imu
+  /flyrat/sensors/stereo/right/image_raw
 ```
 
 `stereo_splitter_node` 用同一条压缩消息的 header stamp 同时发布左右图，输出为

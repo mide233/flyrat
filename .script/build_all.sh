@@ -18,11 +18,12 @@
 #
 # Outputs:
 #   build/host/libflyrat            host core library, tests, and tools
-#   build/host/pilot                host flyrat_pilot and sensor forwarder
+#   build/host/pilot                host flyrat_pilot, forwarder and raw recorder
 #   build/arm/pilot-cmake           cross build tree
 #   build/arm/flyrat_pilot          stripped RK3566 pilot binary
 #   build/arm/decode_bench          stripped decoder benchmark
 #   build/arm/flyrat_sensor_forwarder  stripped dynamic forwarder
+#   build/arm/flyrat_raw_recorder   stripped raw calibration recorder
 #   build/arm/static/flyrat_sensor_forwarder  fully static forwarder
 #
 # Environment:

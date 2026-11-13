@@ -218,7 +218,33 @@ ros2 topic echo --once /flyrat/sensors/tof_0
 
 拔掉 adb 后 receiver 会每秒重连；重新执行 `adb forward` 后恢复。
 
-## 6. 已知限制
+## 6. 重新标定时的原始录制
+
+转发链路发布的话题**不是**重新标定可用的原始数据：
+
+- `/flyrat/sensors/imu` 已经做了 lsb→SI、轴映射、IMU 内参
+  `M/A/C` 和 `imu_time_offset` 修正；
+- 双目话题只做 JPEG 解码和左右拆分，不做去畸变、缩放或裁剪，但 IMU
+  已经无法从话题还原成 FC 的原始计数。
+
+重新标定双目或 IMU 时使用独立的 `flyrat_raw_recorder`。它直接打开 MSP
+串口和 `/dev/video10`，只保存原始数据：
+
+```sh
+.script/bringup_raw_record.sh duration:=10m fps:=20 capture_fps:=60 export:=true
+```
+
+- IMU：`MSP_RAW_IMU` 的 `int16` 计数（acc/gyro/mag）和采集时的
+  `steady_clock` 时间戳；
+- 相机：V4L2 原生 MJPEG，不拆分、不去畸变、不重编码；
+- 相机始终按 `--camera-capture-fps 60` 请求采集，再由
+  `StereoJpegSource` 的交付节流按 `--camera-fps` 丢帧；
+- 不应用 `imu_time_offset`，也不加载 `imu_intrinsics.yaml`。
+
+导出与 Kalibr 流程见
+[`../calibration/raw_recording.md`](../calibration/raw_recording.md)。
+
+## 7. 已知限制
 
 - ToF 地址是易失的，掉电后会回到 `0x52`；当前的启动探测会自动恢复并改回固定地址。
   LPn 拉低只关闭 I2C，不复位地址。

@@ -18,6 +18,7 @@
 #   flyrat_pilot                 stripped pilot binary
 #   decode_bench                 stripped decoder benchmark
 #   flyrat_sensor_forwarder      stripped dynamically linked forwarder
+#   flyrat_raw_recorder          stripped raw IMU/camera calibration recorder
 #   static/flyrat_sensor_forwarder  fully static forwarder
 #
 # Environment:
@@ -73,7 +74,7 @@ fi
 if [ "${CLEAN}" -eq 1 ]; then
     rm -rf "${CMAKE_DIR}" "${STATIC_DIR}"
     rm -f "${BUILD_DIR}/flyrat_pilot" "${BUILD_DIR}/decode_bench" \
-        "${BUILD_DIR}/flyrat_sensor_forwarder"
+        "${BUILD_DIR}/flyrat_sensor_forwarder" "${BUILD_DIR}/flyrat_raw_recorder"
 fi
 mkdir -p "${BUILD_DIR}"
 
@@ -94,9 +95,12 @@ cp "${CMAKE_DIR}/decode_bench" "${BUILD_DIR}/decode_bench"
 "${CROSS_COMPILE}strip" "${BUILD_DIR}/decode_bench" 2>/dev/null || true
 cp "${CMAKE_DIR}/flyrat_sensor_forwarder" "${BUILD_DIR}/flyrat_sensor_forwarder"
 "${CROSS_COMPILE}strip" "${BUILD_DIR}/flyrat_sensor_forwarder" 2>/dev/null || true
+cp "${CMAKE_DIR}/flyrat_raw_recorder" "${BUILD_DIR}/flyrat_raw_recorder"
+"${CROSS_COMPILE}strip" "${BUILD_DIR}/flyrat_raw_recorder" 2>/dev/null || true
 echo "[cross] binary: ${BUILD_DIR}/flyrat_pilot"
 echo "[cross] helper: ${BUILD_DIR}/decode_bench"
 echo "[cross] helper: ${BUILD_DIR}/flyrat_sensor_forwarder"
+echo "[cross] helper: ${BUILD_DIR}/flyrat_raw_recorder"
 
 if [ "${STATIC_FORWARDER}" -eq 1 ]; then
     # The forwarder only needs the libflyrat hardware/MSP sources and the

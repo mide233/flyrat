@@ -64,6 +64,33 @@ target_link_libraries(flyrat_sensor_forwarder PRIVATE
   flyrat::flyrat_hardware)
 target_compile_options(flyrat_sensor_forwarder PRIVATE -Wall -Wextra)
 
+# Calibration recorder: raw MSP IMU counts and native MJPEG frames, with no
+# calibration, axis mapping, time offset or image rectification applied.
+add_executable(flyrat_raw_recorder
+  src/raw/raw_bag.cpp
+  src/raw/raw_recorder.cpp
+  src/raw/raw_recorder_main.cpp)
+target_include_directories(flyrat_raw_recorder PRIVATE src)
+target_link_libraries(flyrat_raw_recorder PRIVATE
+  flyrat::flyrat_msp_interact
+  flyrat::flyrat_hardware
+  Threads::Threads)
+target_compile_options(flyrat_raw_recorder PRIVATE -Wall -Wextra)
+execute_process(
+  COMMAND git rev-parse --short HEAD
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+  OUTPUT_VARIABLE FLYRAT_GIT_COMMIT
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET)
+if(NOT FLYRAT_GIT_COMMIT)
+  set(FLYRAT_GIT_COMMIT "unknown")
+endif()
+target_compile_definitions(flyrat_raw_recorder PRIVATE
+  FLYRAT_GIT_COMMIT="${FLYRAT_GIT_COMMIT}")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+  target_compile_options(flyrat_raw_recorder PRIVATE -mcpu=cortex-a55 -mtune=cortex-a55)
+endif()
+
 # Smallest continuous hardware-decode check: capture real MJPEG from the
 # camera, decode every frame on the VPU and compare against OpenCV.
 add_executable(decode_bench tools/decode_bench.cpp)
