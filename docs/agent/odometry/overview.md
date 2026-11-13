@@ -180,7 +180,7 @@ SchurVINS 需要 IMU，因此 `mode:=stereo` 只对桩后端有意义；启用 S
 ## 5. 构建与运行
 
 ```sh
-.script/build_libflyrat.sh
+./.script/build_all.sh --lib
 .script/build_ros2.sh
 ```
 
@@ -188,7 +188,7 @@ SchurVINS 需要 IMU，因此 `mode:=stereo` 只对桩后端有意义；启用 S
 只使用接口或在不具备这些依赖的平台上构建：
 
 ```sh
-cmake -S libflyrat -B libflyrat/build -DFLYRAT_WITH_SCHURVINS=OFF
+cmake -S libflyrat -B build/host/libflyrat -DFLYRAT_WITH_SCHURVINS=OFF
 ```
 
 SVO 默认关闭逐帧调试输出；需要排查前端行为时加
@@ -224,12 +224,12 @@ ros2 launch flyrat_odometry odometry.launch.py
 ### 5.1 机载模式
 
 机载 MJPEG 硬件解码的调研和实测结论见
-[`mjpeg_decode_research.md`](mjpeg_decode_research.md)。硬件路径直接调用
+[`performance.md`](performance.md)。硬件路径直接调用
 MPP 异步接口，`decode_bench` 在 25 fps 下连续 60 s 无停流；`flyrat_pilot`
 可通过 `--decode mpp` 启用（启动脚本默认 `mpp`，二进制默认仍是 CPU）。
 
 `--trace DIR` 可写出逐帧耗时（pilot 时间线和 SVO 阶段），实测与优化候选见
-[`performance_profiling.md`](performance_profiling.md)。
+[`performance.md`](performance.md)。
 
 开发机模式把双目和 IMU 经 adb 传到主机，再由 `odometry_node` 计算。机载模式
 把 SchurVINS 放到 RK3566 上，主机只接收位姿：
@@ -252,7 +252,7 @@ MPP 异步接口，`decode_bench` 在 25 fps 下连续 60 s 无停流；`flyrat_
 ## 6. 测试
 
 ```sh
-ctest --test-dir libflyrat/build --output-on-failure -R odometry
+ctest --test-dir build/host/libflyrat --output-on-failure -R odometry
 ```
 
 测试覆盖：标定路径校验、空图像/尺寸不一致拒绝、无 IMU 时返回
@@ -261,16 +261,20 @@ SchurVINS 时 TUM 轨迹文件可写。
 
 ## 7. 当前限制
 
+状态、验证范围和实测指标统一维护在
+[`project_status.md`](../status/project_status.md)，性能数据见
+[`performance.md`](performance.md)。
+
 - 双目与 IMU 没有硬件同步；`imu_lookahead` 只能补偿软件时间戳，不能消除
   曝光/传输抖动。
 - 大段 IMU 断流或长时间跟踪失败后，SVO 可能停在 `kPaused`；此时需要调用
   `/flyrat/odometry/reset` 重新初始化，尚未实现自动重初始化。
-- 已在单个实机桌面 bag 上验证短时相对尺度和漂移（0.35 m 升降、水平漂移约
-  1 cm），尚未做飞行、长距离和长期稳定性验证；`kfselect_*`、`max_n_kfs`
-  等参数目前直接写入适配层，尚未暴露为 YAML 参数。
+- 已在单个实机桌面 bag 上做过短时验证，尚未做飞行、长距离和长期稳定性验证；
+  `kfselect_*`、`max_n_kfs` 等参数目前直接写入适配层，尚未暴露为 YAML 参数。
 - 相机始终以传感器最高帧率采集（1280x480 为 60 fps），再按目标帧率丢帧；
   左右目同源同 stamp，自动曝光上限为 1/60 s，暗处拖影明显减轻。
 - 组合二进制受 GPL-3.0 约束，详见文首。
-- 机载模式已在 RK3566 静态桌面场景验证：默认 25 fps，进程 RSS 约 27–30 MB；
-  完全静止时跟踪会间歇进入 `RECENTLY_LOST`，移动后恢复，长时间失败需发送
-  `SIGUSR1` 重建前端。尚未做飞行和长期漂移验证。
+- 机载模式在 RK3566 静态桌面场景下可稳定运行；完全静止时跟踪会间歇进入
+  `RECENTLY_LOST`，移动后恢复，长时间失败需发送 `SIGUSR1` 重建前端。尚未做
+  飞行和长期漂移验证，具体指标见
+  [`project_status.md`](../status/project_status.md)。

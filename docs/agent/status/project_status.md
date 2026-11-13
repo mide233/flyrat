@@ -123,68 +123,23 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 
 ### 2.6 机载 SLAM 与位姿回传
 
-- `flyrat_pilot`：设备端解码双目 MJPEG（1280x480，默认 25 fps，左右各
-  640x480）、读取 200 Hz MSP IMU、按 `imu_intrinsics.yaml` 做
-  scale/misalignment 和时间偏移修正，在本地运行 SchurVINS。
-- 位姿语义为 `T_world_body`，body 为 `imu_link`；只通过 TCP 5001 发送 64 字节
+- `flyrat_pilot`：设备端解码双目 MJPEG（1280x480，默认交付 25 fps，左右各
+  640x480），读取 200 Hz MSP IMU，在本地运行 SchurVINS。
+- 位姿语义为 `T_world_body`，body 为 `imu_link`；通过 TCP 5001 发送 64 字节
   `kPose` 包（位置、四元数、valid、state、epoch 时间戳）。
-- 新增 `libflyrat` 协议消息 `kPose` 和 `PosePayload`；IMU 转换、TCP 位姿流分别
-  在 `flyrat_pilot/src/slam/` 下实现。
-- 新增主机 ROS 2 包 `flyrat_pilot_bridge`：发布
-  `/flyrat/odometry/odometry`、`/flyrat/odometry/path`、
-  `/flyrat/odometry/status`，以及 `odometry_map -> imu_link` 动态 TF 和相机
-  静态 TF。
-- `.script/build_pilot_arm.sh`：用最小静态 OpenCV + sysroot 静态 glog/
-  yaml-cpp/gflags 交叉编译，`build-arm/flyrat_pilot` 约 11 MB，只依赖
-  `libc/libm/ld-linux`。
-- `.script/bringup_pilot_slam.sh`：推送二进制和标定、adb forward 5001、
-  启动设备 SLAM、主机 bridge 和可选 Foxglove，退出时自动清理。
-- 实机 RK3566 实测：默认 25 fps；30 fps 压力测试处理 250 帧全部成功，随后
-  450 帧、600 帧和 1800 帧（60 s）连续运行均完成，进程峰值 RSS 约
-  27–30 MB。静态场景下跟踪会间歇进入 `RECENTLY_LOST`。
-- 性能基线（30 fps，640x480/眼）：CPU 约 1.5–2.0 个核（135–200%），单帧
-  `track()` 稳态约 18–21 ms，最新帧年龄约 41 ms，端到端约 70–100 ms；
-  30 fps 下实时裕量较小，20 fps 时 CPU 降至约 1.6 个核、裕量约 15 ms。
-  因此运行默认限制为 **25 fps**（预算 40 ms）。
-- P0 优化（2026-11-11）：MJPEG 解码从 V4L2 采集回调移到独立解码线程，只解码
-  最新帧；无回调时 `StereoJpegSource` 移动帧而非复制；主机 bridge 去掉 20 ms
-  定时器，收到位姿立即发布；默认 IMU lookahead 从 15 ms 降到 10 ms；
-  OpenCV 线程默认 2，新增 `--slam-cpu` 绑定选项。25 fps 实测 582 帧：
-  CPU 约 133%，RSS 18–19 MB，`track_ms` 25–30 ms，`age_ms` 约 51 ms。
-  `stamp_source:=host` 时 bridge 发布延迟实测 0–1 ms。
-- P1/P2 硬件解码（2026-11-11）：删除 GStreamer `mppjpegdec` 管线，新增
-  `MppJpegDecoder`（dlopen MPP、异步 put/get、NV12 Y 平面）和
-  `flyrat_pilot/tools/decode_bench.cpp`。实机 25 fps 连续 60 s：1496 帧、
-  0 错误、无超过 100 ms 的间隔；硬件解码平均 11.3 ms、p99 12.1 ms，进程
-  CPU 约 27%（CPU 解码约 56%），与 OpenCV 输出平均差 0.01 LSB。
-- P3 pilot 集成（2026-11-11）：`flyrat_pilot` 新增 `--decode cpu|mpp`，默认
-  `cpu`；MPP 路径用 `shared_ptr` 持有 Y 平面并按 `stride` 构造左右目视图，
-  连续 10 帧失败自动回退到 `cv::imdecode` 并累计 `decode_fallbacks`。
-  25/30 fps 各 3 次 600 帧验证：无 UVC 停流、`camera_drops=0`、
-  `decode_fallbacks=0`；25 fps CPU 约 126–130%（CPU 解码 135%），30 fps 约
-  136–140%（CPU 解码 142%），帧年龄基本不变。
-- 分阶段计时（2026-11-11）：`flyrat_pilot` 新增 `--trace DIR`，输出
-  `trace_pilot.csv`（排队/解码/IMU/`track()`/发布/帧年龄）和
-  `trace_frontend.csv`（SVO 各阶段），并提供
-  `tools/analyze_trace.py`。25 fps 600 帧实测：`track()` p50 27.5 ms，
-  `reproject` 12.7 ms（53%）、`pose_optimizer` 6.8 ms（26%）、
-  `pyramid_creation` 2.9 ms（12%）、`sparse_img_align` 1.0 ms；解码 7.0 ms
-  不在关键路径。详见 `docs/agent/odometry/performance_profiling.md`。
-- 前端优化（2026-11-11）：修正 vendored 代码里失效的 `__ARM_NEON__` 判断
-  （aarch64 只定义 `__ARM_NEON`），启用金字塔/patch score/feature alignment
-  的 NEON 实现，并开启双目并行重投影。25 fps 600 帧 `track()` p50 由
-  27.5 ms 降到 16.6 ms，`reproject` 12.7 → 10.4 ms，30 fps 21.6 → 16.0 ms；
-  不改变算法参数。启用并行重投影时不能用 `--slam-cpu` 固定 SLAM 线程。
-- 传感器录制/回放（2026-11-11）：`flyrat_pilot --record DIR` 把原始 MJPEG
-  和已标定 IMU 写入 `DIR/sensor_bag.bin`（独立写线程，队列 64，满则丢帧并
-  计数），`--replay DIR` 跳过相机/MSP，按原始时间间隔重放并自动退出。
-  设备实测 300 帧：录制 `frames=300 imu=2632 dropped=0`（约 23.5 MB），
-  回放 300 帧、25 fps，轨迹和 trace 正常。bringup 脚本支持
-  `record:=DIR` / `replay:=DIR`。
-- SchurVINS 的初始化器原先固定使用 1–50 m 深度范围，已改为读取适配层的
-  0.25–20 m 近场参数，解决实机近距桌面场景无法初始化的问题。
-- `SchurVINS::Prediction()` 原会对 `dt >= 15 ms` 直接 `CHECK` 退出；200 Hz
-  IMU 偶发 15.15 ms 间隔已在实机触发。现改为拆分子步长，进程不再中止。
+- 主机 ROS 2 包 `flyrat_pilot_bridge` 发布 `/flyrat/odometry/*` 话题及
+  `odometry_map -> imu_link` 动态 TF 和相机静态 TF。
+- 已支持 `--decode cpu|mpp`（MPP 失败自动回退 CPU）、`--trace DIR`、
+  `--record/--replay DIR`、`--msp-raw-rc-hz N` 等选项。
+- 相机固定以传感器最高帧率采集（1280x480 为 60 fps），按 `--fps` 丢帧交付，
+  以限制自动曝光时间；统计行 `cam_throttled` 记录被丢弃的采集帧。
+- 性能优化包括 NEON 金字塔/patch score/feature alignment、双目并行重投影、
+  独立解码线程和最新帧队列；当前指标见 §3，过程数据见
+  `docs/agent/odometry/performance.md`。
+- `.script/build_pilot_arm.sh` 交叉构建；`.script/bringup_pilot_slam.sh`
+  推送二进制和标定、adb forward、启动设备 SLAM、主机 bridge 和可选
+  Foxglove，退出时自动清理。
+- 验证范围：RK3566 静态桌面短时运行；尚未做飞行、长距离和长期漂移验证。
 
 ## 3. 实测指标
 
@@ -193,22 +148,21 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 | IMU | 200.07 Hz | MSP UART3，921600 |
 | ToF | 每颗 57–58 Hz | 4 颗 4x4，i2c2 750 kHz |
 | ToF 初始化 | 约 7.2 s | 从进程启动到 TCP 监听 |
-| 双目 | 60.04 Hz | 1280x480@60 MJPEG，单眼 640x480 |
-| adb 吞吐 | 约 30 MB/s | USB2 链路，`adb exec-out` 实测 |
+| 相机采集 | 60.04 Hz | 1280x480 MJPEG，单眼 640x480 |
+| 相机交付 | 25 / 30 fps | pilot 默认 25，录制默认 30；多余采集帧计入 `cam_throttled` |
 | 双目 MJPEG 带宽 | 约 3.2 MB/s | 1280x480@60，适合 adb |
 | 双目原始 NV12 | 约 55 MB/s | 不适合当前 adb，不用于转发 |
-| 里程计后端 | SchurVINS 已接入 | 实机 28 s bag：0.35 m 升降、结束水平漂移约 1.4 cm |
+| adb 吞吐 | 约 30 MB/s | USB2 链路，`adb exec-out` 实测 |
 | ROS 2 IMU 输入 | 200.3–200.8 Hz | 开发机接收节点 |
 | ROS 2 双目输入 | 60.0 Hz | 左右各 640x480 mono8 |
 | ROS 2 里程计状态发布 | 1 Hz | `diagnostic_msgs` |
-| 机载 SLAM（25 fps，NEON + 并行重投影） | CPU 约 1.23 核，RSS 约 22 MB | 单帧 track 16–17 ms，age 约 50 ms |
-| 机载 SLAM（25 fps，P0 优化后） | CPU 约 1.3 核，RSS 18–19 MB | 单帧 track 25–30 ms，age 约 51 ms |
-| 机载 SLAM（25 fps，优化前） | CPU 约 1.3 核，RSS 约 27 MB | 单帧 track 约 28 ms，age 约 47 ms |
-| 机载 SLAM（30 fps） | CPU 1.5–2.0 核，RSS 27–30 MB | 640x480/眼，单帧 track 18–21 ms，age 约 41 ms |
-| 机载 SLAM（20 fps） | CPU 约 1.6 核，RSS 22 MB | 单帧 track 约 35 ms，实时裕量约 15 ms |
-| 机载 SLAM 吞吐 | 29.9 fps / 28.5 fps | 30 fps 长跑 / 600 帧样本 |
+| 机载 SLAM（25 fps） | CPU 约 1.23 核，RSS 约 22 MB | `track()` p50/p95 16.6/18.2 ms，age 49.8/51.1 ms |
+| 机载 SLAM（30 fps） | CPU 约 1.23–1.44 核，RSS 约 22 MB | `track()` p50/p95 16.0/18.3 ms，age 42.3/46.4 ms |
 | 机载端到端延迟 | 约 70–100 ms | 采集到主机接收；设备时钟快 55–64 ms，`ros2 topic delay` 需校正 |
 | 机载二进制 | 约 11 MB | 静态 OpenCV/glog/yaml-cpp，只依赖 libc/libm |
+| 里程计后端 | SchurVINS | 实机 28 s bag：0.35 m 升降，结束水平漂移约 1.4 cm |
+
+优化前基线和分阶段数据见 `docs/agent/odometry/performance.md`。
 
 ## 4. 构建与运行
 
@@ -252,26 +206,28 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 ## 6. 最近提交
 
 ```text
-23b7974 refactor: remove ORB-SLAM3 and add odometry scaffold
-9f09ae4 docs: move all project documentation under docs/agent
-3f24857 docs: reorganize by topic and centralize build instructions
-60a8483 docs: describe ORB-SLAM3 module and measurements
-73a13b1 feat(slam): vendor headless ORB-SLAM3 with stereo facade
-f2ea59b fix(tof): define result-trimming macros in platform header
-39f5406 docs: record sensor forwarding status and ToF recovery
-2420f7e refactor(tof): hardcode the four sensor addresses
-9ec445d fix(hardware): recover ToF sensors at retained I2C addresses
-390874c feat(sensors): forward real IMU, ToF and stereo over adb
+9b76fd9 chore: align docs and scripts with compressed stereo and max-FPS capture
+81a69d5 feat(camera): always capture at max FPS and decimate to target rate
+048df4f feat(sensors): record one compressed stereo stream and split it on replay
+1e3887e feat(msp): read pre-override RC channels from Betaflight
+160bc99 feat(pilot): record and replay camera and IMU sensors
+d170019 chore: clean up docs and scripts after decode and reprojection changes
+9e84e8b chore(bringup): default to MPP decode and add trace option
+4222e97 perf(odometry): enable ARM NEON paths and async stereo reprojection
+f7c1f01 feat(pilot): trace per-stage SLAM timing
+f22a409 feat(pilot): add opt-in Rockchip MPP MJPEG decode
+c565858 refactor(odometry): decode MJPEG through Rockchip MPP directly
 ```
 
 ## 7. 下一步
 
-1. 用已录制的实机双目/IMU 数据回放 SchurVINS，验证轨迹尺度、漂移、跟踪
-   耗时和长期稳定性；根据结果调整 keyframe/feature 参数。
-2. 补充双目/IMU 时间对齐与曝光延迟标定，检查 `imu_lookahead` 是否足够。
-3. 评估 ToF、双目、IMU 的时间对齐策略，必要时增加设备端统一时间戳。
+1. 在飞行/手持移动场景验证机载 SchurVINS 的尺度、漂移和实时率，并做长时间
+   稳定性与温度测试。
+2. 补充双目/IMU 时间对齐与曝光延迟标定，确认 `imu_lookahead` 在运动场景下
+   仍然合适。
+3. 评估 ToF、双目、IMU 的统一时间戳策略，必要时在设备端增加硬件同步。
 4. 在 `flyrat_pilot` 中加入飞控主逻辑、失效保护和链路健康状态；位姿接口
    已经具备，可直接接到位置环。
-5. 视 adb 带宽和算法需求，评估双目降到 30 Hz 或使用硬件编码的长期方案。
-6. 在实机飞行/手持移动场景验证机载 SchurVINS 的尺度、漂移和实时率。
-7. 后端输出稳定位姿后，补充跟踪耗时、RSS、漂移等实测指标。
+5. 根据暗光拖影和带宽测试结果，评估更高采集帧率、分辨率或硬件编码方案。
+6. 实现跟踪失败后的自动重初始化，减少对 `SIGUSR1` 人工干预的依赖。
+7. 补充录制 bag 的自动校验与回放回归测试（帧数、时间戳、轨迹一致性）。

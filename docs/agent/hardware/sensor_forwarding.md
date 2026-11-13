@@ -161,7 +161,7 @@ w_body = C_gyro_i^T * inv(M_gyr) * (w_raw - A * a_gyro)
   `angular_velocity.z` 应为正；抬头时 `angular_velocity.y` 应为负；
   右侧下沉（向右滚转）时 `angular_velocity.x` 应为正。
   更完整的坐标链和调试步骤见
-  [`../slam/coordinates.md`](../slam/coordinates.md)。
+  [`../odometry/coordinates.md`](../odometry/coordinates.md)。
 
 这两个参数只做轴向映射，不包含安装角旋转；飞控板或 IMU 相对机体的安装角在
 `IMU.T_b_c1` 中处理，尺度/轴失准在 `imu_intrinsics.yaml` 中处理。

@@ -69,7 +69,7 @@ docker build . --target rat-dev -t mide233/flyrat-dev:local \
 
 流程：`base`（两架构各自构建，按 digest 推送）→ `dev`（`rat-dev` + 用本次 `base` 的 digest 作为 sysroot 的 `rat-dev-full`）→ `promote`（把两架构 digest 合成多架构 manifest 并打 `latest`）。
 
-镜像里没有单独的冒烟测试 job：`latest` 只在两个架构的 `rat-dev-full` 都构建成功后才会更新，构建失败不会覆盖已经在用的镜像；要验证工具链，拉下来跑一次 `.script/build_libflyrat.sh` / `.script/build_ros2.sh` 即可。
+镜像里没有单独的冒烟测试 job：`latest` 只在两个架构的 `rat-dev-full` 都构建成功后才会更新，构建失败不会覆盖已经在用的镜像；要验证工具链，拉下来跑一次 `./.script/build_all.sh --lib` / `.script/build_ros2.sh` 即可。
 
 ### 一次性配置
 

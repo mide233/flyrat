@@ -59,8 +59,8 @@ ROS 2 工作区。
 
 | 脚本 | 作用 |
 |---|---|
-| `.script/build_libflyrat.sh [--clean] [--debug] [--no-tests]` | 构建核心库，默认跑 ctest |
-| `.script/build_flyrat_pilot.sh [--clean] [--debug]` | 构建实机程序与传感器转发 |
+| `./.script/build_all.sh --lib [--clean] [--debug] [--no-tests]` | 构建核心库，默认跑 ctest |
+| `./.script/build_all.sh --pilot [--clean] [--debug]` | 构建实机程序与传感器转发 |
 | `.script/build_ros2.sh [--clean] [-- <colcon 参数>]` | 构建 ROS 2 工作区 |
 | `.script/build_betaflight.sh` | 构建 Betaflight SITL |
 | `.script/build_plugin.sh` | 构建 Gazebo Betaflight 插件 |
@@ -74,15 +74,15 @@ ROS 2 工作区。
 ### 3.1 构建与测试
 
 ```sh
-.script/build_libflyrat.sh
+./.script/build_all.sh --lib
 ```
 
 等价于：
 
 ```sh
-cmake -S libflyrat -B libflyrat/build -DCMAKE_BUILD_TYPE=Release
-cmake --build libflyrat/build -j
-ctest --test-dir libflyrat/build --output-on-failure
+cmake -S libflyrat -B build/host/libflyrat -DCMAKE_BUILD_TYPE=Release
+cmake --build build/host/libflyrat -j
+ctest --test-dir build/host/libflyrat --output-on-failure
 ```
 
 独立构建默认打开测试和工具；作为 `flyrat_pilot` 的子目录时默认关闭。
@@ -100,7 +100,7 @@ ctest --test-dir libflyrat/build --output-on-failure
 ### 3.2 测试
 
 ```sh
-ctest --test-dir libflyrat/build --output-on-failure
+ctest --test-dir build/host/libflyrat --output-on-failure
 ```
 
 共 10 个测试；其中 `test_odometry_api` 覆盖接口契约，`test_schurvins_integration`
@@ -108,13 +108,13 @@ ctest --test-dir libflyrat/build --output-on-failure
 
 ### 3.3 工具
 
-工具位于 `libflyrat/build/`。
+工具位于 `build/host/libflyrat/`。
 
 `msp_interact_bench`：MSP 链路压测，可连串口或 TCP。
 
 ```sh
-./libflyrat/build/msp_interact_bench --device /dev/ttyS3 --baud 921600 --seconds 30
-./libflyrat/build/msp_interact_bench --host 127.0.0.1 --port 5761 --seconds 30
+./build/host/libflyrat/msp_interact_bench --device /dev/ttyS3 --baud 921600 --seconds 30
+./build/host/libflyrat/msp_interact_bench --host 127.0.0.1 --port 5761 --seconds 30
 ```
 
 常用参数：`--imu-hz`（默认 200）、`--rc-hz`（默认 200）、`--enable-rc`。
@@ -122,7 +122,7 @@ ctest --test-dir libflyrat/build --output-on-failure
 `tof_bench`：4 颗 VL53L5CX 验收。
 
 ```sh
-./libflyrat/build/tof_bench --device /dev/i2c-2 --seconds 10 \
+./build/host/libflyrat/tof_bench --device /dev/i2c-2 --seconds 10 \
   --resolution 4 --hz 60 --sensors 4
 ```
 
@@ -132,7 +132,7 @@ ctest --test-dir libflyrat/build --output-on-failure
 `stereo_bench`：YUYV 双目相机采集。
 
 ```sh
-./libflyrat/build/stereo_bench --device /dev/video10 \
+./build/host/libflyrat/stereo_bench --device /dev/video10 \
   --width 1280 --height 480 --fps 30 --seconds 5
 ```
 
@@ -140,10 +140,10 @@ ctest --test-dir libflyrat/build --output-on-failure
 和解码分别由 `StereoJpegSource` 与 `MppJpegDecoder` 负责。
 
 `decode_bench`：MJPEG 硬件解码连续运行验收，只使用实时相机，交叉编译时由
-`.script/build_pilot_arm.sh` 一并生成到 `build-arm/decode_bench`。
+`.script/build_pilot_arm.sh` 一并生成到 `build/arm/decode_bench`。
 
 ```sh
-adb push build-arm/decode_bench /tmp/
+adb push build/arm/decode_bench /tmp/
 adb shell '/tmp/decode_bench --camera /dev/video10 --mode both --seconds 60'
 ```
 
@@ -157,20 +157,20 @@ adb shell '/tmp/decode_bench --camera /dev/video10 --mode both --seconds 60'
 ### 4.1 本机构建
 
 ```sh
-.script/build_flyrat_pilot.sh
+./.script/build_all.sh --pilot
 ```
 
 产物：
 
 ```text
-flyrat_pilot/build/flyrat_pilot
-flyrat_pilot/build/flyrat_sensor_forwarder
+build/host/pilot/flyrat_pilot
+build/host/pilot/flyrat_sensor_forwarder
 ```
 
 运行主程序（机载 SLAM；需要相机、飞控串口和标定文件）：
 
 ```sh
-./flyrat_pilot/build/flyrat_pilot \
+./build/host/pilot/flyrat_pilot \
   --camera-config libflyrat/configs/camera/uvc_640x480.yaml \
   --imu-config flyrat_play/ros2_ws/src/flyrat_sensors/config/imu_intrinsics.yaml
 ```
@@ -190,9 +190,9 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 
 ```sh
 # 录制到 <DIR>/sensor_bag.bin
-./flyrat_pilot/build/flyrat_pilot ... --record /tmp/bag1 --max-frames 600
+./build/host/pilot/flyrat_pilot ... --record /tmp/bag1 --max-frames 600
 # 回放：不打开相机和 MSP，按原始时间间隔重放
-./flyrat_pilot/build/flyrat_pilot ... --replay /tmp/bag1
+./build/host/pilot/flyrat_pilot ... --replay /tmp/bag1
 ```
 
 回放同样支持 `--trace`、`--trajectory`、`--decode` 和 `--max-frames`，播完
@@ -202,7 +202,7 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 只校验标定、不打开硬件：
 
 ```sh
-./flyrat_pilot/build/flyrat_pilot --check-config \
+./build/host/pilot/flyrat_pilot --check-config \
   --camera-config libflyrat/configs/camera/uvc_640x480.yaml \
   --imu-config flyrat_play/ros2_ws/src/flyrat_sensors/config/imu_intrinsics.yaml
 ```
@@ -212,7 +212,7 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 运行传感器转发：
 
 ```sh
-./flyrat_pilot/build/flyrat_sensor_forwarder --listen 127.0.0.1:5000
+./build/host/pilot/flyrat_sensor_forwarder --listen 127.0.0.1:5000
 ```
 
 完整参数：
@@ -233,15 +233,16 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 ### 4.2 交叉编译到泰山派
 
 `flyrat_sensor_forwarder` 不依赖 OpenCV。完整交叉构建
-（`.script/build_pilot_arm.sh`）会同时生成 `build-arm/flyrat_sensor_forwarder`；
-也可以只用下面的脚本单独构建。两者功能一致，产物不要同时推送：
+（`.script/build_pilot_arm.sh`）会生成动态链接的
+`build/arm/flyrat_sensor_forwarder`；加 `--static-forwarder` 会额外生成一份
+全静态版本，便于在没有目标 sysroot 库的 rootfs 上运行：
 
 ```sh
-.script/build_sensor_forwarder_arm.sh
+./.script/build_pilot_arm.sh --static-forwarder
 ```
 
-单独构建的产物是 `build-arm/flyrat_sensor_forwarder`（AArch64 静态链接）；
-`build_pilot_arm.sh` 生成的同名文件是动态链接版本。
+静态产物是 `build/arm/static/flyrat_sensor_forwarder`，动态产物是
+`build/arm/flyrat_sensor_forwarder`。两者功能一致，产物不要同时推送。
 
 `flyrat_pilot` 需要 OpenCV、yaml-cpp 和 glog。目标 rootfs 没有这些库，因此
 使用 `.script/build_pilot_arm.sh` 链接 sysroot 中的静态依赖：
@@ -250,13 +251,13 @@ flyrat_pilot/build/flyrat_sensor_forwarder
 .script/build_pilot_arm.sh
 ```
 
-产物是 `build-arm/flyrat_pilot`（约 11 MB，`readelf -d` 只依赖
+产物是 `build/arm/flyrat_pilot`（约 11 MB，`readelf -d` 只依赖
 `libc/libm/ld-linux`）。脚本参数：
 
 ```text
---clean                 先删除 build-arm/pilot-cmake 和旧二进制
+--clean                 先删除 build/arm/pilot-cmake 和旧二进制
 FLYRAT_SYSROOT=...      默认 /opt/sysroots/arm64
-BUILD_DIR=...           默认 <repo>/build-arm
+BUILD_DIR=...           默认 <repo>/build/arm
 JOBS=...                默认 4，避免构建内存不足
 ```
 
@@ -293,9 +294,9 @@ sudo aarch64-linux-gnu-ar rcs \
 ### 4.2.2 手动推送
 
 ```sh
-adb -s 4c24d56142f3d0e3 push build-arm/flyrat_pilot /tmp/
+adb -s 4c24d56142f3d0e3 push build/arm/flyrat_pilot /tmp/
 adb -s 4c24d56142f3d0e3 shell chmod +x /tmp/flyrat_pilot
-adb -s 4c24d56142f3d0e3 push build-arm/flyrat_sensor_forwarder /tmp/
+adb -s 4c24d56142f3d0e3 push build/arm/flyrat_sensor_forwarder /tmp/
 adb -s 4c24d56142f3d0e3 shell chmod +x /tmp/flyrat_sensor_forwarder
 ```
 
@@ -531,15 +532,15 @@ SchurVINS 及其内置依赖为 **GPL-3.0**；链接后的 `odometry_node` 组�
 `flyrat_odometry` 目标默认随 libflyrat 构建，并默认启用 SchurVINS：
 
 ```sh
-.script/build_libflyrat.sh
-ctest --test-dir libflyrat/build --output-on-failure
+./.script/build_all.sh --lib
+ctest --test-dir build/host/libflyrat --output-on-failure
 ```
 
 SchurVINS 需要 OpenCV、yaml-cpp、glog 和 gflags。只构建接口或缺少依赖时：
 
 ```sh
-cmake -S libflyrat -B libflyrat/build -DFLYRAT_WITH_SCHURVINS=OFF
-cmake --build libflyrat/build -j
+cmake -S libflyrat -B build/host/libflyrat -DFLYRAT_WITH_SCHURVINS=OFF
+cmake --build build/host/libflyrat -j
 ```
 
 测试共 10 个；`test_odometry_api` 覆盖状态枚举、参数校验、空图像/尺寸不匹配
@@ -677,7 +678,7 @@ ros2 launch flyrat_odometry bringup.launch.py
 
 默认行为：
 
-- 把 `build-arm/flyrat_sensor_forwarder` 推到设备 `/tmp` 并加执行权限
+- 把 `build/arm/flyrat_sensor_forwarder` 推到设备 `/tmp` 并加执行权限
   （设置 `FLYRAT_PUSH_FORWARDER=0` 可跳过）；
 - 建立 `adb forward tcp:5000 tcp:5000`；
 - 先结束设备上旧的 `flyrat_sensor_forwarder`，再启动
@@ -790,11 +791,11 @@ docker exec -it rat-dev-full bash
 
 | 产物 | 路径 |
 |---|---|
-| 核心库 | `libflyrat/build/libflyrat*.a` |
-| 核心测试 | `libflyrat/build/test_*` |
-| 硬件工具 | `libflyrat/build/{tof_bench,stereo_bench,msp_interact_bench}` |
-| 实机主程序 | `flyrat_pilot/build/flyrat_pilot` |
-| 传感器转发 | `flyrat_pilot/build/flyrat_sensor_forwarder` |
+| 核心库 | `build/host/libflyrat/libflyrat*.a` |
+| 核心测试 | `build/host/libflyrat/test_*` |
+| 硬件工具 | `build/host/libflyrat/{tof_bench,stereo_bench,msp_interact_bench}` |
+| 实机主程序 | `build/host/pilot/flyrat_pilot` |
+| 传感器转发 | `build/host/pilot/flyrat_sensor_forwarder` |
 | SITL | `flyrat_play/gazebo/third_party/betaflight/obj/main/betaflight_SITL.elf` |
 | Gazebo 插件 | `.../aeroloop_gazebo/plugins/build/libBetaflightPlugin.so` |
 | ROS 2 工作区 | `flyrat_play/ros2_ws/{build,install,log}` |

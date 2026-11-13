@@ -14,6 +14,20 @@
    - 仿真 → [`simulation/betaflight_sitl_gazebo.md`](simulation/betaflight_sitl_gazebo.md)
    - 里程计 → [`odometry/overview.md`](odometry/overview.md)
    - 坐标系与变换 → [`odometry/coordinates.md`](odometry/coordinates.md)
+   - 性能、分阶段计时、MJPEG 解码与优化 → [`odometry/performance.md`](odometry/performance.md)
+
+## 权威文档映射
+
+同一事实只在一处维护，其他文档链接过去：
+
+| 主题 | 权威文档 |
+|---|---|
+| 构建、运行、ROS 2、SITL、实机启动 | [`build_and_run.md`](build_and_run.md) |
+| 传感器转发、录制、回放、splitter、Kalibr | [`hardware/sensor_forwarding.md`](hardware/sensor_forwarding.md) |
+| 性能、分阶段计时、MJPEG 解码、优化记录 | [`odometry/performance.md`](odometry/performance.md) |
+| 项目状态与实测指标 | [`status/project_status.md`](status/project_status.md) |
+| 坐标与标定 | [`odometry/coordinates.md`](odometry/coordinates.md) |
+| Betaflight SITL / Gazebo | [`simulation/betaflight_sitl_gazebo.md`](simulation/betaflight_sitl_gazebo.md) |
 
 ## 目录
 
