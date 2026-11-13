@@ -11,8 +11,8 @@
 #   -h, --help   show this help
 #
 # Removed by default:
-#   libflyrat/build/                                       CMake build tree
-#   flyrat_pilot/build/                                    CMake build tree
+#   build/host/                                            host CMake build trees
+#   build/arm/                                             cross CMake/build outputs
 #   flyrat_play/ros2_ws/{build,install,log}/               colcon outputs
 #   flyrat_play/gazebo/third_party/betaflight/obj/         SITL ELF + objects
 #   flyrat_play/gazebo/third_party/aeroloop_gazebo/plugins/build/
@@ -51,8 +51,8 @@ for arg in "$@"; do
 done
 
 targets=(
-    "libflyrat/build"
-    "flyrat_pilot/build"
+    "build/host"
+    "build/arm"
     "flyrat_play/ros2_ws/build"
     "flyrat_play/ros2_ws/install"
     "flyrat_play/ros2_ws/log"

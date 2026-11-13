@@ -24,7 +24,7 @@
 #   ROS_DISTRO                ROS 2 distribution (default: jazzy)
 #   FLYRAT_ROS_WS             ROS 2 workspace (default: <repo>/flyrat_play/ros2_ws)
 #   ADB_SERIAL                Device serial when several devices are connected
-#   FLYRAT_SENSOR_FORWARDER   Host aarch64 binary (default: <repo>/build-arm/...)
+#   FLYRAT_SENSOR_FORWARDER   Host aarch64 binary (default: <repo>/build/arm/...)
 #   FLYRAT_DEVICE_BINARY      Device path (default: /tmp/flyrat_sensor_forwarder)
 #   FLYRAT_PUSH_FORWARDER     Set to 0 to skip the push step
 #
@@ -38,7 +38,7 @@ ROS_WS="${FLYRAT_ROS_WS:-${REPO_ROOT}/flyrat_play/ros2_ws}"
 ROS_SETUP="/opt/ros/${ROS_DISTRO}/setup.bash"
 WS_SETUP="${ROS_WS}/install/setup.bash"
 
-HOST_BINARY="${FLYRAT_SENSOR_FORWARDER:-${REPO_ROOT}/build-arm/flyrat_sensor_forwarder}"
+HOST_BINARY="${FLYRAT_SENSOR_FORWARDER:-${REPO_ROOT}/build/arm/flyrat_sensor_forwarder}"
 DEVICE_BINARY="${FLYRAT_DEVICE_BINARY:-/tmp/flyrat_sensor_forwarder}"
 
 if [ ! -f "${ROS_SETUP}" ]; then
@@ -124,7 +124,7 @@ if [ "${FLYRAT_PUSH_FORWARDER:-1}" != "0" ] && [ -f "${HOST_BINARY}" ]; then
 elif ! "${ADB[@]}" shell "test -x ${DEVICE_BINARY}" 2>/dev/null; then
     echo "error: ${DEVICE_BINARY} is missing on the device." >&2
     echo "Build and push it first:" >&2
-    echo "  .script/build_sensor_forwarder_arm.sh" >&2
+    echo "  .script/build_pilot_arm.sh --static-forwarder" >&2
     exit 1
 fi
 

@@ -2,8 +2,8 @@
 #
 # Generate a single compile_commands.json at the repository root for clangd.
 #
-# CMake emits one database per build directory (libflyrat/build,
-# flyrat_pilot/build, flyrat_play/ros2_ws/build/<pkg>), but clangd only searches
+# CMake emits one database per build directory (build/host/libflyrat,
+# build/host/pilot, flyrat_play/ros2_ws/build/<pkg>), but clangd only searches
 # upwards from the file being edited, so sources under libflyrat/,
 # flyrat_pilot/ or flyrat_play/ros2_ws/src/ would never find them. This script
 # (re)configures every build and merges the databases into
@@ -40,8 +40,8 @@ fi
 
 # 2. The ROS-free projects. Configuring is enough to emit the database.
 echo "[compile_commands] configuring libflyrat and flyrat_pilot"
-cmake -S libflyrat -B libflyrat/build -DCMAKE_BUILD_TYPE=Release >/dev/null
-cmake -S flyrat_pilot -B flyrat_pilot/build -DCMAKE_BUILD_TYPE=Release >/dev/null
+cmake -S libflyrat -B build/host/libflyrat -DCMAKE_BUILD_TYPE=Release >/dev/null
+cmake -S flyrat_pilot -B build/host/pilot -DCMAKE_BUILD_TYPE=Release >/dev/null
 
 # 3. Merge. Later entries win, so the standalone libflyrat database goes last:
 #    its sources then get the ROS-free flags instead of the ament ones.
@@ -57,8 +57,8 @@ databases = [
     root / "flyrat_play/ros2_ws/build/flyrat_msp/compile_commands.json",
     root / "flyrat_play/ros2_ws/build/flyrat_control/compile_commands.json",
     root / "flyrat_play/ros2_ws/build/flyrat_odometry/compile_commands.json",
-    root / "flyrat_pilot/build/compile_commands.json",
-    root / "libflyrat/build/compile_commands.json",
+    root / "build/host/pilot/compile_commands.json",
+    root / "build/host/libflyrat/compile_commands.json",
 ]
 
 merged = {}

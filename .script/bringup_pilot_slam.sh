@@ -14,7 +14,7 @@
 # Environment:
 #   ROS_DISTRO          ROS 2 distribution (default: jazzy)
 #   FLYRAT_ROS_WS       ROS 2 workspace (default: <repo>/flyrat_play/ros2_ws)
-#   FLYRAT_PILOT_BIN    Host aarch64 binary (default: <repo>/build-arm/flyrat_pilot)
+#   FLYRAT_PILOT_BIN    Host aarch64 binary (default: <repo>/build/arm/flyrat_pilot)
 #   FLYRAT_PUSH_PILOT   Set to 0 to skip pushing the binary
 #   ADB_SERIAL          Device serial when several devices are connected
 #
@@ -38,7 +38,7 @@ ROS_WS="${FLYRAT_ROS_WS:-${REPO_ROOT}/flyrat_play/ros2_ws}"
 ROS_SETUP="/opt/ros/${ROS_DISTRO}/setup.bash"
 WS_SETUP="${ROS_WS}/install/setup.bash"
 
-HOST_BINARY="${FLYRAT_PILOT_BIN:-${REPO_ROOT}/build-arm/flyrat_pilot}"
+HOST_BINARY="${FLYRAT_PILOT_BIN:-${REPO_ROOT}/build/arm/flyrat_pilot}"
 DEVICE_BINARY="/tmp/flyrat_pilot"
 DEVICE_DIR="/tmp/flyrat/config"
 LOCAL_PORT=5001
