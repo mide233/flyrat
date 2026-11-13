@@ -58,10 +58,13 @@ endif()
 
 add_executable(flyrat_sensor_forwarder
   src/sensors/sensor_forwarder.cpp
-  src/sensors/sensor_forwarder_main.cpp)
+  src/sensors/sensor_forwarder_main.cpp
+  src/sensors/sensor_stream.cpp)
+target_include_directories(flyrat_sensor_forwarder PRIVATE src)
 target_link_libraries(flyrat_sensor_forwarder PRIVATE
   flyrat::flyrat_msp_interact
-  flyrat::flyrat_hardware)
+  flyrat::flyrat_hardware
+  Threads::Threads)
 target_compile_options(flyrat_sensor_forwarder PRIVATE -Wall -Wextra)
 
 # Calibration recorder: raw MSP IMU counts and native MJPEG frames, with no
@@ -69,7 +72,8 @@ target_compile_options(flyrat_sensor_forwarder PRIVATE -Wall -Wextra)
 add_executable(flyrat_raw_recorder
   src/raw/raw_bag.cpp
   src/raw/raw_recorder.cpp
-  src/raw/raw_recorder_main.cpp)
+  src/raw/raw_recorder_main.cpp
+  src/sensors/sensor_stream.cpp)
 target_include_directories(flyrat_raw_recorder PRIVATE src)
 target_link_libraries(flyrat_raw_recorder PRIVATE
   flyrat::flyrat_msp_interact

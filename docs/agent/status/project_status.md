@@ -77,7 +77,9 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - 相机始终按 60 fps 请求采集，再按交付帧率丢帧；
 - 不加载标定 YAML，不做单位换算、轴翻转、时间偏移、去畸变或左右拆分；
 - 输出 `raw_sensors.bin`，由 `flyrat_pilot/tools/raw_export.py` 导出
-  `imu.csv`、`imu_counts.csv`、`cam0/`、`cam1/`。
+  `imu.csv`、`imu_counts.csv`、`cam0/`、`cam1/`；
+- 可选 `preview:=true`：录制时通过同一 TCP 协议把 raw IMU/JPEG 发到主机，
+  自动启动 sensor receiver 和 Foxglove bridge，默认 `imu_corrections:=false`。
 
 一键脚本 `.script/bringup_raw_record.sh`；完整流程见
 [`calibration/raw_recording.md`](../calibration/raw_recording.md)。已在开发机

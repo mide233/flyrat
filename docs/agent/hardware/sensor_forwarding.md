@@ -142,7 +142,10 @@ w_body = C_gyro_i^T * inv(M_gyr) * (w_raw - A * a_gyro)
 ```
 
 零偏仍由里程计后端在线估计（待实现）。`imu_time_offset` 会从 IMU 时间戳中减去，
-用来补偿 Kalibr 估计的相机-IMU 时间偏移；关闭 intrinsics 时该偏移不生效。
+用来补偿 Kalibr 估计的相机-IMU 时间偏移。`imu_corrections` 是总开关，默认
+`true`；设为 `false` 时保留 lsb→SI 和轴映射，但跳过 `M/A/C` 与时间偏移，
+适合原始预览或标定采集。单独关闭 `imu_intrinsics_enable` 只会跳过矩阵，
+`imu_time_offset` 仍会生效。
 `T_i_b` 为单位阵。标定文件和数值来自 `kalibr_ws/calib-imu.yaml`。
 
 `imu_accel_axis` 和 `imu_gyro_axis` 分别控制加速度计和陀螺仪的轴向：
@@ -240,6 +243,10 @@ ros2 topic echo --once /flyrat/sensors/tof_0
 - 相机始终按 `--camera-capture-fps 60` 请求采集，再由
   `StereoJpegSource` 的交付节流按 `--camera-fps` 丢帧；
 - 不应用 `imu_time_offset`，也不加载 `imu_intrinsics.yaml`。
+
+加 `preview:=true` 时，录制器会同时用转发协议把同一份 raw IMU/JPEG
+发到主机，脚本自动启动 `sensor_receiver_node` 和 Foxglove bridge；预览
+默认 `imu_corrections:=false`，不会反向影响 bag。
 
 导出与 Kalibr 流程见
 [`../calibration/raw_recording.md`](../calibration/raw_recording.md)。

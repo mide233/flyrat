@@ -14,6 +14,7 @@
 #include "flyrat/hardware/serial_transport.hpp"
 #include "flyrat/msp_interact.hpp"
 #include "raw/raw_bag.hpp"
+#include "sensors/sensor_stream.hpp"
 
 namespace flyrat::pilot {
 
@@ -52,6 +53,7 @@ struct RawRecorder::Impl {
     std::unique_ptr<MspInteract> msp;
     std::unique_ptr<hardware::StereoJpegSource> camera;
     std::unique_ptr<RawBagWriter> bag;
+    std::unique_ptr<SensorStreamServer> preview;
     RawBagMetadata metadata;
     std::atomic<std::uint64_t> imu_samples{0};
     std::atomic<std::uint64_t> images{0};
@@ -63,6 +65,8 @@ struct RawRecorder::Impl {
     bool have_last_camera_stats = false;
     LinkStats last_link_stats{};
     bool have_last_link_stats = false;
+    SensorStreamStats last_preview_stats{};
+    bool have_last_preview_stats = false;
 
     void on_imu(const Sample<ImuSample>& sample) {
         if (!bag) {
@@ -74,16 +78,32 @@ struct RawRecorder::Impl {
             values[3 + i] = sample.value.gyro[i];
             values[6 + i] = sample.value.mag[i];
         }
-        bag->writeImu(values, to_ns(sample.stamp));
+        const std::int64_t stamp_ns = to_ns(sample.stamp);
+        bag->writeImu(values, stamp_ns);
         imu_samples.fetch_add(1, std::memory_order_relaxed);
+
+        if (preview) {
+            sensors::ImuPayload payload;
+            payload.acc = sample.value.acc;
+            payload.gyro = sample.value.gyro;
+            payload.mag = sample.value.mag;
+            preview->send_imu(payload, stamp_ns);
+        }
     }
 
     void on_image(const hardware::StereoJpegFrame& frame) {
         if (!bag || frame.jpeg.empty()) {
             return;
         }
-        bag->writeImage(frame.jpeg.data(), frame.jpeg.size(), frame.sequence, to_ns(frame.stamp));
+        const std::int64_t stamp_ns = to_ns(frame.stamp);
+        bag->writeImage(frame.jpeg.data(), frame.jpeg.size(), frame.sequence, stamp_ns);
         images.fetch_add(1, std::memory_order_relaxed);
+
+        if (preview) {
+            preview->send_stereo(static_cast<std::uint32_t>(frame.width),
+                static_cast<std::uint32_t>(frame.height), frame.jpeg.data(),
+                frame.jpeg.size(), stamp_ns);
+        }
     }
 
     void on_link(bool connected, const std::string& message) {
@@ -137,6 +157,20 @@ struct RawRecorder::Impl {
         } else if (have_last_link_stats) {
             out.imu_connected = last_link_stats.connected;
         }
+        out.preview_enabled = config.preview_enabled;
+        if (preview) {
+            const SensorStreamStats stream_stats = preview->stats();
+            out.preview_connected = stream_stats.connected;
+            out.preview_priority_sent = stream_stats.priority_sent;
+            out.preview_stereo_sent = stream_stats.stereo_sent;
+            out.preview_dropped = stream_stats.priority_dropped + stream_stats.stereo_dropped;
+        } else if (have_last_preview_stats) {
+            out.preview_connected = last_preview_stats.connected;
+            out.preview_priority_sent = last_preview_stats.priority_sent;
+            out.preview_stereo_sent = last_preview_stats.stereo_sent;
+            out.preview_dropped =
+                last_preview_stats.priority_dropped + last_preview_stats.stereo_dropped;
+        }
         if (start_time.time_since_epoch().count() != 0) {
             out.elapsed_s =
                 std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time)
@@ -154,6 +188,11 @@ struct RawRecorder::Impl {
         if (camera) {
             try {
                 camera->stop();
+            } catch (...) {}
+        }
+        if (preview) {
+            try {
+                preview->stop();
             } catch (...) {}
         }
     }
@@ -206,6 +245,25 @@ struct RawRecorder::Impl {
                   << ",\"malformed_frames\":" << link.malformed_frames
                   << ",\"reconnects\":" << link.reconnects
                   << ",\"last_imu_latency_ms\":" << link.last_imu_latency_ms << '}';
+        }
+        SensorStreamStats stream;
+        bool have_stream_stats = false;
+        if (preview) {
+            stream = preview->stats();
+            have_stream_stats = true;
+        }
+        if (have_last_preview_stats) {
+            stream = last_preview_stats;
+            stream.connected = false;
+            have_stream_stats = true;
+        }
+        if (have_stream_stats) {
+            event << ",\"preview\":{\"connected\":"
+                  << (stream.connected ? "true" : "false")
+                  << ",\"priority_sent\":" << stream.priority_sent
+                  << ",\"stereo_sent\":" << stream.stereo_sent
+                  << ",\"dropped\":"
+                  << (stream.priority_dropped + stream.stereo_dropped) << '}';
         }
         event << '}';
         try {
@@ -271,8 +329,19 @@ void RawRecorder::start() {
     impl.metadata.camera_layout = impl.config.camera_layout;
     impl.metadata.capture_fps_requested = impl.config.camera.capture_fps;
     impl.metadata.delivery_fps = impl.config.camera.fps;
+    impl.metadata.preview_enabled = impl.config.preview_enabled;
+    impl.metadata.preview_address = impl.config.preview_address;
+    impl.metadata.preview_port = impl.config.preview_port;
 
     try {
+        if (impl.config.preview_enabled) {
+            impl.preview = std::make_unique<SensorStreamServer>("raw recorder preview");
+            impl.preview->start(impl.config.preview_address, impl.config.preview_port);
+            std::printf(
+                "raw recorder: preview listening on %s:%d\n",
+                impl.config.preview_address.c_str(), impl.config.preview_port);
+        }
+
         if (impl.config.camera_enabled) {
             impl.camera = std::make_unique<hardware::StereoJpegSource>(impl.config.camera);
             impl.camera->start();
@@ -326,6 +395,7 @@ void RawRecorder::start() {
         impl.close_bag();
         impl.msp.reset();
         impl.camera.reset();
+        impl.preview.reset();
         throw;
     }
 }
@@ -344,10 +414,16 @@ void RawRecorder::stop() {
         impl.last_link_stats = impl.msp->stats();
         impl.have_last_link_stats = true;
     }
+    if (impl.preview) {
+        impl.last_preview_stats = impl.preview->stats();
+        impl.last_preview_stats.connected = false;
+        impl.have_last_preview_stats = true;
+    }
     impl.stop_all();
     impl.close_bag();
     impl.msp.reset();
     impl.camera.reset();
+    impl.preview.reset();
     impl.started = false;
 }
 
@@ -355,6 +431,15 @@ void RawRecorder::check() {
     Impl& impl = *impl_;
     if (!impl.config.imu_enabled && !impl.config.camera_enabled) {
         throw std::runtime_error("both IMU and camera checking are disabled");
+    }
+
+    if (impl.config.preview_enabled) {
+        SensorStreamServer preview("raw recorder preview");
+        preview.start(impl.config.preview_address, impl.config.preview_port);
+        std::printf(
+            "raw recorder check: preview can listen on %s:%d\n",
+            impl.config.preview_address.c_str(), impl.config.preview_port);
+        preview.stop();
     }
 
     if (impl.config.camera_enabled) {

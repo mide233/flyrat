@@ -238,6 +238,9 @@ build/host/pilot/flyrat_raw_recorder
 # 先检查设备，再按 60 fps 采集、20 fps 保留录制 10 分钟
 .script/bringup_raw_record.sh check:=true
 .script/bringup_raw_record.sh duration:=10m fps:=20 capture_fps:=60 export:=true
+
+# 边录边用 Foxglove 预览（同一份 raw 数据，不影响 bag）
+.script/bringup_raw_record.sh duration:=10m preview:=true
 ```
 
 导出目录包含 `imu.csv`、`imu_counts.csv`、`cam0/`、`cam1/` 和
@@ -462,15 +465,18 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 
 `sensors.launch.py` 参数：`host`（默认 127.0.0.1）、`port`（默认 5000）、
 `stereo_color`、`acc_lsb_per_g`、`gyro_lsb_per_dps`、`imu_accel_axis`（默认
-`none`）、`imu_gyro_axis`（默认 `none`）。当前实机加速度和陀螺仪原始数据
-都已是 ROS FLU，实测左偏航 `angular_velocity.z > 0`。只有偏航为顺时针正的
-飞控才需要 `bf_to_flu`（翻 z）；真正的 FRD 数据源用 `frd_to_flu`。
+`none`）、`imu_gyro_axis`（默认 `none`）、`imu_corrections`（默认 `true`）。
+当前实机加速度和陀螺仪原始数据都已是 ROS FLU，实测左偏航
+`angular_velocity.z > 0`。只有偏航为顺时针正的飞控才需要 `bf_to_flu`
+（翻 z）；真正的 FRD 数据源用 `frd_to_flu`。
 
 启动时还会加载 `flyrat_sensors/config/imu_intrinsics.yaml`：打开
 `imu_intrinsics_enable` 后，节点按 Kalibr 的 scale/misalignment 模型修正
 加速度和陀螺仪，并从 IMU 时间戳中扣除 `imu_time_offset`（相机到 IMU 的
-固定时间差，约 3.8 ms）。YAML 中 `T_i_b` 为单位阵；零偏不写入配置，由
-SchurVINS 在线估计。关闭该功能后发布的是未修正的原始刻度数据。
+固定时间差，约 3.8 ms）。`imu_corrections:=false` 是总开关关闭：保留
+lsb→SI 和轴映射，但跳过矩阵和时间偏移。单独关闭 `imu_intrinsics_enable`
+只会跳过矩阵，时间偏移仍生效。YAML 中 `T_i_b` 为单位阵；零偏不写入配置，
+由 SchurVINS 在线估计。
 
 ## 6. Gazebo + Betaflight SITL
 

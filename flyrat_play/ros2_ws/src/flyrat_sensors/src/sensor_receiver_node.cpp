@@ -111,6 +111,7 @@ public:
         gyro_lsb_per_dps_ = declare_parameter<double>("gyro_lsb_per_dps", 16.4);
         imu_accel_axis_ = declare_parameter<std::string>("imu_accel_axis", "none");
         imu_gyro_axis_ = declare_parameter<std::string>("imu_gyro_axis", "none");
+        imu_corrections_ = declare_parameter<bool>("imu_corrections", true);
         imu_intrinsics_enable_ = declare_parameter<bool>(
             "imu_intrinsics_enable", false);
         imu_time_offset_ = declare_parameter<double>("imu_time_offset", 0.0);
@@ -130,7 +131,11 @@ public:
         stereo_color_ = declare_parameter<bool>("stereo_color", false);
         const int tof_count = declare_parameter<int>("tof_count", 4);
 
-        if (imu_intrinsics_enable_) {
+        if (!imu_corrections_) {
+            RCLCPP_INFO(get_logger(),
+                "IMU corrections disabled: publishing raw scale/axis values, "
+                "no intrinsics or stamp offset");
+        } else if (imu_intrinsics_enable_) {
             const auto to_mat = [](const std::vector<double>& v,
                                     const char* name) {
                 if (v.size() != 9) {
@@ -383,7 +388,7 @@ private:
             static_cast<double>(raw.gyro[1]) / gyro_lsb_per_dps_ * kPi / 180.0 * gyro_y_sign_,
             static_cast<double>(raw.gyro[2]) / gyro_lsb_per_dps_ * kPi / 180.0 * gyro_z_sign_);
 
-        if (imu_intrinsics_enable_) {
+        if (imu_intrinsics_enable_ && imu_corrections_) {
             // Kalibr scale-misalignment model, biases left to the odometry backend:
             //   a_body = inv(M_acc) * a_raw
             //   w_body = C^T * inv(M_gyr) * (w_raw - A * C * a_body)
@@ -397,8 +402,9 @@ private:
 
         sensor_msgs::msg::Imu msg;
         const rclcpp::Time stamp = stamp_for(header.device_time_ns);
-        msg.header.stamp = imu_time_offset_ != 0.0 ?
-            stamp - rclcpp::Duration::from_seconds(imu_time_offset_) : stamp;
+        const double time_offset = imu_corrections_ ? imu_time_offset_ : 0.0;
+        msg.header.stamp = time_offset != 0.0 ?
+            stamp - rclcpp::Duration::from_seconds(time_offset) : stamp;
         msg.header.frame_id = imu_frame_id_;
 
         msg.linear_acceleration.x = accel[0];
@@ -508,6 +514,7 @@ private:
     double accel_z_sign_ = 1.0;
     double gyro_y_sign_ = 1.0;
     double gyro_z_sign_ = 1.0;
+    bool imu_corrections_ = true;
     bool imu_intrinsics_enable_ = false;
     double imu_time_offset_ = 0.0;
     cv::Matx33d acc_M_ = cv::Matx33d::eye();

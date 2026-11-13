@@ -77,6 +77,10 @@ imu_hz:=200          MSP_RAW_IMU 轮询率
 local:=DIR           主机拉取目录；默认 <repo>/flyrat_raw
 export:=true         拉取后自动运行 raw_export.py
 require_capture:=true  相机协商不到 capture_fps 时直接失败
+preview:=true        边录边把同一份 raw 数据转发到主机
+preview_port:=5000   预览监听端口（设备与 adb forward 共用）
+foxglove:=true       预览时自动启动 Foxglove bridge
+imu_corrections:=false  预览 IMU 是否套用旧标定，默认 false
 ```
 
 相机路径的行为是**按 60 fps 请求采集，再按 `fps` 丢帧**：
@@ -96,6 +100,48 @@ require_capture:=true  相机协商不到 capture_fps 时直接失败
 - 双目外参：保持标定板同时出现在左右目，覆盖不同深度；
 - IMU：静止 2–5 分钟做 Allan/噪声，再充分转动三个轴；
 - 相机-IMU：让相机和 IMU 一起做 6 轴激励，避免只有平移。
+
+### 4.1 边录边预览（Foxglove）
+
+加 `preview:=true` 后，录制器在写 bag 的同时，用与
+`flyrat_sensor_forwarder` 相同的 TCP 协议把**同一份** raw IMU 计数和
+MJPEG 帧发到主机。脚本会自动完成 `adb forward`、启动
+`sensor_receiver_node`，并默认启动 Foxglove bridge：
+
+```sh
+.script/bringup_raw_record.sh \
+  output:=/userdata/flyrat_raw/calib1 \
+  duration:=10m \
+  fps:=20 capture_fps:=60 \
+  preview:=true
+```
+
+打开 Foxglove，连接 `ws://<主机>:8765`，可看：
+
+```text
+/flyrat/sensors/imu
+/flyrat/sensors/stereo/left/image_raw
+/flyrat/sensors/stereo/right/image_raw
+/flyrat/sensors/stereo/compressed
+```
+
+默认 `imu_corrections:=false`，预览的 IMU 只做 lsb→SI 和轴映射，不套用旧的
+`M/A/C` 和 `imu_time_offset`，因此和正在录制的原始数据一致。需要对比旧标定
+效果时可以加 `imu_corrections:=true`，但这只影响预览话题，**不会改变 bag**。
+
+相关参数：
+
+```text
+preview:=true/false       是否边录边转发，默认 false
+preview_port:=5000        设备监听端口和主机 adb forward 端口
+foxglove:=true/false      是否自动启动 Foxglove bridge，默认 true
+foxglove_port:=8765       Foxglove WebSocket 端口
+imu_corrections:=false    预览 IMU 是否应用旧标定，默认 false
+```
+
+预览端口与 forwarder 默认的 5000 冲突，因此脚本会先停掉
+`flyrat_sensor_forwarder` 和 `flyrat_pilot`；停止录制后自动移除
+`adb forward` 并关闭预览进程。
 
 ## 5. 停止与拉取
 

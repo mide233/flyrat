@@ -32,6 +32,13 @@ struct RawRecorderConfig {
     // Fail instead of continuing when the camera cannot negotiate the requested
     // capture rate.
     bool require_capture_fps = false;
+
+    // Stream the same raw samples to a host while recording. The stream uses
+    // the sensor forwarder protocol, so sensor_receiver_node and Foxglove can
+    // display it without touching the bag.
+    bool preview_enabled = false;
+    std::string preview_address = "127.0.0.1";
+    int preview_port = 5000;
 };
 
 struct RawRecorderStats {
@@ -45,6 +52,12 @@ struct RawRecorderStats {
     double elapsed_s = 0.0;
     double capture_fps = 0.0;
     bool imu_connected = false;
+
+    bool preview_connected = false;
+    std::uint64_t preview_priority_sent = 0;
+    std::uint64_t preview_stereo_sent = 0;
+    std::uint64_t preview_dropped = 0;
+    bool preview_enabled = false;
 };
 
 class RawRecorder {

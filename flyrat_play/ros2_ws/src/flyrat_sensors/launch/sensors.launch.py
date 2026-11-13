@@ -20,6 +20,7 @@ def generate_launch_description():
     gyro_lsb_per_dps = LaunchConfiguration('gyro_lsb_per_dps')
     imu_accel_axis = LaunchConfiguration('imu_accel_axis')
     imu_gyro_axis = LaunchConfiguration('imu_gyro_axis')
+    imu_corrections = LaunchConfiguration('imu_corrections')
 
     intrinsics_file = PathJoinSubstitution(
         [FindPackageShare('flyrat_sensors'), 'config', 'imu_intrinsics.yaml'])
@@ -51,6 +52,10 @@ def generate_launch_description():
             description="Gyroscope axes: 'none' (already FLU), "
                         "'bf_to_flu' (clockwise yaw, flip z) or "
                         "'frd_to_flu' (flip y and z)."),
+        DeclareLaunchArgument(
+            'imu_corrections', default_value='true',
+            description='Apply IMU intrinsics and stamp offset. Set false for '
+                        'raw preview or calibration data collection.'),
         Node(
             package='flyrat_sensors',
             executable='sensor_receiver_node',
@@ -67,6 +72,8 @@ def generate_launch_description():
                     gyro_lsb_per_dps, value_type=float),
                 'imu_accel_axis': imu_accel_axis,
                 'imu_gyro_axis': imu_gyro_axis,
+                'imu_corrections': ParameterValue(
+                    imu_corrections, value_type=bool),
             }],
         ),
     ])

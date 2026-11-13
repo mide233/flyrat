@@ -99,11 +99,14 @@ trace:=DIR         写出逐帧耗时 CSV，退出时自动拉回主机
 ./build/host/pilot/flyrat_raw_recorder --self-test
 .script/bringup_raw_record.sh check:=true
 .script/bringup_raw_record.sh duration:=10m fps:=20 capture_fps:=60 export:=true
+# 边录边用 Foxglove 预览
+.script/bringup_raw_record.sh duration:=10m preview:=true
 ```
 
 相机始终按 `capture_fps`（默认 60）请求采集，再按 `fps` 丢帧交付。输出
-`raw_sensors.bin`，用 `python3 tools/raw_export.py` 导出 Kalibr 目录。完整
-流程见
+`raw_sensors.bin`，用 `python3 tools/raw_export.py` 导出 Kalibr 目录。加
+`preview:=true` 会同时转发到主机，默认 `imu_corrections:=false`，不影响
+bag。完整流程见
 [`docs/agent/calibration/raw_recording.md`](../docs/agent/calibration/raw_recording.md)。
 
 ## 5. 位姿协议

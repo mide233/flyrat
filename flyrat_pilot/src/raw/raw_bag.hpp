@@ -45,6 +45,10 @@ struct RawBagMetadata {
     double capture_fps_negotiated = 0.0;
     int delivery_fps = 0;
 
+    bool preview_enabled = false;
+    std::string preview_address = "127.0.0.1";
+    int preview_port = 5000;
+
     std::int64_t start_steady_ns = 0;
     std::int64_t start_system_ns = 0;
 };

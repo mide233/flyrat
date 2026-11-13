@@ -110,6 +110,7 @@ if [ "${STATIC_FORWARDER}" -eq 1 ]; then
         -Ilibflyrat/include
         -Ilibflyrat/third_party/vl53l5cx/include
         -Ilibflyrat/third_party/vl53l5cx/platform
+        -Iflyrat_pilot/src
     )
 
     C_SOURCES=(
@@ -123,6 +124,7 @@ if [ "${STATIC_FORWARDER}" -eq 1 ]; then
     CXX_SOURCES=(
         flyrat_pilot/src/sensors/sensor_forwarder.cpp
         flyrat_pilot/src/sensors/sensor_forwarder_main.cpp
+        flyrat_pilot/src/sensors/sensor_stream.cpp
         libflyrat/src/msp_frame.cpp
         libflyrat/src/msp_parse.cpp
         libflyrat/src/msp_interact.cpp

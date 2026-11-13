@@ -140,6 +140,10 @@ std::string raw_bag_metadata_json(const RawBagMetadata& metadata) {
         << ",\"capture_fps_requested\":" << metadata.capture_fps_requested
         << ",\"capture_fps_negotiated\":" << metadata.capture_fps_negotiated
         << ",\"delivery_fps\":" << metadata.delivery_fps << "}"
+        << ",\"preview\":{"
+        << "\"enabled\":" << (metadata.preview_enabled ? "true" : "false")
+        << ",\"address\":\"" << escape_json(metadata.preview_address) << "\""
+        << ",\"port\":" << metadata.preview_port << "}"
         << ",\"clocks\":{"
         << "\"source\":\"steady_clock\""
         << ",\"start_steady_ns\":" << metadata.start_steady_ns

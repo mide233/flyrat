@@ -56,6 +56,12 @@ void usage(const char* program) {
         "  --require-capture-fps        fail when the camera negotiates less than requested\n"
         "  --no-stereo                  do not record camera\n"
         "\n"
+        "Preview:\n"
+        "  --preview                    stream raw IMU and JPEG to a host while recording\n"
+        "  --preview-address ADDR       listen address for the preview stream (default "
+        "127.0.0.1)\n"
+        "  --preview-port PORT          listen port for the preview stream (default 5000)\n"
+        "\n"
         "Diagnostics:\n"
         "  --check                      open devices, print negotiated settings, exit\n"
         "  --self-test                  exercise the raw bag writer/reader, exit\n"
@@ -136,6 +142,14 @@ void print_stats(const flyrat::pilot::RawRecorderStats& stats) {
         static_cast<unsigned long long>(stats.dropped_imu),
         static_cast<unsigned long long>(stats.dropped_images),
         static_cast<double>(stats.bytes) / (1024.0 * 1024.0));
+    if (stats.preview_enabled) {
+        std::printf(
+            "raw recorder: preview %s  IMU frames %llu  stereo frames %llu  dropped %llu\n",
+            stats.preview_connected ? "connected" : "waiting",
+            static_cast<unsigned long long>(stats.preview_priority_sent),
+            static_cast<unsigned long long>(stats.preview_stereo_sent),
+            static_cast<unsigned long long>(stats.preview_dropped));
+    }
 }
 
 } // namespace
@@ -204,6 +218,12 @@ int main(int argc, char** argv) {
                 config.require_capture_fps = true;
             } else if (arg == "--no-stereo") {
                 config.camera_enabled = false;
+            } else if (arg == "--preview") {
+                config.preview_enabled = true;
+            } else if (arg == "--preview-address") {
+                config.preview_address = value();
+            } else if (arg == "--preview-port") {
+                config.preview_port = std::stoi(value());
             } else if (arg == "--check") {
                 check = true;
             } else if (arg == "--self-test") {
@@ -229,6 +249,13 @@ int main(int argc, char** argv) {
         }
         if (config.camera_enabled && config.camera.capture_fps < 0) {
             throw std::invalid_argument("--camera-capture-fps must not be negative");
+        }
+        if (config.preview_enabled
+            && (config.preview_port <= 0 || config.preview_port > 65535)) {
+            throw std::invalid_argument("--preview-port must be between 1 and 65535");
+        }
+        if (config.preview_enabled && config.preview_address.empty()) {
+            throw std::invalid_argument("--preview-address must not be empty");
         }
         if (!check && config.output.empty()) {
             config.output = default_output();
