@@ -2,16 +2,12 @@
 #
 # Unified entry point for the operational bring-up flows. Each mode is
 # implemented in this file so there is a single place to discover and maintain
-# the supported modes. build/clean/foxglove still delegate to their dedicated
-# scripts.
+# the supported modes.
 #
 # Usage:
 #   .script/bringup.sh sensors|real [launch arguments...]
 #   .script/bringup.sh slam|pilot    [start_foxglove:=true] [fps:=25] [decode:=mpp] ...
 #   .script/bringup.sh raw|calib     [output:=DIR] [duration:=10m] [fps:=20] ...
-#   .script/bringup.sh build         [build_all.sh arguments...]
-#   .script/bringup.sh clean         [clean_build.sh arguments...]
-#   .script/bringup.sh foxglove      [foxglove.sh arguments...]
 #
 # sensors/real forwards every argument to ros2 launch; slam and raw also accept
 # -h/--help for their mode-specific option list.
@@ -32,9 +28,6 @@ Usage:
   .script/bringup.sh sensors|real [launch arguments...]
   .script/bringup.sh slam|pilot    [start_foxglove:=true] [fps:=25] [decode:=mpp] ...
   .script/bringup.sh raw|calib     [output:=DIR] [duration:=10m] [fps:=20] ...
-  .script/bringup.sh build         [build_all.sh arguments...]
-  .script/bringup.sh clean         [clean_build.sh arguments...]
-  .script/bringup.sh foxglove      [foxglove.sh arguments...]
 
 Run `.script/bringup.sh slam --help` or `.script/bringup.sh raw --help` for the
 mode-specific options. sensors|real passes all arguments to ros2 launch.
@@ -769,15 +762,6 @@ case "${mode}" in
         ;;
     raw|calib)
         run_raw "$@"
-        ;;
-    build)
-        exec "${SCRIPT_DIR}/build_all.sh" "$@"
-        ;;
-    clean)
-        exec "${SCRIPT_DIR}/clean_build.sh" "$@"
-        ;;
-    foxglove|fox)
-        exec "${SCRIPT_DIR}/foxglove.sh" "$@"
         ;;
     -h|--help|help)
         usage

@@ -6,13 +6,10 @@
 .script/bringup.sh sensors    # 实机传感器 + 里程计 + 可选 Foxglove
 .script/bringup.sh slam       # 机载 SchurVINS + 主机 bridge
 .script/bringup.sh raw        # 原始 IMU/双目录制与标定导出
-.script/bringup.sh build      # 构建 host / arm / ROS 2 / 仿真
-.script/bringup.sh clean      # 清理构建产物
-.script/bringup.sh foxglove   # 只启动 Foxglove bridge
 ```
 
-`bringup.sh` 内置 sensors/slam/raw 三条实机流程，参数原样传入；
-build/clean/foxglove 分派给对应的专用脚本。
+`bringup.sh` 内置 sensors/slam/raw 三条实机流程，参数原样传入。构建、清理和
+单独启动 Foxglove 不属于 bring-up，直接使用下表中对应的专用脚本。
 
 ## 具体脚本
 
