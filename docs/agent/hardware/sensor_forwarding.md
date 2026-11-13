@@ -98,7 +98,7 @@ bash -lc 'source /opt/ros/jazzy/setup.bash && \
 接收节点；用一键启动即可：
 
 ```sh
-.script/bringup_real.sh
+.script/bringup.sh sensors
 ```
 
 它会把 adb forward、设备端 forwarder、`sensor_receiver_node` 和

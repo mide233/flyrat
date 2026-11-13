@@ -64,7 +64,7 @@ build/arm/flyrat_raw_recorder
 一条命令完成推送、adb forward、设备端 SLAM、主机 bridge 和可选 Foxglove：
 
 ```bash
-./.script/bringup_pilot_slam.sh start_foxglove:=true
+./.script/bringup.sh slam start_foxglove:=true
 ```
 
 常用参数：
@@ -97,10 +97,10 @@ trace:=DIR         写出逐帧耗时 CSV，退出时自动拉回主机
 
 ```bash
 ./build/host/pilot/flyrat_raw_recorder --self-test
-.script/bringup_raw_record.sh check:=true
-.script/bringup_raw_record.sh duration:=10m fps:=20 capture_fps:=60 export:=true
+.script/bringup.sh raw check:=true
+.script/bringup.sh raw duration:=10m fps:=20 capture_fps:=60 export:=true
 # 边录边用 Foxglove 预览
-.script/bringup_raw_record.sh duration:=10m preview:=true
+.script/bringup.sh raw duration:=10m preview:=true
 ```
 
 相机始终按 `capture_fps`（默认 60）请求采集，再按 `fps` 丢帧交付。输出

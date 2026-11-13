@@ -43,7 +43,7 @@ cmake --build build/pilot-native --target flyrat_raw_recorder
 先确认飞控串口和相机没有被 forwarder 或 pilot 占用：
 
 ```sh
-.script/bringup_raw_record.sh check:=true
+.script/bringup.sh raw check:=true
 ```
 
 输出示例：
@@ -58,7 +58,7 @@ raw recorder check: MSP /dev/ttyS3 @ 921600, IMU samples 300 in 1.5 s, timeouts 
 ## 4. 录制
 
 ```sh
-.script/bringup_raw_record.sh \
+.script/bringup.sh raw \
   output:=/userdata/flyrat_raw/calib1 \
   duration:=10m \
   fps:=20 \
@@ -109,7 +109,7 @@ MJPEG 帧发到主机。脚本会自动完成 `adb forward`、启动
 `sensor_receiver_node`，并默认启动 Foxglove bridge：
 
 ```sh
-.script/bringup_raw_record.sh \
+.script/bringup.sh raw \
   output:=/userdata/flyrat_raw/calib1 \
   duration:=10m \
   fps:=20 capture_fps:=60 \

@@ -3,10 +3,10 @@
 # One-command bring-up for the real vehicle sensor + odometry pipeline:
 #
 #   adb forward -> device forwarder -> sensor_receiver_node -> odometry_node
-#   (the push step is handled by .script/bringup_real.sh)
+#   (the push step is handled by .script/bringup.sh sensors)
 #
 # It can also start foxglove_bridge, so the whole stack runs from one terminal.
-# .script/bringup_real.sh wraps this launch and cleans up adb forward and the
+# .script/bringup.sh sensors wraps this launch and cleans up adb forward and the
 # device-side forwarder when it exits.
 #
 # Usage:
@@ -205,7 +205,7 @@ def _launch_setup(context, *args, **kwargs):
             )],
         ))
 
-    # adb forward and device-process cleanup lives in .script/bringup_real.sh.
+    # adb forward and device-process cleanup lives in .script/bringup.sh sensors.
     # Its trap runs reliably after ros2 launch exits; OnShutdown actions can be
     # skipped when launch is interrupted with SIGINT.
     return actions

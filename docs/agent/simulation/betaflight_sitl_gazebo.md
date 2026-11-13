@@ -454,7 +454,7 @@ mpc: cmd=(...) att_err=.. vel=(.. .. ..) att_thr=.. thr2acc=.. thr=.. err=(.. ..
 
 ```bash
 .script/build_pilot_arm.sh          # aarch64 静态交叉编译
-.script/bringup_pilot_slam.sh       # 推送、启动设备 pilot 与主机 bridge
+.script/bringup.sh slam       # 推送、启动设备 pilot 与主机 bridge
 ```
 
 飞控侧预留的接入点：`flyrat::MspInteract`（TCP / 串口）、`flyrat::RcReceiver`（UDP 9004）、

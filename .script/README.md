@@ -11,16 +11,17 @@
 .script/bringup.sh foxglove   # 只启动 Foxglove bridge
 ```
 
-`bringup.sh` 只做分派，参数原样传给对应的现有脚本。直接调用具体脚本仍然可用。
+`bringup.sh` 内置 sensors/slam/raw 三条实机流程，参数原样传入；
+build/clean/foxglove 分派给对应的专用脚本。
 
 ## 具体脚本
 
 | 脚本 | 用途 | 权威文档 |
 |---|---|---|
-| `bringup.sh` | 统一入口，按模式分派 | 本文件 |
-| `bringup_real.sh` | 实机 forwarder + ROS 2 接收/里程计 | `docs/agent/build_and_run.md` |
-| `bringup_pilot_slam.sh` | 机载 SLAM、录制/回放、trace | `docs/agent/build_and_run.md` |
-| `bringup_raw_record.sh` | 原始 IMU/相机录制、预览、导出 | `docs/agent/calibration/raw_recording.md` |
+| `bringup.sh` | 统一入口，内置三种实机流程 | 本文件 |
+| `bringup.sh sensors` | 实机 forwarder + ROS 2 接收/里程计 | `docs/agent/build_and_run.md` |
+| `bringup.sh slam` | 机载 SLAM、录制/回放、trace | `docs/agent/build_and_run.md` |
+| `bringup.sh raw` | 原始 IMU/相机录制、预览、导出 | `docs/agent/calibration/raw_recording.md` |
 | `build_all.sh` | host、arm、ROS 2、SITL 统一构建 | `docs/agent/build_and_run.md` |
 | `build_pilot_arm.sh` | 只交叉编译 RK3566 程序 | `docs/agent/build_and_run.md` |
 | `build_ros2.sh` | 只构建 ROS 2 workspace | `docs/agent/build_and_run.md` |

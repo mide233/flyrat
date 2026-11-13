@@ -307,7 +307,7 @@ adb -s 4c24d56142f3d0e3 push build/arm/flyrat_sensor_forwarder /tmp/
 adb -s 4c24d56142f3d0e3 shell chmod +x /tmp/flyrat_sensor_forwarder
 ```
 
-`.script/bringup_real.sh` 和 `.script/bringup_pilot_slam.sh` 每次启动都会
+`.script/bringup.sh sensors` 和 `.script/bringup.sh slam` 每次启动都会
 自动推送对应二进制，因此重启后 `/tmp` 被清空也不需要手动处理。
 
 ### 4.3 转发到 ROS 2
@@ -354,10 +354,10 @@ ros2 run flyrat_sensors sensor_receiver_node
 
 ```sh
 # 推送 + adb forward + 设备 SLAM + 主机 bridge + Foxglove
-.script/bringup_pilot_slam.sh start_foxglove:=true
+.script/bringup.sh slam start_foxglove:=true
 
 # 只跑 25 fps，不启动 Foxglove，跑到手动 Ctrl-C
-.script/bringup_pilot_slam.sh fps:=25
+.script/bringup.sh slam fps:=25
 ```
 
 可选参数：
@@ -673,11 +673,11 @@ IMU 的 scale/misalignment 在 `sensor_receiver_node` 发布前按
 `odometry_node` 串成一条启动链：
 
 ```sh
-.script/bringup_real.sh                         # 传感器 + 里程计
-.script/bringup_real.sh trajectory_path:=/tmp/flyrat.tum
-.script/bringup_real.sh start_foxglove:=true    # 再加 Foxglove bridge
-.script/bringup_real.sh start_odometry:=false   # 只看传感器
-.script/bringup_real.sh start_adb_forward:=false start_device:=false  # 复用已有转发
+.script/bringup.sh sensors                         # 传感器 + 里程计
+.script/bringup.sh sensors trajectory_path:=/tmp/flyrat.tum
+.script/bringup.sh sensors start_foxglove:=true    # 再加 Foxglove bridge
+.script/bringup.sh sensors start_odometry:=false   # 只看传感器
+.script/bringup.sh sensors start_adb_forward:=false start_device:=false  # 复用已有转发
 ```
 
 脚本会 source ROS 2 和 `flyrat_play/ros2_ws/install/setup.bash`，然后执行：
@@ -735,25 +735,25 @@ trajectory_path=
 `start_foxglove:=true` 需要安装 `ros-jazzy-foxglove-bridge`；否则保持默认，用
 `.script/foxglove.sh` 单独启动。
 
-录制由 `.script/bringup_real.sh` 启动，和 `ros2 launch` 平级，按 `Ctrl-C` 时
+录制由 `.script/bringup.sh sensors` 启动，和 `ros2 launch` 平级，按 `Ctrl-C` 时
 脚本会给 `ros2 bag record` 发 `SIGTERM` 并等待它写完 MCAP。只录 IMU 做 Allan
 方差：
 
 ```sh
-.script/bringup_real.sh start_odometry:=false record:=true record_imu_only:=true \
+.script/bringup.sh sensors start_odometry:=false record:=true record_imu_only:=true \
   record_duration:=3h
 ```
 
 录双目 + IMU：
 
 ```sh
-.script/bringup_real.sh start_odometry:=false record:=true
+.script/bringup.sh sensors start_odometry:=false record:=true
 ```
 
 默认录 `/flyrat/sensors/stereo/compressed`（左右拼接的原始 MJPEG）而不是两路
 独立 raw 图像，并把 `camera_fps` 自动降到 30。bag 回放时用 splitter 生成左右
 话题。**这条 IMU 路径已经应用旧标定，不能用于重新标定 IMU**；重新标定请用
-`bringup_raw_record.sh`，见
+`.script/bringup.sh raw`，见
 [`calibration/raw_recording.md`](calibration/raw_recording.md)。以下仅供回放
 和旧 bag 的离线使用：
 

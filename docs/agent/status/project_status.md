@@ -81,7 +81,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - 可选 `preview:=true`：录制时通过同一 TCP 协议把 raw IMU/JPEG 发到主机，
   自动启动 sensor receiver 和 Foxglove bridge，默认 `imu_corrections:=false`。
 
-一键脚本 `.script/bringup_raw_record.sh`；完整流程见
+一键脚本 `.script/bringup.sh raw`；完整流程见
 [`calibration/raw_recording.md`](../calibration/raw_recording.md)。已在开发机
 用 Radiolink F722（200 Hz）和 UVC 相机（测试机仅支持 30 fps 采集，交付
 10 fps）验证：3 秒录制得到 601 个 IMU 样本、28 帧图像，无队列丢帧，导出正常。
@@ -131,7 +131,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
   `libflyrat/configs/camera/uvc_640x480.yaml` 或包内安装副本；`body_frame`
   默认 `imu_link`，`world_frame` 默认 `odometry_map`。
 - `trajectory_path` 非空时，节点退出前写 TUM 轨迹。
-- `bringup.launch.py` / `.script/bringup_real.sh`：一条命令拉起 adb forward、
+- `bringup.launch.py` / `.script/bringup.sh sensors`：一条命令拉起 adb forward、
   设备 forwarder、接收节点和 `odometry_node`，可选 Foxglove；退出时自动清理。
 - 已用实机 28 s 桌面 bag 验证短时轨迹：0.35 m 升降、水平漂移约 1 cm；
   尚未做飞行、长距离和长期稳定性验证。
@@ -155,7 +155,7 @@ flyrat 是一个面向 Betaflight 飞控的四旋翼自驾栈：
 - 性能优化包括 NEON 金字塔/patch score/feature alignment、双目并行重投影、
   独立解码线程和最新帧队列；当前指标见 §3，过程数据见
   `docs/agent/odometry/performance.md`。
-- `.script/build_pilot_arm.sh` 交叉构建；`.script/bringup_pilot_slam.sh`
+- `.script/build_pilot_arm.sh` 交叉构建；`.script/bringup.sh slam`
   推送二进制和标定、adb forward、启动设备 SLAM、主机 bridge 和可选
   Foxglove，退出时自动清理。
 - 验证范围：RK3566 静态桌面短时运行；尚未做飞行、长距离和长期漂移验证。

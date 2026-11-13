@@ -203,19 +203,19 @@ ros2 launch flyrat_odometry odometry.launch.py
 实机一键启动：
 
 ```sh
-.script/bringup_real.sh
+.script/bringup.sh sensors
 ```
 
 不启动里程计、只看传感器：
 
 ```sh
-.script/bringup_real.sh start_odometry:=false
+.script/bringup.sh sensors start_odometry:=false
 ```
 
 记录轨迹：
 
 ```sh
-.script/bringup_real.sh trajectory_path:=/tmp/flyrat.tum
+.script/bringup.sh sensors trajectory_path:=/tmp/flyrat.tum
 ```
 
 `bringup.launch.py` 会依次启动 adb forward、设备端 forwarder、接收节点和
@@ -236,7 +236,7 @@ MPP 异步接口，`decode_bench` 在 25 fps 下连续 60 s 无停流；`flyrat_
 
 ```sh
 .script/build_pilot_arm.sh
-.script/bringup_pilot_slam.sh start_foxglove:=true
+.script/bringup.sh slam start_foxglove:=true
 ```
 
 设备端 `flyrat_pilot` 直接读取 V4L2 MJPEG 和 MSP IMU，在本地完成标定修正与
